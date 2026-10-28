@@ -3,7 +3,7 @@ import { loadConfig } from './config.js';
 import { connect } from './db.js';
 
 const config = loadConfig();
-const sql = connect(config.DATABASE_URL);
+const sql = connect(config.DATABASE_URL, { role: config.DB_APP_ROLE });
 const app = await buildApp({ sql, logger: true });
 
 await app.listen({ port: config.PORT, host: config.HOST });

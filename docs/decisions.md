@@ -25,3 +25,4 @@
 - Integrity check: a nightly query that recomputes hashes and logs its result.
 - Removed from the plan: template builder, line clearance, filter integrity, pressure scheduling, email, QR codes, label printing, multi-site, validation-pack generator.
 | D-13 | 2026-10-28 | Owner: do not ask for decisions; Claude takes the option it judges best, records it here and reports it in the next update email. Compliance-rule mismatches found in verification are still reported, not silently fixed. |
+| D-14 | 2026-10-28 | Passwords hashed with scrypt from Node's built-in crypto (N=16384, r=8, p=1) instead of argon2: no native dependency, equally accepted for password storage. Password rule: at least 10 characters, must not contain the user ID. (Claude, under D-13.) |

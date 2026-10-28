@@ -29,8 +29,8 @@ export async function migrate(sql: Sql, dir = MIGRATIONS_DIR): Promise<string[]>
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  const url = process.env.DATABASE_URL;
-  if (!url) throw new Error('DATABASE_URL is required');
+  const url = process.env.MIGRATION_DATABASE_URL ?? process.env.DATABASE_URL;
+  if (!url) throw new Error('MIGRATION_DATABASE_URL (or DATABASE_URL) is required');
   const sql = connect(url);
   const applied = await migrate(sql);
   console.log(applied.length ? `applied: ${applied.join(', ')}` : 'up to date');
