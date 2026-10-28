@@ -1,6 +1,6 @@
 # Deliverable (c) — Minimum compliance register (draft 2)
 
-Status: approved (D-01), amended for Schedule M numbering (D-04) and simplified implementation lines (D-07 to D-12, pending confirmation). Draft 1 was verified clause by clause by three
+Status: approved (D-01), amended for Schedule M numbering (D-04) and simplified implementation lines (D-07 to D-12). Draft 1 was verified clause by clause by three
 independent checks; every mismatch and how this draft handles it is in
 `04-register-verification.md`.
 
