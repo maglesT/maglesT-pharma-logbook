@@ -264,3 +264,18 @@ describe('review fixes (S4)', () => {
     expect((await status(id)).state).toBe('clean');
   });
 });
+
+describe('minute precision (S5 browser finding)', () => {
+  it('LB-07: a cleaning entered with a minute-precision start in the same minute the use ended is accepted', async () => {
+    const id = await newItem();
+    await cleanAndVerify(id);
+    const use = (await startUse(id)).json().id;
+    const endedAt = new Date();
+    await call(t.app, c.op1!, 'POST', `/api/entries/${use}/complete`, { activityEnd: endedAt.toISOString() });
+    const minute = new Date(Math.floor(endedAt.getTime() / 60_000) * 60_000).toISOString();
+    const res = await entry('op1', id, { logbookType: 'equipment_cleaning', activityStart: minute, activityEnd: now(), data: { cleaningType: 'major', checklist: {} }, signature: sig('op1') });
+    expect(res.statusCode).toBe(201);
+    await signEntry('sup1', 'verify', res.json().id);
+    expect((await status(id)).state).toBe('clean');
+  });
+});

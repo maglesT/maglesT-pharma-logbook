@@ -1,6 +1,6 @@
 # Handover
 
-Updated: 2026-10-29, after slice S4.
+Updated: 2026-10-29, after slice S5.
 
 ## State
 - Planning deliverables (a)–(d) are approved: decisions D-01 to D-05 in `decisions.md`.
@@ -40,11 +40,24 @@ Updated: 2026-10-29, after slice S4.
 - **Equipment field:** `needs_calibration` (migration 0008).
 - **UI:** status chips on tiles, a status bar with the reasons on the logbook page, a Release button, and the "Not fit for use" list on Home.
 
-## Next: S5, review and exports (LB-22, LB-25)
-- **Period review:** QA *Reviewed* signature on a logbook period, as a settings-like object, or a new object type `review` in `signatures.object_type` (needs a migration to the check constraint). It shows open items and the audit trail for the period; a later correction in the period marks the review superseded.
-- **Audit-trail viewer:** filters by object, user and date.
-- **Batch view:** every entry referencing a batch, plus the audit rows for those entries.
-- **Exports:** one PDF layout (pdfmake) and one CSV, for a logbook period and for a batch view. Corrected entries are marked and all versions included.
+## Done: S5, review and exports (LB-18 viewer, LB-22, LB-25)
+- **`reviews` (migration 0009):** `signatures.object_type` now also allows `review`.
+- **Period review (`server/routes/review.ts`):**
+  - `GET /api/equipment/:id/period` returns every version, open-item counts, the audit trail and a content hash;
+  - `POST /api/equipment/:id/reviews` is the QA *Reviewed* signature on that hash;
+  - a review shows as superseded when the versions in its period change.
+- **Batch view and audit:** `GET /api/batches/:batch`; `GET /api/audit` with filters (QA/Admin).
+- **Exports (`server/routes/exports.ts`):** `/api/export/period.(pdf|csv)` and `/api/export/batch.(pdf|csv)`, using pdfmake with Helvetica.
+- **UI:** Review page with logbook review, batch view and audit trail tabs.
+
+## Next: S6, sterile types (LB-12, LB-14–16)
+- **Data schemas** (`server/entries.ts`):
+  - `steriliser_cycle`: type (steam/dry heat/SIP/VHP), cycleId unique per equipment (partial unique index on `(equipment_id, data->>'cycleId')` for latest versions, or a server check), programme, load, result, controller record ref;
+  - `steriliser_test`: test (leak/Bowie-Dick), result;
+  - `glove_integrity`: port, result;
+  - `pressure_reading`: point (from settings), value, out of limit, which needs a comment and deviation reference.
+- **Status:** a failed steriliser test or cycle blocks the steriliser; a failed glove test blocks the isolator. Add these to `status.ts` as blockers.
+- **Recording:** add the four types to RECORDERS, the UI form and the PERFORMER_SIGNS lists.
 
 ## Notes
 - Official PDFs and extracted texts are in `sources/` (git-ignored). The gazette text of Schedule M Part I is in `maglesT/ebmr`, branch `docs/schedule-m-gazette`.
