@@ -70,6 +70,6 @@ export async function login(app: FastifyInstance, username: string, password = P
 }
 
 // JSON request helper carrying the session cookie.
-export function call(app: FastifyInstance, cookie: string, method: 'GET' | 'POST' | 'PATCH', url: string, payload?: object) {
+export function call(app: FastifyInstance, cookie: string, method: 'GET' | 'POST' | 'PATCH' | 'PUT', url: string, payload?: object) {
   return app.inject({ method, url, headers: { cookie }, ...(method === 'GET' ? {} : { payload: payload ?? {} }) });
 }

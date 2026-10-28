@@ -3,8 +3,10 @@ import { api, ApiError, type Me } from './api.js';
 import { Login, ChangePassword } from './pages/Login.js';
 import { Home } from './pages/Home.js';
 import { Users } from './pages/Users.js';
+import { MasterData } from './pages/MasterData.js';
+import { LogbookSettings } from './pages/LogbookSettings.js';
 
-type Page = 'home' | 'users' | 'password';
+type Page = 'home' | 'users' | 'password' | 'masterdata' | 'settings';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -38,6 +40,10 @@ export function App() {
         <strong>Pharma Logbook</strong>
         <nav>
           <button className={page === 'home' ? 'tab on' : 'tab'} onClick={() => setPage('home')}>Home</button>
+          <button className={page === 'masterdata' ? 'tab on' : 'tab'} onClick={() => setPage('masterdata')}>Master data</button>
+          {(me.roles.includes('admin') || me.roles.includes('qa')) && (
+            <button className={page === 'settings' ? 'tab on' : 'tab'} onClick={() => setPage('settings')}>Logbook settings</button>
+          )}
           {me.roles.includes('admin') && (
             <button className={page === 'users' ? 'tab on' : 'tab'} onClick={() => setPage('users')}>Users</button>
           )}
@@ -51,6 +57,8 @@ export function App() {
       <main className="page">
         {page === 'home' && <Home me={me} />}
         {page === 'users' && <Users me={me} />}
+        {page === 'masterdata' && <MasterData me={me} />}
+        {page === 'settings' && <LogbookSettings me={me} />}
         {page === 'password' && <ChangePassword me={me} onDone={() => setPage('home')} />}
       </main>
     </>

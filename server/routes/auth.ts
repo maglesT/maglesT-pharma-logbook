@@ -1,30 +1,16 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { Sql, Tx } from '../db.js';
+import type { Sql } from '../db.js';
+import { recordFailure } from '../lockout.js';
 import { audit } from '../audit.js';
 import { hashPassword, passwordProblem, verifyPassword } from '../passwords.js';
-import { POLICY, SESSION_COOKIE, newSessionId, requireRole, sessionKey } from '../auth.js';
+import { SESSION_COOKIE, newSessionId, requireRole, sessionKey } from '../auth.js';
 
 const loginBody = z.object({ username: z.string().min(1).max(40), password: z.string().min(1).max(200) });
 const passwordBody = z.object({ current: z.string().min(1).max(200), new: z.string().min(1).max(200) });
 
 // Compared against when the user does not exist, so response time does not reveal valid user IDs.
 const DUMMY_HASH = await hashPassword('dummy-password-for-timing');
-
-// LB-21 / P11 11.300(d): count a failed password check; at the limit, lock the account and raise
-// an immediate on-screen alert to Admin and QA. Used by login and by password change.
-async function recordFailure(tx: Tx, userId: number, username: string, failedBefore: number): Promise<void> {
-  const failed = failedBefore + 1;
-  if (failed >= POLICY.maxFailedAttempts) {
-    await tx`update users set failed_attempts = ${failed}, locked_at = now() where id = ${userId}`;
-    await tx`delete from sessions where user_id = ${userId}`;
-    await tx`insert into alerts (kind, user_id, message)
-      values ('account_locked', ${userId}, ${`Account ${username} locked after ${failed} failed password attempts.`})`;
-    await audit(tx, { actorId: null, action: 'user.locked', objectType: 'user', objectId: userId, new: { failedAttempts: failed } });
-  } else {
-    await tx`update users set failed_attempts = ${failed} where id = ${userId}`;
-  }
-}
 
 export function authRoutes(app: FastifyInstance, sql: Sql) {
   app.post('/api/login', async (req, reply) => {

@@ -1,6 +1,6 @@
 # Handover
 
-Updated: 2026-10-28, after slice S1.
+Updated: 2026-10-28, after slice S2.
 
 ## State
 - Planning deliverables (a)–(d) are approved: decisions D-01 to D-05 in `decisions.md`.
@@ -18,11 +18,18 @@ Updated: 2026-10-28, after slice S1.
 - **Admin API:** list, create, edit (reason required), reset password.
 - **UI:** login, change password, home with alerts, users admin. `npm run create-admin` handles first-time setup.
 
-## Next: S2, master data, e-signatures and logbook settings (LB-19, LB-20, LB-24)
-- **Master data:** the `site` record; `equipment` (kind: equipment/instrument/area; sterile/classified flags; clean-hold limit); `products`.
-- **E-signatures:** `signatures` with user ID + password at every signing (reuse `verifyPassword`), meaning, server time and a SHA-256 of the signed content.
-- **Logbook settings:** `logbook_settings` versions per built-in type, with QA *Approved* and an effective date.
-- **Admin role:** Admin may not sign. Enforce this in the sign service.
+## Done: S2, master data, e-signatures and logbook settings (LB-19, LB-20, LB-24)
+- **Database (migration 0004):** `site` (single row), `equipment` (equipment/instrument/area; code unique and never changeable; clean-hold hours), `products`, `logbook_settings` (versioned per type), `signatures` (insert-only, with the time set by the database).
+- **Signing (`server/signatures.ts`):** `authenticateSigner()` runs in its own transaction, so failures count towards lockout. It returns a proof object that `sign()` requires. `sign()` stores the printed name, meaning and a SHA-256 of the canonical content, and Admin can never sign.
+- **Logbook types are code (`server/logbook-types.ts`):** 10 types. Settings are drafted by Admin and approved by QA with an e-signature. A version is in force once approved and its effective date has passed; an effective date already past at approval becomes the approval time.
+- **UI:** Master data (equipment, products, site), Logbook settings, and the reusable SignDialog.
+
+## Next: S3, entries (LB-01–04, LB-10, LB-11, LB-17, LB-26)
+- **Table:** `entries` (insert-only), one row per version, with `supersedes`. Each entry stores the settings version in force when it was made.
+- **Types:** a zod schema per type in `logbook-types.ts`.
+- **Signatures:** *Performed* at save; *Verified* by a different user (cleaning, maintenance, area cleaning and sterile cycles always; others where settings say so); *Corrected* on a correction, which also requires a reason.
+- **Times:** late-entry window of 30 min, with a reason when late. Activity time cannot be in the future.
+- **Batch view:** query entries by batch, ahead of S5.
 
 ## Notes
 - Official PDFs and extracted texts are in `sources/` (git-ignored). The gazette text of Schedule M Part I is in `maglesT/ebmr`, branch `docs/schedule-m-gazette`.
