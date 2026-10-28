@@ -46,7 +46,7 @@ export const LOGBOOK_TYPES: LogbookType[] = [
   { key: 'equipment_use', label: 'Equipment use', appliesTo: ['equipment', 'instrument', 'area'], sterile: false, alwaysVerified: false },
   { key: 'equipment_cleaning', label: 'Equipment cleaning', appliesTo: ['equipment', 'instrument'], sterile: false, alwaysVerified: true },
   { key: 'maintenance', label: 'Maintenance / breakdown', appliesTo: ['equipment', 'instrument', 'area'], sterile: false, alwaysVerified: true },
-  { key: 'calibration', label: 'Calibration / check', appliesTo: ['equipment', 'instrument'], sterile: false, alwaysVerified: false },
+  { key: 'calibration', label: 'Calibration / check', appliesTo: ['equipment', 'instrument'], sterile: false, alwaysVerified: true },
   { key: 'area_cleaning', label: 'Area cleaning', appliesTo: ['area'], sterile: false, alwaysVerified: true },
   { key: 'general_log', label: 'General equipment log', appliesTo: ['equipment', 'instrument', 'area'], sterile: false, alwaysVerified: false },
   { key: 'steriliser_cycle', label: 'Sterilisation / decontamination cycle', appliesTo: ['equipment'], sterile: true, alwaysVerified: true },
