@@ -36,3 +36,18 @@ th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--line); 
 .chip { display: inline-block; padding: 4px 10px; border-radius: 999px; color: #fff; font-size: 0.85em; }
 .chip-ok { background: var(--ok); }
 .chip-bad { background: var(--bad); }
+.muted { color: var(--muted); }
+.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); display: flex; align-items: center; justify-content: center; padding: 16px; }
+.dialog { width: 100%; max-width: 460px; }
+.actions { display: flex; gap: 8px; justify-content: flex-end; }
+textarea { font: inherit; padding: 10px; border: 1px solid var(--line); border-radius: 6px; min-height: 90px; }
+select { font: inherit; padding: 10px; border: 1px solid var(--line); border-radius: 6px; }
+h2 { margin: 0; }
+.subtabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.subtabs button.on { background: var(--brand); color: #fff; border-color: var(--brand); }
+.status { font-size: 0.85em; padding: 3px 8px; border-radius: 999px; background: var(--line); }
+.status.in-force { background: var(--ok); color: #fff; }
+.summary { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; max-height: 40vh; overflow: auto; }
+.summary dt { color: var(--muted); }
+.summary dd { margin: 0; }
+.summary ul { margin: 0; padding-left: 18px; }

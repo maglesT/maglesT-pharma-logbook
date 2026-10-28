@@ -9,6 +9,8 @@ import { BACKGROUND_HEADER, SESSION_COOKIE, loadSession } from './auth.js';
 import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
 import { alertRoutes } from './routes/alerts.js';
+import { masterDataRoutes } from './routes/masterdata.js';
+import { settingsRoutes } from './routes/settings.js';
 
 export const VERSION = '0.1.0';
 
@@ -48,6 +50,8 @@ export async function buildApp({ sql, logger = false, webRoot, cookieSecure = tr
   authRoutes(app, sql);
   userRoutes(app, sql);
   alertRoutes(app, sql);
+  masterDataRoutes(app, sql);
+  settingsRoutes(app, sql);
 
   // In production the built web UI is served from the same process.
   const root = webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');

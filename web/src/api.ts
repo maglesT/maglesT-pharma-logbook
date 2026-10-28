@@ -9,7 +9,7 @@ export class ApiError extends Error {
 }
 
 // background: polls that must not keep an idle session alive (server checks this header).
-export async function api<T>(method: 'GET' | 'POST' | 'PATCH', url: string, body?: object, background = false): Promise<T> {
+export async function api<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT', url: string, body?: object, background = false): Promise<T> {
   const res = await fetch(url, {
     method,
     headers: {
@@ -64,4 +64,68 @@ export function plantTime(iso: string | null): string {
   if (!iso) return '—';
   const s = new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
   return `${s} IST`;
+}
+
+export interface Equipment {
+  id: number;
+  code: string;
+  name: string;
+  kind: 'equipment' | 'instrument' | 'area';
+  location: string;
+  sterile: boolean;
+  classified: boolean;
+  cleanHoldHours: number | null;
+  active: boolean;
+}
+
+export interface Product {
+  id: number;
+  code: string;
+  name: string;
+  active: boolean;
+}
+
+export interface Settings {
+  enabled: boolean;
+  sopRef: string;
+  checklist: string[];
+  verificationRequired: boolean;
+  limits: Record<string, { min?: number; max?: number; unit: string }>;
+  pressurePoints: { name: string; critical: false; ccsRef: string; min: number; max: number; unit: string }[];
+}
+
+export interface SettingsVersion {
+  id: number;
+  version: number;
+  settings: Settings;
+  effectiveFrom: string;
+  createdBy: string;
+  approvedBy: string | null;
+  approvedAt: string | null;
+  status: string;
+  // Hash of exactly this content; sent back when signing (LB-19).
+  contentHash: string;
+}
+
+export interface LogbookTypeInfo {
+  key: string;
+  label: string;
+  sterile: boolean;
+  alwaysVerified: boolean;
+  versions: SettingsVersion[];
+}
+
+export const MEANING_LABEL: Record<string, string> = {
+  performed: 'Performed',
+  verified: 'Verified',
+  released: 'Released',
+  reviewed: 'Reviewed',
+  approved: 'Approved',
+  corrected: 'Corrected',
+};
+
+// Value for a datetime-local input, in the browser's local time.
+export function localInputValue(iso: string | Date = new Date()): string {
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }
