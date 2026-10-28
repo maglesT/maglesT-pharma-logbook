@@ -1,4 +1,8 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { existsSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import PdfPrinter from 'pdfmake';
 import type { Content, TDocumentDefinitions } from 'pdfmake/interfaces.js';
 import { z } from 'zod';
@@ -6,16 +10,41 @@ import type { Sql } from '../db.js';
 import { parseId, requireRole } from '../auth.js';
 import { PLANT_TZ } from '../status.js';
 import { present, type EntryRow } from './entries.js';
-import { auditFor, batchVersions, periodVersions, type AuditRow } from './review.js';
+import { auditFor, batchVersions, periodQuery, periodVersions, plantRange, reviewsFor, type AuditRow } from './review.js';
 
 // LB-22: one PDF layout and one CSV, for a logbook period and for a batch view. Every version is
-// included, corrected versions are marked, signatures and the audit trail are part of the copy.
+// included, corrected versions are marked, signatures, reviews and the audit trail are part of the copy.
 
 type Presented = Awaited<ReturnType<typeof present>>[number];
+type Review = Awaited<ReturnType<typeof reviewsFor>>[number];
 
+// Embedded Unicode fonts, so names and symbols print exactly as entered (review S5-2). Characters
+// neither font has are printed as a visible code point, never silently changed.
+const here = path.dirname(fileURLToPath(import.meta.url));
+const FONTS = [path.resolve(here, '../fonts'), path.resolve(here, '../../../server/fonts')].find((d) => existsSync(path.join(d, 'NotoSans-Regular.ttf')))!;
+const font = (f: string) => path.join(FONTS, f);
 const printer = new PdfPrinter({
-  Helvetica: { normal: 'Helvetica', bold: 'Helvetica-Bold', italics: 'Helvetica-Oblique', bolditalics: 'Helvetica-BoldOblique' },
+  Noto: { normal: font('NotoSans-Regular.ttf'), bold: font('NotoSans-Bold.ttf'), italics: font('NotoSans-Regular.ttf'), bolditalics: font('NotoSans-Bold.ttf') },
+  NotoMath: { normal: font('NotoSansMath-Regular.ttf'), bold: font('NotoSansMath-Regular.ttf'), italics: font('NotoSansMath-Regular.ttf'), bolditalics: font('NotoSansMath-Regular.ttf') },
 });
+const fontkit = createRequire(import.meta.url)('@foliojs-fork/fontkit') as { openSync: (f: string) => { hasGlyphForCodePoint: (c: number) => boolean } };
+const mainGlyphs = fontkit.openSync(font('NotoSans-Regular.ttf'));
+const mathGlyphs = fontkit.openSync(font('NotoSansMath-Regular.ttf'));
+
+// Splits text into runs per font; unknown characters become [U+XXXX].
+export function runs(text: string): { text: string; font?: string }[] {
+  const out: { text: string; font?: string }[] = [];
+  for (const ch of text) {
+    const cp = ch.codePointAt(0)!;
+    const ctrl = cp === 10 || cp === 9;
+    const [t, f] = ctrl || mainGlyphs.hasGlyphForCodePoint(cp) ? [ch, undefined] : mathGlyphs.hasGlyphForCodePoint(cp) ? [ch, 'NotoMath'] : [`[U+${cp.toString(16).toUpperCase().padStart(4, '0')}]`, undefined];
+    const last = out.at(-1);
+    if (last && last.font === f) last.text += t;
+    else out.push(f ? { text: t, font: f } : { text: t });
+  }
+  return out;
+}
+const cellText = (text: string, extra: Record<string, unknown> = {}): Content => ({ text: runs(text), fontSize: 7, ...extra }) as Content;
 
 const plant = (d: Date | string | null) =>
   d ? `${new Date(d).toLocaleString('en-GB', { timeZone: PLANT_TZ, dateStyle: 'medium', timeStyle: 'short' })} IST` : '';
@@ -29,6 +58,7 @@ interface Report {
   versions: EntryRow[];
   entries: Presented[];
   audit: AuditRow[];
+  reviews: Review[];
   codes: Map<number, string>;
 }
 
@@ -40,60 +70,73 @@ function versionNote(e: Presented, all: EntryRow[]) {
 
 const signatureText = (e: Presented) =>
   e.signatures.map((s) => `${s.meaning}: ${s.printedName}, ${plant(s.signedAt)}${s.valid ? '' : ' [INVALID: content changed]'}`).join('\n');
+const reviewText = (r: Review) =>
+  `Reviewed by ${r.reviewedBy ?? '—'}, ${plant(r.reviewedAt)} · period ${plant(r.periodFrom)} to ${plant(r.periodTo)}` +
+  `${r.superseded ? ' · SUPERSEDED: entries changed after the review' : ''}${r.valid ? '' : ' · INVALID: review content changed'}`;
+
+// Spreadsheet formula triggers, also after leading spaces (review S5-4).
+const FORMULA = /^[\s]*[=+\-@\t\r]/;
 
 function csv(r: Report): string {
   const head = ['record', 'equipment', 'entry_id', 'version', 'change', 'note', 'logbook_type', 'activity_start_utc', 'activity_end_utc',
     'batch', 'data', 'late_reason', 'entered_by', 'entered_at_utc', 'signatures', 'audit_at_utc', 'audit_user', 'audit_action', 'audit_old', 'audit_new', 'audit_reason'];
   const cell = (v: unknown) => {
     const s = v instanceof Date ? v.toISOString() : v === null || v === undefined ? '' : String(v);
-    // Quote every cell; neutralise spreadsheet formulas.
-    return `"${(/^[=+\-@]/.test(s) ? `'${s}` : s).replaceAll('"', '""')}"`;
+    return `"${(FORMULA.test(s) ? `'${s}` : s).replaceAll('"', '""')}"`;
   };
   const rows: unknown[][] = r.entries.map((e) => [
     'entry', r.codes.get(e.equipmentId), e.entryId, e.version, e.change, versionNote(e, r.versions), e.logbookType, e.activityStart, e.activityEnd,
     e.batch, json(e.data), e.lateReason, e.enteredBy, e.enteredAt, signatureText(e).replaceAll('\n', ' | '), '', '', '', '', '', '',
   ]);
+  for (const v of r.reviews) rows.push(['review', '', v.id, '', '', reviewText(v), '', v.periodFrom, v.periodTo, '', '', '', v.reviewedBy, v.reviewedAt, '', '', '', '', '', '', '']);
   for (const a of r.audit) rows.push(['audit', '', '', '', '', '', '', '', '', '', '', '', '', '', '', a.at, a.actor ?? 'system', a.action, json(a.oldValue), json(a.newValue), a.reason]);
   return [head, ...rows].map((row) => row.map(cell).join(',')).join('\r\n') + '\r\n';
 }
 
 async function pdf(r: Report, site: { name: string; code: string } | undefined, by: string): Promise<Buffer> {
-  const small = { fontSize: 7 };
-  const entryRows: Content[][] = r.entries.map((e) => [
-    { text: `${r.codes.get(e.equipmentId) ?? ''}\n#${e.entryId} v${e.version}`, ...small },
-    { text: `${e.logbookType.replaceAll('_', ' ')}\n${versionNote(e, r.versions)}`, ...small, color: versionNote(e, r.versions).startsWith('Superseded') ? '#888' : '#000' },
-    { text: `${plant(e.activityStart)}${e.activityEnd ? `\nto ${plant(e.activityEnd)}` : ''}${e.late ? `\nLATE: ${e.lateReason}` : ''}`, ...small },
-    { text: `${e.batch ? `Batch ${e.batch}\n` : ''}${wrapJson(e.data)}`, ...small },
-    { text: `${e.enteredBy}\n${plant(e.enteredAt)}`, ...small },
-    { text: signatureText(e), ...small },
-  ]);
+  const entryRows: Content[][] = r.entries.map((e) => {
+    const superseded = versionNote(e, r.versions).startsWith('Superseded');
+    const grey = superseded ? { color: '#888888' } : {};
+    return [
+      cellText(`${r.codes.get(e.equipmentId) ?? ''}\n#${e.entryId} v${e.version}`, grey),
+      cellText(`${e.logbookType.replaceAll('_', ' ')}\n${versionNote(e, r.versions)}`, grey),
+      cellText(`${plant(e.activityStart)}${e.activityEnd ? `\nto ${plant(e.activityEnd)}` : ''}${e.late ? `\nLATE: ${e.lateReason}` : ''}`, grey),
+      cellText(`${e.batch ? `Batch ${e.batch}\n` : ''}${wrapJson(e.data)}`, grey),
+      cellText(`${e.enteredBy}\n${plant(e.enteredAt)}`, grey),
+      cellText(signatureText(e), grey),
+    ];
+  });
   const auditRows: Content[][] = r.audit.map((a) => [
-    { text: plant(a.at), ...small },
-    { text: a.actor ?? 'system', ...small },
-    { text: `${a.action} ${a.objectType} ${a.objectId ?? ''}`, ...small },
-    { text: `${a.reason ? `Reason: ${a.reason}\n` : ''}${a.oldValue ? `Old: ${wrapJson(a.oldValue)}\n` : ''}${a.newValue ? `New: ${wrapJson(a.newValue)}` : ''}`, ...small },
+    cellText(plant(a.at)),
+    cellText(a.actor ?? 'system'),
+    cellText(`${a.action} ${a.objectType} ${a.objectId ?? ''}`),
+    cellText(`${a.reason ? `Reason: ${a.reason}\n` : ''}${a.oldValue ? `Old: ${wrapJson(a.oldValue)}\n` : ''}${a.newValue ? `New: ${wrapJson(a.newValue)}` : ''}`),
   ]);
+  const heading = (text: string) => ({ text, fontSize: 8, bold: true });
   const def: TDocumentDefinitions = {
     pageOrientation: 'landscape',
     pageSize: 'A4',
     pageMargins: [28, 50, 28, 36],
-    defaultStyle: { font: 'Helvetica', fontSize: 9 },
-    header: { text: `${site?.name ?? ''} (${site?.code ?? ''}) · ${r.title}`, margin: [28, 20, 28, 0], fontSize: 9, bold: true },
+    defaultStyle: { font: 'Noto', fontSize: 9 },
+    header: { text: runs(`${site?.name ?? ''} (${site?.code ?? ''}) · ${r.title}`), margin: [28, 20, 28, 0], fontSize: 9, bold: true },
     footer: (page, pages) => ({
       text: `Generated ${plant(new Date())} by ${by} · true copy of the electronic record · page ${page} of ${pages}`,
       margin: [28, 10, 28, 0],
       fontSize: 7,
     }),
     content: [
-      { text: r.title, fontSize: 14, bold: true },
-      { text: r.subtitle, margin: [0, 2, 0, 10] },
+      { text: runs(r.title), fontSize: 14, bold: true },
+      { text: runs(r.subtitle), margin: [0, 2, 0, 10] },
+      ...(r.reviews.length
+        ? [{ text: 'QA reviews', bold: true, margin: [0, 0, 0, 4] } as Content, { ul: r.reviews.map((v) => ({ text: runs(reviewText(v)), fontSize: 8 })), margin: [0, 0, 0, 10] } as Content]
+        : []),
       { text: 'Entries (all versions; superseded versions shown in grey)', bold: true, margin: [0, 0, 0, 4] },
       r.entries.length
-        ? { table: { headerRows: 1, widths: [55, 75, 90, '*', 70, 150], body: [['Item / entry', 'Type', 'Activity', 'Details', 'Entered', 'Signatures'].map((h) => ({ text: h, bold: true, fontSize: 8 })), ...entryRows] }, layout: 'lightHorizontalLines' }
+        ? { table: { headerRows: 1, widths: [55, 75, 90, '*', 70, 150], body: [['Item / entry', 'Type', 'Activity', 'Details', 'Entered', 'Signatures'].map(heading), ...entryRows] }, layout: 'lightHorizontalLines' }
         : { text: 'No entries.', italics: true },
       { text: 'Audit trail', bold: true, margin: [0, 14, 0, 4] },
       r.audit.length
-        ? { table: { headerRows: 1, widths: [80, 80, 120, '*'], body: [['When', 'Who', 'Action', 'Details'].map((h) => ({ text: h, bold: true, fontSize: 8 })), ...auditRows] }, layout: 'lightHorizontalLines' }
+        ? { table: { headerRows: 1, widths: [80, 80, 120, '*'], body: [['When', 'Who', 'Action', 'Details'].map(heading), ...auditRows] }, layout: 'lightHorizontalLines' }
         : { text: 'No audit rows.', italics: true },
     ],
   };
@@ -107,13 +150,24 @@ async function pdf(r: Report, site: { name: string; code: string } | undefined, 
   });
 }
 
-async function build(sql: Sql, title: string, subtitle: string, versions: EntryRow[]): Promise<Report> {
+async function build(sql: Sql, title: string, subtitle: string, versions: EntryRow[], reviews: Review[] = []): Promise<Report> {
   const codes = new Map(
     (await sql<{ id: number; code: string }[]>`
       select id::int, code from equipment where id = any(${[...new Set(versions.map((v) => v.equipment_id))]}::bigint[])`).map((c) => [c.id, c.code]),
   );
-  return { title, subtitle, versions, entries: await present(sql, versions), audit: await auditFor(sql, versions), codes };
+  return {
+    title,
+    subtitle,
+    versions,
+    entries: await present(sql, versions),
+    audit: await auditFor(sql, versions, reviews.map((v) => v.id)),
+    reviews,
+    codes,
+  };
 }
+
+// Size guard (review S5-6): exports are built in memory.
+const MAX_VERSIONS = 20_000;
 
 async function send(sql: Sql, reply: FastifyReply, format: string, name: string, report: Report, by: string) {
   const safe = name.replace(/[^A-Za-z0-9._-]/g, '_');
@@ -131,20 +185,25 @@ export function exportRoutes(app: FastifyInstance, sql: Sql) {
   app.get<{ Params: { format: string }; Querystring: Record<string, string> }>('/api/export/period.:format', readers, async (req, reply) => {
     const format = fmt.safeParse(req.params.format);
     const id = parseId(req.query.equipmentId ?? '');
-    const q = z.object({ from: z.coerce.date(), to: z.coerce.date() }).safeParse(req.query);
+    const q = periodQuery.safeParse(req.query);
     if (!format.success || id === null || !q.success) return reply.code(400).send({ error: 'invalid_request' });
     const [eq] = await sql<{ code: string; name: string }[]>`select code, name from equipment where id = ${id}`;
     if (!eq) return reply.code(404).send({ error: 'not_found' });
-    const report = await build(sql, `Logbook ${eq.code} · ${eq.name}`, `Period ${plant(q.data.from)} to ${plant(q.data.to)}`,
-      await periodVersions(sql, id, q.data.from, q.data.to));
-    return send(sql, reply, format.data, `logbook-${eq.code}-${q.data.from.toISOString().slice(0, 10)}`, report, req.user!.fullName);
+    const { from, to } = await plantRange(sql, q.data.fromDay, q.data.toDay);
+    const versions = await periodVersions(sql, id, from, to);
+    if (versions.length > MAX_VERSIONS) return reply.code(413).send({ error: 'too_large', message: 'Choose a shorter period.' });
+    const report = await build(sql, `Logbook ${eq.code} · ${eq.name}`, `Period ${q.data.fromDay} to ${q.data.toDay} (plant time)`,
+      versions, await reviewsFor(sql, id, from, to));
+    return send(sql, reply, format.data, `logbook-${eq.code}-${q.data.fromDay}`, report, req.user!.fullName);
   });
 
   app.get<{ Params: { format: string }; Querystring: Record<string, string> }>('/api/export/batch.:format', readers, async (req, reply) => {
     const format = fmt.safeParse(req.params.format);
     const batch = z.string().trim().min(1).max(60).safeParse(req.query.batch);
     if (!format.success || !batch.success) return reply.code(400).send({ error: 'invalid_request' });
-    const report = await build(sql, `Batch ${batch.data}`, 'All logbook entries referencing this batch', await batchVersions(sql, batch.data));
+    const versions = await batchVersions(sql, batch.data);
+    if (versions.length > MAX_VERSIONS) return reply.code(413).send({ error: 'too_large' });
+    const report = await build(sql, `Batch ${batch.data}`, 'All logbook entries referencing this batch', versions);
     return send(sql, reply, format.data, `batch-${batch.data}`, report, req.user!.fullName);
   });
 }

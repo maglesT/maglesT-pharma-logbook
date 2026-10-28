@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PASSWORD, call, freshApp, login, seedUser, type TestApp } from './helpers.js';
+import { runs } from '../server/routes/exports.js';
 
 let t: TestApp;
 const c: Record<string, string> = {};
@@ -7,8 +8,11 @@ let mixer: number;
 let product: number;
 const sig = (username: string) => ({ username, password: PASSWORD });
 const now = () => new Date().toISOString();
-const from = new Date(Date.now() - 86_400_000).toISOString();
-const to = () => new Date(Date.now() + 60_000).toISOString();
+// Plant-local days covering yesterday to tomorrow.
+const dayOf = (offset: number) => new Date(Date.now() + offset * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+const fromDay = dayOf(-1);
+const toDay = dayOf(1);
+const range = `fromDay=${fromDay}&toDay=${toDay}`;
 
 async function approve(type: string) {
   const id = (await call(t.app, c.admin!, 'POST', '/api/settings', { logbookType: type, settings: { enabled: true, sopRef: '', checklist: [], verificationRequired: false }, effectiveFrom: now() })).json().id;
@@ -17,7 +21,7 @@ async function approve(type: string) {
 }
 const entry = (who: string, body: object) => call(t.app, c[who]!, 'POST', `/api/equipment/${mixer}/entries`, body);
 const versionsOf = async (id: number) => (await call(t.app, c.qa!, 'GET', `/api/entries/${id}/versions`)).json();
-const period = async (toTime = to()) => (await call(t.app, c.qa!, 'GET', `/api/equipment/${mixer}/period?from=${encodeURIComponent(from)}&to=${encodeURIComponent(toTime)}`)).json();
+const period = async () => (await call(t.app, c.qa!, 'GET', `/api/equipment/${mixer}/period?${range}`)).json();
 
 let cleaningId: number;
 let useId: number;
@@ -29,7 +33,7 @@ beforeAll(async () => {
   await call(t.app, c.admin!, 'PUT', '/api/site', { name: 'Plant One', code: 'P1', reason: 'setup' });
   mixer = (await call(t.app, c.admin!, 'POST', '/api/equipment', { code: 'RMG-9', name: 'Mixer', kind: 'equipment' })).json().id;
   product = (await call(t.app, c.admin!, 'POST', '/api/products', { code: 'PX', name: 'Product X' })).json().id;
-  for (const type of ['equipment_use', 'equipment_cleaning']) await approve(type);
+  for (const type of ['equipment_use', 'equipment_cleaning', 'maintenance']) await approve(type);
   cleaningId = (await entry('op1', { logbookType: 'equipment_cleaning', activityStart: now(), data: { cleaningType: 'major', checklist: {} }, signature: sig('op1') })).json().id;
   const v = (await versionsOf(cleaningId))[0];
   await call(t.app, c.sup1!, 'POST', `/api/entries/${cleaningId}/verify`, { ...sig('sup1'), contentHash: v.contentHash });
@@ -48,12 +52,11 @@ describe('QA period review (LB-25)', () => {
   });
 
   it('LB-25: QA signs "Reviewed" for exactly what was shown; a later correction marks the review superseded', async () => {
-    const toTime = to();
-    const p = await period(toTime);
-    const res = await call(t.app, c.qa!, 'POST', `/api/equipment/${mixer}/reviews`, { from, to: toTime, ...sig('qa1'), contentHash: p.contentHash });
+    const p = await period();
+    const res = await call(t.app, c.qa!, 'POST', `/api/equipment/${mixer}/reviews`, { fromDay, toDay, ...sig('qa1'), contentHash: p.contentHash });
     expect(res.statusCode).toBe(201);
     let reviews = (await call(t.app, c.qa!, 'GET', `/api/equipment/${mixer}/reviews`)).json();
-    expect(reviews[0]).toMatchObject({ reviewedBy: 'QA1', superseded: false });
+    expect(reviews[0]).toMatchObject({ reviewedBy: 'QA1', superseded: false, valid: true });
 
     const latest = (await versionsOf(useId)).at(-1);
     const corr = await call(t.app, c.op1!, 'POST', `/api/entries/${latest.id}/correct`, {
@@ -65,17 +68,16 @@ describe('QA period review (LB-25)', () => {
   });
 
   it('LB-25: signing a review refuses content that changed after it was shown', async () => {
-    const toTime = to();
-    const p = await period(toTime);
+    const p = await period();
     await entry('op1', { logbookType: 'equipment_cleaning', activityStart: now(), data: { cleaningType: 'major', checklist: {} }, signature: sig('op1') });
-    const res = await call(t.app, c.qa!, 'POST', `/api/equipment/${mixer}/reviews`, { from, to: toTime, ...sig('qa1'), contentHash: p.contentHash });
+    const res = await call(t.app, c.qa!, 'POST', `/api/equipment/${mixer}/reviews`, { fromDay, toDay, ...sig('qa1'), contentHash: p.contentHash });
     expect(res.json().error).toBe('content_changed');
   });
 
   it('LB-21: only QA signs reviews; operators cannot see review data', async () => {
     const p = await period();
-    expect((await call(t.app, c.sup1!, 'POST', `/api/equipment/${mixer}/reviews`, { from, to: to(), ...sig('sup1'), contentHash: p.contentHash })).statusCode).toBe(403);
-    expect((await call(t.app, c.op1!, 'GET', `/api/equipment/${mixer}/period?from=${from}&to=${to()}`)).statusCode).toBe(403);
+    expect((await call(t.app, c.sup1!, 'POST', `/api/equipment/${mixer}/reviews`, { fromDay, toDay, ...sig('sup1'), contentHash: p.contentHash })).statusCode).toBe(403);
+    expect((await call(t.app, c.op1!, 'GET', `/api/equipment/${mixer}/period?${range}`)).statusCode).toBe(403);
   });
 });
 
@@ -108,7 +110,7 @@ describe('exports (LB-22)', () => {
   });
 
   it('LB-22: the PDF is a readable copy of a logbook period', async () => {
-    const res = await call(t.app, c.qa!, 'GET', `/api/export/period.pdf?equipmentId=${mixer}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to())}`);
+    const res = await call(t.app, c.qa!, 'GET', `/api/export/period.pdf?equipmentId=${mixer}&${range}`);
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('application/pdf');
     expect(res.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
@@ -118,7 +120,50 @@ describe('exports (LB-22)', () => {
   it('LB-22: spreadsheet formulas in entered text are neutralised in the CSV', async () => {
     const id = (await entry('op1', { logbookType: 'equipment_cleaning', activityStart: now(), data: { cleaningType: 'major', checklist: {}, remarks: '=HYPERLINK("x")' }, signature: sig('op1') })).json().id;
     expect(id).toBeGreaterThan(0);
-    const res = await call(t.app, c.qa!, 'GET', `/api/export/period.csv?equipmentId=${mixer}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to())}`);
+    const res = await call(t.app, c.qa!, 'GET', `/api/export/period.csv?equipmentId=${mixer}&${range}`);
     expect(res.body).not.toMatch(/(^|,)"=/m);
+  });
+});
+
+describe('review fixes (S5)', () => {
+  it('LB-25: an entry corrected into another period still shows in its original period', async () => {
+    const id = (await entry('op1', { logbookType: 'maintenance', activityStart: now(), data: { kind: 'preventive', description: 'Lubrication' }, signature: sig('op1') })).json().id;
+    const v = (await versionsOf(id))[0];
+    const earlier = new Date(Date.now() - 10 * 86_400_000).toISOString();
+    const corr = await call(t.app, c.op1!, 'POST', `/api/entries/${id}/correct`, { activityStart: earlier, activityEnd: earlier, data: v.data, reason: 'wrong date', lateReason: 'from paper', signature: sig('op1') });
+    expect(corr.statusCode).toBe(200);
+    const p = await period();
+    expect(p.entries.filter((e: { entryId: number }) => e.entryId === v.entryId)).toHaveLength(2);
+  });
+
+  it('LB-25: periods are limited in length', async () => {
+    const res = await call(t.app, c.qa!, 'GET', `/api/equipment/${mixer}/period?fromDay=2000-01-01&toDay=2026-01-01`);
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('LB-19: a tampered review shows as invalid', async () => {
+    const [r] = await t.owner`select id from reviews order by id limit 1`;
+    await t.owner`update reviews set content = jsonb_set(content, '{versions}', '[]') where id = ${r!.id}`;
+    const reviews = (await call(t.app, c.qa!, 'GET', `/api/equipment/${mixer}/reviews`)).json();
+    expect(reviews.find((x: { id: number }) => x.id === Number(r!.id)).valid).toBe(false);
+  });
+
+  it('LB-22: PDF text uses embedded fonts; symbols use the math font; unknown characters stay visible', () => {
+    expect(runs('रमेश 5 µm')).toEqual([{ text: 'रमेश 5 µm' }]);
+    expect(runs('a ≤ b')).toEqual([{ text: 'a ' }, { text: '≤', font: 'NotoMath' }, { text: ' b' }]);
+    expect(runs('ok \u{1F600}')).toEqual([{ text: 'ok [U+1F600]' }]);
+  });
+
+  it('LB-22: CSV cells starting with a tab or spaces before a formula are neutralised', async () => {
+    await entry('op1', { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: '\t=1+1', data: {} }).catch(() => undefined);
+    const res = await call(t.app, c.qa!, 'GET', `/api/export/batch.csv?batch=${encodeURIComponent('\t=1+1')}`);
+    expect(res.statusCode).toBe(200);
+    expect(res.body).not.toMatch(/,"\t=/);
+  });
+
+  it('LB-22: the period export includes the QA reviews', async () => {
+    const res = await call(t.app, c.qa!, 'GET', `/api/export/period.csv?equipmentId=${mixer}&${range}`);
+    expect(res.body).toContain('"review"');
+    expect(res.body).toMatch(/Reviewed by QA1/);
   });
 });

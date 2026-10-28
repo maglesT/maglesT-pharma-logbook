@@ -19,7 +19,7 @@ interface Period {
   openItems: { notFinishedOrNotVerified: number; late: number; corrected: number; failedCalibrations: number };
   audit: AuditRow[];
   contentHash: string;
-  reviews: { id: number; periodFrom: string; periodTo: string; reviewedBy: string; reviewedAt: string; superseded: boolean }[];
+  reviews: { id: number; periodFrom: string; periodTo: string; reviewedBy: string; reviewedAt: string; superseded: boolean; valid: boolean }[];
 }
 
 const day = (offset: number) => {
@@ -27,9 +27,9 @@ const day = (offset: number) => {
   d.setDate(d.getDate() + offset);
   return d.toLocaleDateString('en-CA');
 };
-// Whole plant-local days: from 00:00 of the first day to 00:00 after the last day.
-const startOf = (d: string) => new Date(`${d}T00:00:00`).toISOString();
-const endOf = (d: string) => new Date(new Date(`${d}T00:00:00`).getTime() + 86_400_000).toISOString();
+// Periods are whole plant-local days; the server converts them (review S5-3).
+const startOf = (d: string) => new Date(`${d}T00:00:00+05:30`).toISOString();
+const endOf = (d: string) => new Date(new Date(`${d}T00:00:00+05:30`).getTime() + 86_400_000).toISOString();
 
 export function Review({ me }: { me: Me }) {
   const reviewer = me.roles.includes('qa') || me.roles.includes('supervisor');
@@ -61,16 +61,12 @@ function PeriodReview({ me }: { me: Me }) {
     void api<Equipment[]>('GET', '/api/equipment').then(setEquipment);
   }, []);
 
-  const range = () => ({ from: startOf(fromDay), to: endOf(toDay) });
+  const range = () => ({ fromDay, toDay });
   const load = async () => {
     if (!equipmentId) return;
-    const { from, to } = range();
-    setPeriod(await api<Period>('GET', `/api/equipment/${equipmentId}/period?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`));
+    setPeriod(await api<Period>('GET', `/api/equipment/${equipmentId}/period?fromDay=${fromDay}&toDay=${toDay}`));
   };
-  const exportUrl = (fmt: string) => {
-    const { from, to } = range();
-    return `/api/export/period.${fmt}?equipmentId=${equipmentId}&from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
-  };
+  const exportUrl = (fmt: string) => `/api/export/period.${fmt}?equipmentId=${equipmentId}&fromDay=${fromDay}&toDay=${toDay}`;
   const eq = equipment.find((e) => e.id === equipmentId);
 
   return (
@@ -99,7 +95,8 @@ function PeriodReview({ me }: { me: Me }) {
           {period.reviews.map((r) => (
             <p key={r.id}>
               Reviewed by {r.reviewedBy}, {plantTime(r.reviewedAt)} (period {plantTime(r.periodFrom)} – {plantTime(r.periodTo)})
-              {r.superseded && <span className="chip chip-warn"> Superseded: entries changed after the review</span>}
+              {r.superseded && <span className="chip chip-warn"> Superseded: entries in this period were added or changed after the review</span>}
+              {!r.valid && <span className="chip chip-bad"> Invalid: review content changed</span>}
             </p>
           ))}
           {me.roles.includes('qa') && <button className="primary" onClick={() => setSigning(true)}>Sign as reviewed</button>}
