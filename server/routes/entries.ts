@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
 import { parseId, requireRole, type SessionUser } from '../auth.js';
-import { typeByKey, type LogbookSettings } from '../logbook-types.js';
+import { LOGBOOK_TYPES, typeByKey, type LogbookSettings } from '../logbook-types.js';
 import { DATA_SCHEMAS, VERIFIERS, checkData, mayRecord, performerSigns, verificationNeeded, type EquipmentInfo } from '../entries.js';
 import { SignError, authenticateSigner, contentHash, sign, signBody, type SignInput } from '../signatures.js';
 import { settingsInForce } from './settings.js';
@@ -32,6 +32,7 @@ const correctBody = z.object({
   batch: z.string().trim().min(1).max(60).nullable().optional(),
   data: z.record(z.unknown()),
   reason: z.string().trim().min(1).max(500),
+  lateReason: z.string().trim().max(500).optional(),
   signature: credentials,
 });
 
@@ -258,21 +259,36 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
       const signer = await authenticateSigner(sql, user, { ...b.signature, contentHash: '0'.repeat(64) }, { objectType: 'entry', objectId: id, meaning: 'corrected' });
       const row = await sql.begin(async (tx) => {
         const prev = await latestVersion(tx, id);
-        const [first] = await tx<{ entered_by: number }[]>`select entered_by::int from entries where entry_id = ${prev.entry_id} and version = 1`;
+        const [first] = await tx<{ entered_by: number; entered_at: Date }[]>`
+          select entered_by::int, entered_at from entries where entry_id = ${prev.entry_id} and version = 1`;
         const own = first!.entered_by === user.id || prev.entered_by === user.id;
-        if (!own && !user.roles.some((r) => r === 'supervisor' || r === 'qa')) throw new EntryError(403, 'forbidden');
+        // D-17: the right to record this type, and being the author or a supervisor.
+        if (!mayRecord(prev.logbook_type, user.roles) || (!own && !user.roles.includes('supervisor'))) {
+          throw new EntryError(403, 'forbidden');
+        }
         const eq = await loadEquipment(tx, prev.equipment_id);
         const [s] = await tx<{ settings: LogbookSettings }[]>`select settings from logbook_settings where id = ${prev.settings_id}`;
-        const end = b.activityEnd === undefined ? prev.activity_end : b.activityEnd;
+        // A correction keeps an open use open and a finished activity finished (review S3-2).
+        if (prev.activity_end === null && b.activityEnd) throw new EntryError(400, 'check_failed', ['End the use with "End use", not by a correction.']);
+        if (prev.activity_end !== null && b.activityEnd === null) throw new EntryError(400, 'check_failed', ['A finished activity cannot be reopened.']);
+        const end = b.activityEnd === undefined || b.activityEnd === null ? prev.activity_end : b.activityEnd;
         if (end && end < b.activityStart) throw new EntryError(400, 'check_failed', ['The end cannot be before the start.']);
         if (prev.logbook_type === 'equipment_use' && (b.productId === null || b.batch === null)) {
           throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
         }
-        timing(await dbNow(tx), [b.activityStart, end], 'correction');
+        const now = await dbNow(tx);
+        timing(now, [b.activityStart, end], 'n/a');
+        // LB-04: lateness is judged against when the entry was first made (review S3-1).
+        const latest = Math.max(b.activityStart.getTime(), end?.getTime() ?? 0);
+        const late = latest < first!.entered_at.getTime() - LATE_MINUTES * 60_000;
+        const lateReason = late ? (b.lateReason?.trim() || prev.late_reason) : null;
+        if (late && !lateReason) {
+          throw new EntryError(400, 'late_reason_required', [`The corrected time is more than ${LATE_MINUTES} minutes before the entry was made: give a reason.`]);
+        }
         const data = validate(prev.logbook_type, b.data, s!.settings, eq, b.activityStart);
         const next = await insertVersion(tx, {
           ...prev, entry_id: prev.entry_id, version: prev.version + 1, supersedes: prev.id, change: 'corrected',
-          activity_start: b.activityStart, activity_end: end,
+          activity_start: b.activityStart, activity_end: end, late, late_reason: lateReason,
           product_id: b.productId === undefined ? prev.product_id : b.productId,
           batch: b.batch === undefined ? prev.batch : b.batch, data, correction_reason: b.reason, entered_by: user.id,
         });
@@ -335,7 +351,15 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
 
   // LB-26: open items, so nothing is silently left unfinished.
   app.get('/api/entries/open', anyUser, async () => {
-    const rows = await listEntries(sql, sql`true`);
+    const always = LOGBOOK_TYPES.filter((t) => t.alwaysVerified).map((t) => t.key);
+    const rows = await listEntries(
+      sql,
+      sql`((e.logbook_type = 'equipment_use' and e.activity_end is null)
+        or ((e.logbook_type = any(${always}) or coalesce((s.settings->>'verificationRequired')::boolean, false))
+            and not exists (select 1 from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'verified')
+            and not (e.logbook_type = 'equipment_use' and e.activity_end is null)))`,
+      null,
+    );
     return rows.filter((r) => r.awaitingVerification || r.inProgress);
   });
 }
@@ -385,14 +409,15 @@ async function present(sql: Sql, rows: EntryRow[], needsVerification?: (r: Entry
   });
 }
 
-async function listEntries(sql: Sql, where: ReturnType<Sql>) {
+// limit null: every matching row (open items must never be cut off; LB-26).
+async function listEntries(sql: Sql, where: ReturnType<Sql>, limit: number | null = 500) {
   const rows = await sql<(EntryRow & { settings: LogbookSettings })[]>`
     select e.id::int, e.equipment_id::int, e.logbook_type, e.settings_id::int, e.entry_id::int, e.version, e.supersedes::int,
       e.change, e.activity_start, e.activity_end, e.product_id::int, e.batch, e.data, e.late, e.late_reason,
       e.correction_reason, e.entered_by::int, e.entered_at, s.settings
     from entries e join logbook_settings s on s.id = e.settings_id
     where ${where} and not exists (select 1 from entries x where x.supersedes = e.id)
-    order by e.activity_start desc limit 500`;
+    order by e.activity_start desc ${limit === null ? sql`` : sql`limit ${limit}`}`;
   const needs = new Map(rows.map((r) => [r.id, verificationNeeded(r.logbook_type, r.settings)]));
   return present(sql, rows, (r) => needs.get(r.id) ?? false);
 }

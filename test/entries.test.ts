@@ -229,3 +229,60 @@ describe('open items (LB-26)', () => {
     expect(open.some((e: { awaitingVerification: boolean }) => e.awaitingVerification)).toBe(true);
   });
 });
+
+describe('review fixes (S3)', () => {
+  it('LB-04: a correction that moves times back past the late window needs a reason and is flagged late', async () => {
+    const id = (await create('op1', room, { logbookType: 'area_cleaning', activityStart: now(), data: { cleaningType: 'daily' }, signature: sig('op1') })).json().id;
+    const twoDaysAgo = minutesAgo(48 * 60);
+    const body = { activityStart: twoDaysAgo, activityEnd: twoDaysAgo, data: { cleaningType: 'daily' }, reason: 'Wrong day', signature: sig('op1') };
+    const without = await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/correct`, body);
+    expect(without.json().error).toBe('late_reason_required');
+    const ok = await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/correct`, { ...body, lateReason: 'Recorded from the paper log' });
+    expect(ok.statusCode).toBe(200);
+    const all = await versions(id);
+    expect(all[1]).toMatchObject({ late: true, lateReason: 'Recorded from the paper log' });
+  });
+
+  it('LB-10: a correction cannot end an open use or reopen a finished activity', async () => {
+    const id = (await create('op1', mixer, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B3001', data: {} })).json().id;
+    const close = await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/correct`, { activityStart: now(), activityEnd: now(), data: {}, reason: 'x', signature: sig('op1') });
+    expect(close.statusCode).toBe(400);
+    const ended = (await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/complete`, { activityEnd: now() })).json().id;
+    const reopen = await call(t.app, cookies.op1!, 'POST', `/api/entries/${ended}/correct`, { activityStart: now(), activityEnd: null, data: {}, reason: 'x', signature: sig('op1') });
+    expect(reopen.statusCode).toBe(400);
+  });
+
+  it('LB-21: QA cannot rewrite entries; a supervisor may correct entries of types they may record', async () => {
+    const id = (await create('op1', mixer, { logbookType: 'equipment_use', activityStart: minutesAgo(1), productId: product, batch: 'B3002', data: {} })).json().id;
+    const ended = (await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/complete`, { activityEnd: now() })).json().id;
+    const v = (await versions(ended))[1];
+    const body = { activityStart: v.activityStart, activityEnd: v.activityEnd, batch: 'B3003', data: {}, reason: 'typo' };
+    expect((await call(t.app, cookies.qa!, 'POST', `/api/entries/${ended}/correct`, { ...body, signature: sig('qa1') })).statusCode).toBe(403);
+    expect((await call(t.app, cookies.sup1!, 'POST', `/api/entries/${ended}/correct`, { ...body, signature: sig('sup1') })).statusCode).toBe(200);
+  });
+
+  it('LB-17: the database refuses a version that does not follow its predecessor', async () => {
+    const a = (await create('op1', mixer, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B3004', data: {} })).json().id;
+    const [row] = await t.owner`select * from entries where id = ${a}`;
+    await expect(t.sql`
+      insert into entries (equipment_id, logbook_type, settings_id, entry_id, version, supersedes, change, activity_start, data, entered_by)
+      values (${room}, ${row!.logbook_type}, ${row!.settings_id}, ${row!.entry_id}, 2, ${a}, 'completed', now(), '{}', ${row!.entered_by})`,
+    ).rejects.toThrow(/does not follow/);
+    await expect(t.sql`
+      insert into entries (equipment_id, logbook_type, settings_id, entry_id, version, supersedes, change, activity_start, data, entered_by)
+      values (${mixer}, ${row!.logbook_type}, ${row!.settings_id}, ${row!.entry_id}, 5, ${a}, 'completed', now(), '{}', ${row!.entered_by})`,
+    ).rejects.toThrow(/does not follow/);
+    await call(t.app, cookies.op1!, 'POST', `/api/entries/${a}/complete`, { activityEnd: now() });
+  });
+
+  it('LB-26: open items are found in the database, not cut off by a list limit', async () => {
+    const id = (await create('op1', room, { logbookType: 'area_cleaning', activityStart: minutesAgo(25), data: { cleaningType: 'weekly' }, signature: sig('op1') })).json().id;
+    // Simulate many newer, closed entries elsewhere: the open item must still be listed.
+    const [row] = await t.owner`select * from entries where id = ${id}`;
+    await t.owner`insert into entries (equipment_id, logbook_type, settings_id, version, change, activity_start, activity_end, data, entered_by)
+      select ${mixer}, 'equipment_use', (select settings_id from entries where logbook_type = 'equipment_use' limit 1), 1, 'created',
+             now(), now(), '{}', ${row!.entered_by} from generate_series(1, 520)`;
+    const open = (await call(t.app, cookies.qa!, 'GET', '/api/entries/open')).json();
+    expect(open.some((e: { id: number }) => e.id === id)).toBe(true);
+  });
+});

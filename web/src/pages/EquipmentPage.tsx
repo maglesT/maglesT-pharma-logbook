@@ -80,7 +80,9 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
     } catch (err) {
       if (err instanceof ApiError && err.code === 'late_reason_required') {
         const reason = window.prompt('This is a late entry. Reason:')?.trim();
-        if (reason) await api('POST', `/api/entries/${e.id}/complete`, { activityEnd: at, lateReason: reason });
+        if (reason) {
+          await api('POST', `/api/entries/${e.id}/complete`, { activityEnd: at, lateReason: reason }).catch((again: Error) => setError(again.message));
+        }
       } else setError((err as Error).message);
     }
     await load();
