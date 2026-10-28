@@ -80,7 +80,7 @@ export interface SignRequest {
   signer: AuthenticatedSigner;
   // The hash the signer was shown (from SignInput); must equal the hash of `content`.
   shownHash: string;
-  objectType: 'entry' | 'settings';
+  objectType: 'entry' | 'settings' | 'review';
   objectId: number;
   meaning: Meaning;
   content: unknown;

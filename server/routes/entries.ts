@@ -37,7 +37,7 @@ const correctBody = z.object({
   signature: credentials,
 });
 
-interface EntryRow {
+export interface EntryRow {
   id: number;
   equipment_id: number;
   logbook_type: string;
@@ -58,7 +58,7 @@ interface EntryRow {
   entered_at: Date;
 }
 
-const ENTRY_COLS = `id::int, equipment_id::int, logbook_type, settings_id::int, entry_id::int, version, supersedes::int, change,
+export const ENTRY_COLS = `id::int, equipment_id::int, logbook_type, settings_id::int, entry_id::int, version, supersedes::int, change,
   activity_start, activity_end, product_id::int, batch, data, late, late_reason, correction_reason, entered_by::int, entered_at`;
 
 // What every signature on an entry version covers (LB-19).
@@ -81,7 +81,7 @@ export const entryContent = (e: EntryRow) => ({
   enteredBy: e.entered_by,
   enteredAt: e.entered_at,
 });
-const hashOf = (e: EntryRow) => contentHash('entry', e.id, entryContent(e));
+export const hashOf = (e: EntryRow) => contentHash('entry', e.id, entryContent(e));
 
 class EntryError extends Error {
   constructor(
@@ -119,7 +119,9 @@ function timing(now: Date, times: (Date | null | undefined)[], lateReason: strin
 // (review S4-3/7).
 function cleaningFits(status: { inUse: unknown; lastUseEnd: Date | null }, start: Date) {
   if (status.inUse) throw new EntryError(409, 'in_use', ['End the current use before recording a cleaning.']);
-  if (status.lastUseEnd && start < status.lastUseEnd) {
+  // Forms enter times to the minute, so compare at minute precision.
+  const useEndMinute = status.lastUseEnd ? Math.floor(status.lastUseEnd.getTime() / 60_000) * 60_000 : null;
+  if (useEndMinute !== null && start.getTime() < useEndMinute) {
     throw new EntryError(400, 'check_failed', ['A cleaning cannot start before the last use ended.']);
   }
 }
@@ -414,7 +416,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
 interface SigRow { object_id: number; printed_name: string; meaning: string; signed_at: Date; content_hash: string }
 
 // Presents entry versions with their signatures and the name of who entered them, in two queries.
-async function present(sql: Sql, rows: EntryRow[], needsVerification?: (r: EntryRow) => boolean) {
+export async function present(sql: Sql, rows: EntryRow[], needsVerification?: (r: EntryRow) => boolean) {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
   const sigs = await sql<SigRow[]>`

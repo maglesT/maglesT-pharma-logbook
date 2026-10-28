@@ -82,7 +82,7 @@ async function facts(q: Sql | Tx, ids: number[] | null): Promise<Facts[]> {
       -- A cleaning counts only if it started after the last use ended (review S4-3).
       (select max(l.activity_end) from latest l where l.equipment_id = q.id and l.verified
          and l.logbook_type in ('equipment_cleaning', 'area_cleaning')
-         and (us.last_use_end is null or l.activity_start >= us.last_use_end)) as last_clean_end,
+         and (us.last_use_end is null or l.activity_start >= date_trunc('minute', us.last_use_end))) as last_clean_end,
       (select count(*)::int from latest l where l.equipment_id = q.id and not l.verified
          and l.logbook_type in ('equipment_cleaning', 'area_cleaning')) as unverified_cleanings,
       (select count(*)::int from latest l where l.equipment_id = q.id and l.logbook_type = 'maintenance' and l.data->>'kind' = 'breakdown'

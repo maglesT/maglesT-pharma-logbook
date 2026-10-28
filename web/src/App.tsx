@@ -6,8 +6,9 @@ import { Users } from './pages/Users.js';
 import { MasterData } from './pages/MasterData.js';
 import { LogbookSettings } from './pages/LogbookSettings.js';
 import { EquipmentPage } from './pages/EquipmentPage.js';
+import { Review } from './pages/Review.js';
 
-type Page = 'home' | 'users' | 'password' | 'masterdata' | 'settings' | 'equipment';
+type Page = 'home' | 'users' | 'password' | 'masterdata' | 'settings' | 'equipment' | 'review';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -43,6 +44,9 @@ export function App() {
         <nav>
           <button className={page === 'home' ? 'tab on' : 'tab'} onClick={() => setPage('home')}>Home</button>
           <button className={page === 'equipment' ? 'tab on' : 'tab'} onClick={() => { setOpenId(undefined); setPage('equipment'); }}>Logbooks</button>
+          {me.roles.some((r) => r === 'qa' || r === 'supervisor' || r === 'admin') && (
+            <button className={page === 'review' ? 'tab on' : 'tab'} onClick={() => setPage('review')}>{me.roles.some((r) => r === 'qa' || r === 'supervisor') ? 'Review' : 'Audit trail'}</button>
+          )}
           <button className={page === 'masterdata' ? 'tab on' : 'tab'} onClick={() => setPage('masterdata')}>Master data</button>
           {(me.roles.includes('admin') || me.roles.includes('qa')) && (
             <button className={page === 'settings' ? 'tab on' : 'tab'} onClick={() => setPage('settings')}>Logbook settings</button>
@@ -60,6 +64,7 @@ export function App() {
       <main className="page">
         {page === 'home' && <Home me={me} onOpen={(id) => { setOpenId(id); setPage('equipment'); }} />}
         {page === 'equipment' && <EquipmentPage me={me} openId={openId} />}
+        {page === 'review' && <Review me={me} />}
         {page === 'users' && <Users me={me} />}
         {page === 'masterdata' && <MasterData me={me} />}
         {page === 'settings' && <LogbookSettings me={me} />}
