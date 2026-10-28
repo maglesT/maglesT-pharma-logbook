@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
 import { hashPassword, temporaryPassword } from '../passwords.js';
-import { ROLES, requireRole } from '../auth.js';
+import { POLICY, ROLES, parseId, requireRole } from '../auth.js';
 
 const roleList = z.array(z.enum(ROLES)).min(1).transform((r) => [...new Set(r)].sort());
 const createBody = z.object({
@@ -74,7 +74,8 @@ export function userRoutes(app: FastifyInstance, sql: Sql) {
       const [taken] = await tx`select 1 from users where username = ${username}`;
       if (taken) return null;
       const [u] = await tx<{ id: number }[]>`
-        insert into users (username, full_name, password_hash) values (${username}, ${fullName}, ${hash})
+        insert into users (username, full_name, password_hash, temp_password_expires_at)
+        values (${username}, ${fullName}, ${hash}, now() + make_interval(hours => ${POLICY.temporaryPasswordHours}))
         returning id::int`;
       for (const role of roles) await tx`insert into user_roles (user_id, role) values (${u!.id}, ${role})`;
       await audit(tx, { actorId: req.user!.id, action: 'user.created', objectType: 'user', objectId: u!.id,
@@ -89,7 +90,8 @@ export function userRoutes(app: FastifyInstance, sql: Sql) {
   app.patch<{ Params: { id: string } }>('/api/users/:id', admin, async (req, reply) => {
     const body = updateBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'invalid_request' });
-    const id = Number(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return reply.code(400).send({ error: 'invalid_request' });
     const { fullName, roles, active, reason } = body.data;
     if (id === req.user!.id && (active === false || (roles && !roles.includes('admin')))) {
       return reply.code(400).send({ error: 'cannot_remove_own_admin' });
@@ -120,12 +122,14 @@ export function userRoutes(app: FastifyInstance, sql: Sql) {
   app.post<{ Params: { id: string } }>('/api/users/:id/reset-password', admin, async (req, reply) => {
     const body = reasonBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'invalid_request' });
-    const id = Number(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return reply.code(400).send({ error: 'invalid_request' });
     const temp = temporaryPassword();
     const hash = await hashPassword(temp);
     const ok = await sql.begin(async (tx) => {
       const [u] = await tx`
         update users set password_hash = ${hash}, must_change_password = true, password_changed_at = now(),
+          temp_password_expires_at = now() + make_interval(hours => ${POLICY.temporaryPasswordHours}),
           failed_attempts = 0, locked_at = null
         where id = ${id} returning id`;
       if (!u) return false;

@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import type { Sql } from './db.js';
-import { SESSION_COOKIE, loadSession } from './auth.js';
+import { BACKGROUND_HEADER, SESSION_COOKIE, loadSession } from './auth.js';
 import { authRoutes } from './routes/auth.js';
 import { userRoutes } from './routes/users.js';
 import { alertRoutes } from './routes/alerts.js';
@@ -17,10 +17,13 @@ export interface AppOptions {
   sql: Sql;
   logger?: boolean;
   webRoot?: string;
+  // Secure flag on the session cookie; off only for plain-HTTP development.
+  cookieSecure?: boolean;
 }
 
-export async function buildApp({ sql, logger = false, webRoot }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ sql, logger = false, webRoot, cookieSecure = true }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger, trustProxy: true });
+  app.decorate('cookieSecure', cookieSecure);
   await app.register(fastifyCookie);
 
   app.addHook('onRequest', async (req, reply) => {
@@ -30,7 +33,7 @@ export async function buildApp({ sql, logger = false, webRoot }: AppOptions): Pr
       return reply.code(415).send({ error: 'json_required' });
     }
     const sid = req.cookies[SESSION_COOKIE];
-    if (sid) req.user = (await loadSession(sql, sid)) ?? undefined;
+    if (sid) req.user = (await loadSession(sql, sid, !req.headers[BACKGROUND_HEADER])) ?? undefined;
   });
 
   app.get('/api/health', async (_req, reply) => {
@@ -56,4 +59,10 @@ export async function buildApp({ sql, logger = false, webRoot }: AppOptions): Pr
   }
 
   return app;
+}
+
+declare module 'fastify' {
+  interface FastifyInstance {
+    cookieSecure: boolean;
+  }
 }

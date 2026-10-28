@@ -5,11 +5,11 @@ export function Home({ me }: { me: Me }) {
   const watches = me.roles.includes('admin') || me.roles.includes('qa');
   const [alerts, setAlerts] = useState<Alert[]>([]);
 
-  const load = async () => setAlerts(await api<Alert[]>('GET', '/api/alerts'));
+  const load = async (background = false) => setAlerts(await api<Alert[]>('GET', '/api/alerts', undefined, background));
   useEffect(() => {
     if (!watches) return;
     void load();
-    const timer = setInterval(load, 30_000);
+    const timer = setInterval(() => void load(true).catch(() => window.location.reload()), 30_000);
     return () => clearInterval(timer);
   }, [watches]);
 

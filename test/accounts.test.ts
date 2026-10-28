@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { POLICY } from '../server/auth.js';
+import { POLICY, sessionKey } from '../server/auth.js';
 import { call, freshApp, login, seedUser, type TestApp } from './helpers.js';
 
 let t: TestApp;
@@ -51,7 +51,7 @@ describe('login and sessions', () => {
   it(`LB-21: session expires after ${POLICY.sessionIdleMinutes} idle minutes`, async () => {
     await seedUser(t.owner, uniq('op'), ['operator']);
     const { cookie } = await login(t.app, `op${n}`);
-    const sid = cookie.slice(4);
+    const sid = sessionKey(cookie.slice(4));
     await t.owner`update sessions set last_seen_at = now() - interval '16 minutes' where id = ${sid}`;
     expect((await call(t.app, cookie, 'GET', '/api/me')).statusCode).toBe(401);
   });
@@ -146,8 +146,11 @@ describe('passwords', () => {
   });
 
   it('LB-20: the audit trail never contains passwords', async () => {
-    const rows = await t.owner`select * from audit_log where coalesce(new_value::text, '') like '%scrypt%'
-                               or coalesce(new_value::text, '') ilike '%password%'`;
+    // Look for password values and hashes, not the word "password" (field names may contain it).
+    const rows = await t.owner`select * from audit_log
+      where concat(old_value::text, new_value::text, reason) like '%scrypt$%'
+         or concat(old_value::text, new_value::text, reason) like '%Correct-Horse-9%'
+         or concat(old_value::text, new_value::text, reason) like '%A-much-better-pw-1%'`;
     expect(rows).toHaveLength(0);
   });
 });
@@ -220,5 +223,74 @@ describe('audit trail', () => {
                                 where action = 'user.created' order by a.id desc limit 1`;
     expect(row!.username).toBe('admin1');
     expect(Math.abs(Date.now() - new Date(row!.at).getTime())).toBeLessThan(60_000);
+  });
+});
+
+describe('review fixes (S1)', () => {
+  const background = (cookie: string) =>
+    t.app.inject({ method: 'GET', url: '/api/alerts', headers: { cookie, 'x-background-poll': '1' } });
+
+  it('LB-21: background alert polling does not keep an idle session alive', async () => {
+    await seedUser(t.owner, uniq('qa'), ['qa']);
+    const { cookie } = await login(t.app, `qa${n}`);
+    const sid = sessionKey(cookie.slice(4));
+    await t.owner`update sessions set last_seen_at = now() - interval '14 minutes' where id = ${sid}`;
+    expect((await background(cookie)).statusCode).toBe(200);
+    const [row] = await t.owner`select now() - last_seen_at > interval '13 minutes' as stale from sessions where id = ${sid}`;
+    expect(row!.stale).toBe(true);
+  });
+
+  it('LB-21: a wrong current password on password change counts towards lockout and is audited', async () => {
+    const id = await seedUser(t.owner, uniq('op'), ['operator']);
+    const { cookie } = await login(t.app, `op${n}`);
+    for (let i = 0; i < POLICY.maxFailedAttempts; i++) {
+      await call(t.app, cookie, 'POST', '/api/me/password', { current: 'wrong-guess-123', new: 'Another-good-pw-9' });
+    }
+    expect(await auditRows('password.change_failed', id)).toHaveLength(POLICY.maxFailedAttempts);
+    expect(await auditRows('user.locked', id)).toHaveLength(1);
+    expect((await call(t.app, cookie, 'GET', '/api/me')).statusCode).toBe(401);
+  });
+
+  it('LB-21: changing the password ends the user\'s other sessions', async () => {
+    await seedUser(t.owner, uniq('op'), ['operator']);
+    const first = await login(t.app, `op${n}`);
+    const second = await login(t.app, `op${n}`);
+    await call(t.app, second.cookie, 'POST', '/api/me/password', { current: 'Correct-Horse-9', new: 'Fresh-secret-pw-7' });
+    expect((await call(t.app, first.cookie, 'GET', '/api/me')).statusCode).toBe(401);
+    expect((await call(t.app, second.cookie, 'GET', '/api/me')).statusCode).toBe(200);
+  });
+
+  it('LB-20: a temporary password expires after 24 hours', async () => {
+    const created = await call(t.app, adminCookie, 'POST', '/api/users', { username: uniq('new'), fullName: 'Late Starter', roles: ['operator'] });
+    const { id, username } = created.json().user;
+    await t.owner`update users set temp_password_expires_at = now() - interval '1 minute' where id = ${id}`;
+    expect((await login(t.app, username, created.json().temporaryPassword)).res.statusCode).toBe(401);
+  });
+
+  it('LB-20: turning a temporary password into a personal one is marked in the audit trail', async () => {
+    const created = await call(t.app, adminCookie, 'POST', '/api/users', { username: uniq('new'), fullName: 'First Login', roles: ['operator'] });
+    const { cookie } = await login(t.app, created.json().user.username, created.json().temporaryPassword);
+    await call(t.app, cookie, 'POST', '/api/me/password', { current: created.json().temporaryPassword, new: 'My-own-secret-42' });
+    const [row] = await auditRows('password.changed', created.json().user.id);
+    expect(row!.new_value).toEqual({ fromTemporaryPassword: true });
+  });
+
+  it('LB-18: the application cannot choose the audit timestamp', async () => {
+    await expect(
+      t.sql`insert into audit_log (at, action, object_type) values (now() - interval '1 year', 'x', 'y')`,
+    ).rejects.toThrow(/permission denied/);
+  });
+
+  it('LB-21: session ids are stored only as hashes', async () => {
+    await seedUser(t.owner, uniq('op'), ['operator']);
+    const { cookie } = await login(t.app, `op${n}`);
+    const raw = cookie.slice(4);
+    expect(await t.owner`select 1 from sessions where id = ${raw}`).toHaveLength(0);
+    expect(await t.owner`select 1 from sessions where id = ${sessionKey(raw)}`).toHaveLength(1);
+  });
+
+  it('non-numeric ids are rejected with 400', async () => {
+    const res = await call(t.app, adminCookie, 'PATCH', '/api/users/abc', { fullName: 'x', reason: 'y' });
+    expect(res.statusCode).toBe(400);
   });
 });

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
-import { requireRole } from '../auth.js';
+import { parseId, requireRole } from '../auth.js';
 
 // LB-21 / P11 11.300(d): misuse alerts stay on screen for Admin and QA until acknowledged.
 export function alertRoutes(app: FastifyInstance, sql: Sql) {
@@ -13,7 +13,8 @@ export function alertRoutes(app: FastifyInstance, sql: Sql) {
   );
 
   app.post<{ Params: { id: string } }>('/api/alerts/:id/ack', watchers, async (req, reply) => {
-    const id = Number(req.params.id);
+    const id = parseId(req.params.id);
+    if (id === null) return reply.code(400).send({ error: 'invalid_request' });
     const ok = await sql.begin(async (tx) => {
       const [a] = await tx`update alerts set acknowledged_by = ${req.user!.id}, acknowledged_at = now()
                            where id = ${id} and acknowledged_at is null returning id`;

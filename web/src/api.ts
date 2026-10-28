@@ -8,10 +8,14 @@ export class ApiError extends Error {
   }
 }
 
-export async function api<T>(method: 'GET' | 'POST' | 'PATCH', url: string, body?: object): Promise<T> {
+// background: polls that must not keep an idle session alive (server checks this header).
+export async function api<T>(method: 'GET' | 'POST' | 'PATCH', url: string, body?: object, background = false): Promise<T> {
   const res = await fetch(url, {
     method,
-    headers: method === 'GET' ? {} : { 'content-type': 'application/json' },
+    headers: {
+      ...(method === 'GET' ? {} : { 'content-type': 'application/json' }),
+      ...(background ? { 'x-background-poll': '1' } : {}),
+    },
     body: method === 'GET' ? undefined : JSON.stringify(body ?? {}),
     credentials: 'same-origin',
   });

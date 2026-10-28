@@ -1,12 +1,30 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { Sql } from '../db.js';
+import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
 import { hashPassword, passwordProblem, verifyPassword } from '../passwords.js';
-import { POLICY, SESSION_COOKIE, newSessionId, requireRole } from '../auth.js';
+import { POLICY, SESSION_COOKIE, newSessionId, requireRole, sessionKey } from '../auth.js';
 
 const loginBody = z.object({ username: z.string().min(1).max(40), password: z.string().min(1).max(200) });
-const passwordBody = z.object({ current: z.string().min(1), new: z.string().min(1).max(200) });
+const passwordBody = z.object({ current: z.string().min(1).max(200), new: z.string().min(1).max(200) });
+
+// Compared against when the user does not exist, so response time does not reveal valid user IDs.
+const DUMMY_HASH = await hashPassword('dummy-password-for-timing');
+
+// LB-21 / P11 11.300(d): count a failed password check; at the limit, lock the account and raise
+// an immediate on-screen alert to Admin and QA. Used by login and by password change.
+async function recordFailure(tx: Tx, userId: number, username: string, failedBefore: number): Promise<void> {
+  const failed = failedBefore + 1;
+  if (failed >= POLICY.maxFailedAttempts) {
+    await tx`update users set failed_attempts = ${failed}, locked_at = now() where id = ${userId}`;
+    await tx`delete from sessions where user_id = ${userId}`;
+    await tx`insert into alerts (kind, user_id, message)
+      values ('account_locked', ${userId}, ${`Account ${username} locked after ${failed} failed password attempts.`})`;
+    await audit(tx, { actorId: null, action: 'user.locked', objectType: 'user', objectId: userId, new: { failedAttempts: failed } });
+  } else {
+    await tx`update users set failed_attempts = ${failed} where id = ${userId}`;
+  }
+}
 
 export function authRoutes(app: FastifyInstance, sql: Sql) {
   app.post('/api/login', async (req, reply) => {
@@ -15,34 +33,26 @@ export function authRoutes(app: FastifyInstance, sql: Sql) {
     const username = body.data.username.trim().toLowerCase();
 
     const outcome = await sql.begin(async (tx) => {
-      const [u] = await tx<{ id: number; password_hash: string; active: boolean; locked: boolean; failed: number }[]>`
-        select id::int, password_hash, active, locked_at is not null as locked, failed_attempts as failed
+      const [u] = await tx<
+        { id: number; password_hash: string; active: boolean; locked: boolean; failed: number; temp_expired: boolean }[]
+      >`
+        select id::int, password_hash, active, locked_at is not null as locked, failed_attempts as failed,
+          (must_change_password and temp_password_expires_at < now()) as temp_expired
         from users where username = ${username} for update`;
+      const passwordOk = await verifyPassword(body.data.password, u?.password_hash ?? DUMMY_HASH);
       if (!u) {
         await audit(tx, { actorId: null, action: 'login.failed', objectType: 'user', objectId: username, reason: 'unknown user' });
         return { ok: false as const };
       }
-      const passwordOk = await verifyPassword(body.data.password, u.password_hash);
-      if (!u.active || u.locked || !passwordOk) {
-        const why = !u.active ? 'inactive' : u.locked ? 'locked' : 'wrong password';
+      if (!u.active || u.locked || !passwordOk || u.temp_expired) {
+        const why = !u.active ? 'inactive' : u.locked ? 'locked' : !passwordOk ? 'wrong password' : 'temporary password expired';
         await audit(tx, { actorId: null, action: 'login.failed', objectType: 'user', objectId: u.id, reason: why });
-        if (u.active && !u.locked && !passwordOk) {
-          const failed = u.failed + 1;
-          if (failed >= POLICY.maxFailedAttempts) {
-            // LB-21 / P11 11.300(d): lock and raise an immediate on-screen alert to Admin and QA.
-            await tx`update users set failed_attempts = ${failed}, locked_at = now() where id = ${u.id}`;
-            await tx`insert into alerts (kind, user_id, message)
-              values ('account_locked', ${u.id}, ${`Account ${username} locked after ${failed} failed login attempts.`})`;
-            await audit(tx, { actorId: null, action: 'user.locked', objectType: 'user', objectId: u.id, new: { failedAttempts: failed } });
-          } else {
-            await tx`update users set failed_attempts = ${failed} where id = ${u.id}`;
-          }
-        }
+        if (u.active && !u.locked && !passwordOk) await recordFailure(tx, u.id, username, u.failed);
         return { ok: false as const };
       }
       const sessionId = newSessionId();
       await tx`update users set failed_attempts = 0, last_login_at = now() where id = ${u.id}`;
-      await tx`insert into sessions (id, user_id) values (${sessionId}, ${u.id})`;
+      await tx`insert into sessions (id, user_id) values (${sessionKey(sessionId)}, ${u.id})`;
       await audit(tx, { actorId: u.id, action: 'login', objectType: 'user', objectId: u.id });
       return { ok: true as const, sessionId };
     });
@@ -53,7 +63,7 @@ export function authRoutes(app: FastifyInstance, sql: Sql) {
       path: '/',
       httpOnly: true,
       sameSite: 'strict',
-      secure: req.protocol === 'https',
+      secure: app.cookieSecure,
     });
     return { ok: true };
   });
@@ -61,7 +71,7 @@ export function authRoutes(app: FastifyInstance, sql: Sql) {
   app.post('/api/logout', async (req, reply) => {
     if (req.user) {
       await sql.begin(async (tx) => {
-        await tx`delete from sessions where id = ${req.user!.sessionId}`;
+        await tx`delete from sessions where id = ${sessionKey(req.user!.sessionId)}`;
         await audit(tx, { actorId: req.user!.id, action: 'logout', objectType: 'user', objectId: req.user!.id });
       });
     }
@@ -83,17 +93,29 @@ export function authRoutes(app: FastifyInstance, sql: Sql) {
     if (body.data.new === body.data.current) {
       return reply.code(400).send({ error: 'weak_password', message: 'The new password must differ from the current one.' });
     }
-    const [row] = await sql<{ password_hash: string }[]>`select password_hash from users where id = ${u.id}`;
-    if (!row || !(await verifyPassword(body.data.current, row.password_hash))) {
-      return reply.code(400).send({ error: 'wrong_password' });
-    }
     const hash = await hashPassword(body.data.new);
-    await sql.begin(async (tx) => {
-      await tx`update users set password_hash = ${hash}, must_change_password = false, password_changed_at = now()
+    const result = await sql.begin(async (tx) => {
+      const [row] = await tx<{ password_hash: string; failed: number; was_temporary: boolean }[]>`
+        select password_hash, failed_attempts as failed, must_change_password as was_temporary
+        from users where id = ${u.id} for update`;
+      if (!row || !(await verifyPassword(body.data.current, row.password_hash))) {
+        // A wrong current password counts towards lockout like a failed login (review finding 3).
+        await audit(tx, { actorId: u.id, action: 'password.change_failed', objectType: 'user', objectId: u.id, reason: 'wrong current password' });
+        if (row) await recordFailure(tx, u.id, u.username, row.failed);
+        return 'wrong_password' as const;
+      }
+      await tx`update users set password_hash = ${hash}, must_change_password = false, password_changed_at = now(),
+                 temp_password_expires_at = null, failed_attempts = 0
                where id = ${u.id}`;
-      // Never log the password itself; only the event.
-      await audit(tx, { actorId: u.id, action: 'password.changed', objectType: 'user', objectId: u.id });
+      // A changed password ends the user's other sessions.
+      await tx`delete from sessions where user_id = ${u.id} and id <> ${sessionKey(u.sessionId)}`;
+      // Never log the password itself. Marking a change from a temporary password makes an
+      // admin-issued password visible in the audit trail when it is turned into a personal one.
+      await audit(tx, { actorId: u.id, action: 'password.changed', objectType: 'user', objectId: u.id,
+        new: { fromTemporaryPassword: row.was_temporary } });
+      return 'ok' as const;
     });
+    if (result === 'wrong_password') return reply.code(400).send({ error: 'wrong_password' });
     return { ok: true };
   });
 }
