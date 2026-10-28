@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, type Entry, type Equipment, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
+import { api, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
+import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
 
 const CORE_TYPES = ['equipment_use', 'equipment_cleaning', 'maintenance', 'calibration', 'area_cleaning', 'general_log'];
@@ -18,9 +19,11 @@ export function EquipmentPage({ me, openId }: { me: Me; openId?: number }) {
   const [items, setItems] = useState<Equipment[]>([]);
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<number | undefined>(openId);
+  const [statuses, setStatuses] = useState<EquipmentStatus[]>([]);
   useEffect(() => {
     void api<Equipment[]>('GET', '/api/equipment').then(setItems);
-  }, []);
+    void api<EquipmentStatus[]>('GET', '/api/equipment/status').then(setStatuses);
+  }, [selected]);
   useEffect(() => setSelected(openId), [openId]);
 
   const eq = items.find((i) => i.id === selected);
@@ -34,7 +37,7 @@ export function EquipmentPage({ me, openId }: { me: Me; openId?: number }) {
       <div className="tiles">
         {shown.map((i) => (
           <button key={i.id} className="tile" onClick={() => setSelected(i.id)}>
-            <strong>{i.code}</strong>
+            <strong>{i.code} <StatusChip status={statuses.find((x) => x.equipmentId === i.id)} /></strong>
             <span>{i.name}</span>
             <span className="muted">{i.location}</span>
           </button>
@@ -50,10 +53,15 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
   const [products, setProducts] = useState<Product[]>([]);
   const [form, setForm] = useState<{ type: string; correcting?: Entry } | null>(null);
   const [verifying, setVerifying] = useState<Entry | null>(null);
+  const [releasing, setReleasing] = useState<Entry | null>(null);
+  const [status, setStatus] = useState<EquipmentStatus | null>(null);
   const [history, setHistory] = useState<Entry[] | null>(null);
   const [error, setError] = useState('');
 
-  const load = async () => setEntries(await api<Entry[]>('GET', `/api/equipment/${equipment.id}/entries`));
+  const load = async () => {
+    setEntries(await api<Entry[]>('GET', `/api/equipment/${equipment.id}/entries`));
+    setStatus(await api<EquipmentStatus>('GET', `/api/equipment/${equipment.id}/status`));
+  };
   useEffect(() => {
     void load();
     void api<LogbookTypeInfo[]>('GET', '/api/logbook-types').then(setTypes);
@@ -95,6 +103,15 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
       <p className="muted">
         {equipment.location} {equipment.sterile && '· Sterile'} {equipment.classified && '· Classified room'} {equipment.cleanHoldHours && `· Clean-hold ${equipment.cleanHoldHours} h`}
       </p>
+      {status && (
+        <div className={`statusbar ${status.blockers.length ? 'blocked' : 'fit'}`}>
+          <StatusChip status={status} />
+          {status.inUse && <span>Batch {status.inUse.batch} {status.inUse.stage && `· ${status.inUse.stage}`} since {plantTime(status.inUse.since)}</span>}
+          {status.cleanUntil && !status.blockers.length && <span>Clean until {plantTime(status.cleanUntil)}</span>}
+          {status.calibrationDue && <span>Calibration due {status.calibrationDue.slice(0, 10)}</span>}
+          {[...status.blockers, ...status.warnings].map((b) => <span key={b} className="reason">{b}</span>)}
+        </div>
+      )}
       <div className="row">
         {available.map((k) => <button key={k} className="primary" onClick={() => setForm({ type: k })}>+ {TYPE_LABEL[k]}</button>)}
         {available.length === 0 && <p className="muted">No logbook types are switched on for this item yet.</p>}
@@ -130,6 +147,10 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
               <td className="actions-cell">
                 {e.inProgress && <button onClick={() => endUse(e)}>End use</button>}
                 {e.awaitingVerification && isVerifier && !e.inProgress && <button onClick={() => setVerifying(e)}>Verify</button>}
+                {e.logbookType === 'maintenance' && e.data.kind === 'breakdown' && me.roles.includes('qa') &&
+                  e.signatures.some((g) => g.meaning === 'verified') && !e.signatures.some((g) => g.meaning === 'released') && (
+                    <button onClick={() => setReleasing(e)}>Release to service</button>
+                  )}
                 {!me.roles.includes('admin') && !e.inProgress && <button onClick={() => setForm({ type: e.logbookType, correcting: e })}>Correct</button>}
                 {e.version > 1 && <button onClick={async () => setHistory(await api<Entry[]>('GET', `/api/entries/${e.id}/versions`))}>History</button>}
               </td>
@@ -164,6 +185,20 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
           }}
         >
           <div className="summary-box"><Summary e={verifying} full /></div>
+        </SignDialog>
+      )}
+      {releasing && (
+        <SignDialog
+          meaning="released"
+          what={`Return ${equipment.code} to service after the breakdown of ${plantTime(releasing.activityStart)}`}
+          onCancel={() => setReleasing(null)}
+          onSign={async (c) => {
+            await api('POST', `/api/entries/${releasing.id}/release`, { ...c, contentHash: releasing.contentHash });
+            setReleasing(null);
+            await load();
+          }}
+        >
+          <div className="summary-box"><Summary e={releasing} full /></div>
         </SignDialog>
       )}
       {history && (
