@@ -24,3 +24,4 @@
 - Backups: one daily backup kept 1 year plus a restore script. No archive copy, because nothing is deleted from the live database.
 - Integrity check: a nightly query that recomputes hashes and logs its result.
 - Removed from the plan: template builder, line clearance, filter integrity, pressure scheduling, email, QR codes, label printing, multi-site, validation-pack generator.
+| D-13 | 2026-10-28 | Owner: do not ask for decisions; Claude takes the option it judges best, records it here and reports it in the next update email. Compliance-rule mismatches found in verification are still reported, not silently fixed. |
