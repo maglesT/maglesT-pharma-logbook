@@ -47,3 +47,7 @@ h2 { margin: 0; }
 .subtabs button.on { background: var(--brand); color: #fff; border-color: var(--brand); }
 .status { font-size: 0.85em; padding: 3px 8px; border-radius: 999px; background: var(--line); }
 .status.in-force { background: var(--ok); color: #fff; }
+.summary { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; max-height: 40vh; overflow: auto; }
+.summary dt { color: var(--muted); }
+.summary dd { margin: 0; }
+.summary ul { margin: 0; padding-left: 18px; }

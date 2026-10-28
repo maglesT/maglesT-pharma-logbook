@@ -1,15 +1,18 @@
-import { useState, type FormEvent } from 'react';
+import { useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError, MEANING_LABEL } from '../api.js';
 
 // LB-19/LB-20: every signing asks for both components and shows the meaning being signed.
 export function SignDialog({
   meaning,
   what,
+  children,
   onSign,
   onCancel,
 }: {
   meaning: string;
   what: string;
+  // The content being signed, shown in full so the signer sees what the signature covers.
+  children?: ReactNode;
   onSign: (credentials: { username: string; password: string }) => Promise<void>;
   onCancel: () => void;
 }) {
@@ -30,6 +33,8 @@ export function SignDialog({
           ? 'User ID or password is wrong. Repeated failures lock your account.'
           : err instanceof ApiError && err.code === 'not_allowed'
             ? 'Your role may not sign.'
+            : err instanceof ApiError && err.code === 'content_changed'
+              ? 'The content changed while this dialog was open. Close it and review the new content.'
             : (err as Error).message,
       );
       setBusy(false);
@@ -41,6 +46,7 @@ export function SignDialog({
       <form className="card dialog" onSubmit={submit}>
         <h2>Sign: {MEANING_LABEL[meaning] ?? meaning}</h2>
         <p>{what}</p>
+        {children}
         <p className="muted">
           Your electronic signature is the legally binding equivalent of your handwritten signature. It records your
           name, the date and time, and the meaning “{MEANING_LABEL[meaning] ?? meaning}”.

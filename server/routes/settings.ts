@@ -48,25 +48,32 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
   // All versions per type, with their approval signature (printed name, time, meaning: LB-19).
   app.get('/api/logbook-types', anyUser, async () => {
     const rows = await sql`
-      select s.id::int, s.logbook_type as "logbookType", s.version, s.settings, s.effective_from as "effectiveFrom",
-        s.created_at as "createdAt", u.full_name as "createdBy",
-        g.printed_name as "approvedBy", g.signed_at as "approvedAt"
+      select s.id::int, s.logbook_type, s.version, s.settings, s.effective_from, s.created_by::int, s.created_at,
+        u.full_name as created_by_name, g.printed_name as approved_by, g.signed_at as approved_at,
+        (g.id is not null and s.effective_from <= now()) as effective,
+        row_number() over (partition by s.logbook_type, (g.id is not null and s.effective_from <= now()) order by s.version desc) as rank
       from logbook_settings s
       join users u on u.id = s.created_by
       left join signatures g on g.object_type = 'settings' and g.object_id = s.id and g.meaning = 'approved'
       order by s.logbook_type, s.version desc`;
-    const now = Date.now();
-    return LOGBOOK_TYPES.map((t) => {
-      const versions = rows.filter((r) => r.logbookType === t.key);
-      const inForce = versions.find((v) => v.approvedAt && new Date(v.effectiveFrom).getTime() <= now);
-      return {
-        ...t,
-        versions: versions.map((v) => ({
-          ...v,
-          status: !v.approvedAt ? 'draft' : v.id === inForce?.id ? 'in force' : new Date(v.effectiveFrom).getTime() > now ? 'approved, not yet effective' : 'superseded',
+    return LOGBOOK_TYPES.map((t) => ({
+      ...t,
+      versions: rows
+        .filter((r) => r.logbook_type === t.key)
+        .map((r) => ({
+          id: r.id,
+          version: r.version,
+          settings: r.settings,
+          effectiveFrom: r.effective_from,
+          createdAt: r.created_at,
+          createdBy: r.created_by_name,
+          approvedBy: r.approved_by,
+          approvedAt: r.approved_at,
+          // Database time decides what is in force (review finding S2-3).
+          status: !r.approved_at ? 'draft' : !r.effective ? 'approved, not yet effective' : Number(r.rank) === 1 ? 'in force' : 'superseded',
+          contentHash: contentHash('settings', r.id, signedContent(r as unknown as SettingsRow)),
         })),
-      };
-    });
+    }));
   });
 
   // Admin drafts a new settings version (FRS §2); QA approves it.
@@ -127,20 +134,26 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
           select id::int, logbook_type, version, settings, effective_from, created_by::int, created_at
           from logbook_settings where id = ${id} for update`;
         if (!row) return null;
-        // An effective date already past at approval becomes the approval time: a version never
-        // takes effect before it was approved.
-        if (row.effective_from.getTime() < Date.now()) {
-          const [r] = await tx<{ effective_from: Date }[]>`
-            update logbook_settings set effective_from = now() where id = ${id} returning effective_from`;
-          row.effective_from = r!.effective_from;
-        }
-        return sign(tx, { signer, objectType: 'settings', objectId: id, meaning: 'approved', content: signedContent(row) });
+        const [signed] = await tx`select 1 from signatures where object_type = 'settings' and object_id = ${id} and meaning = 'approved'`;
+        if (signed) throw new SignError('already_signed');
+        // The signer saw this exact content (draft as displayed).
+        const shown = contentHash('settings', id, signedContent(row));
+        if (shown !== body.data.contentHash) throw new SignError('content_changed');
+        // An effective date already past at approval becomes the approval time (database clock):
+        // a version never takes effect before it was approved.
+        const [r] = await tx<{ effective_from: Date }[]>`
+          update logbook_settings set effective_from = greatest(effective_from, now()) where id = ${id}
+          returning effective_from`;
+        row.effective_from = r!.effective_from;
+        const content = signedContent(row);
+        return sign(tx, { signer, objectType: 'settings', objectId: id, meaning: 'approved', content,
+          shownHash: contentHash('settings', id, content) });
       });
       if (!result) return reply.code(404).send({ error: 'not_found' });
       return { ok: true, signedAt: result.signedAt };
     } catch (e) {
       if (e instanceof SignError) {
-        const status = e.code === 'wrong_credentials' ? 401 : e.code === 'already_signed' ? 409 : 403;
+        const status = e.code === 'wrong_credentials' ? 401 : e.code === 'already_signed' || e.code === 'content_changed' ? 409 : 403;
         return reply.code(status).send({ error: e.code });
       }
       throw e;

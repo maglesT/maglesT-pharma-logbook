@@ -3,7 +3,9 @@ import { z } from 'zod';
 // Built-in logbook types (D-07). Each type's entry form and status effect arrive in S3/S4;
 // here: identity, which equipment kinds it applies to, and what a site may configure.
 
-const limit = z.object({ min: z.number().optional(), max: z.number().optional(), unit: z.string().max(20).default('') });
+const limit = z
+  .object({ min: z.number().finite().optional(), max: z.number().finite().optional(), unit: z.string().max(20).default('') })
+  .refine((l) => l.min === undefined || l.max === undefined || l.min <= l.max, 'min must not exceed max');
 
 export const settingsSchema = z.object({
   enabled: z.boolean(),
@@ -20,10 +22,11 @@ export const settingsSchema = z.object({
         name: z.string().trim().min(1).max(80),
         critical: z.literal(false),
         ccsRef: z.string().trim().min(1).max(100),
-        min: z.number(),
-        max: z.number(),
+        min: z.number().finite(),
+        max: z.number().finite(),
         unit: z.string().max(10).default('Pa'),
-      }),
+      })
+      .refine((p) => p.min <= p.max, 'min must not exceed max'),
     )
     .max(100)
     .default([]),

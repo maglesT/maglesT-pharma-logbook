@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, plantTime, type LogbookTypeInfo, type Me, type Settings, type SettingsVersion } from '../api.js';
+import { api, localInputValue, plantTime, type LogbookTypeInfo, type Me, type Settings, type SettingsVersion } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 
 const blank: Settings = { enabled: true, sopRef: '', checklist: [], verificationRequired: false, limits: {}, pressurePoints: [] };
@@ -11,7 +11,14 @@ const textToPoints = (text: string) =>
     .split('\n')
     .map((l) => l.split(';').map((x) => x.trim()))
     .filter((p) => p[0])
-    .map(([name, ccsRef, min, max]) => ({ name: name!, ccsRef: ccsRef ?? '', min: Number(min), max: Number(max), critical: false as const, unit: 'Pa' }));
+    .map(([name, ccsRef, min, max]) => ({
+      name: name!,
+      ccsRef: ccsRef ?? '',
+      min: min ? Number(min) : NaN,
+      max: max ? Number(max) : NaN,
+      critical: false as const,
+      unit: 'Pa',
+    }));
 
 export function LogbookSettings({ me }: { me: Me }) {
   const isAdmin = me.roles.includes('admin');
@@ -75,11 +82,13 @@ export function LogbookSettings({ me }: { me: Me }) {
           what={`${approving.type.label}, settings version ${approving.version.version}`}
           onCancel={() => setApproving(null)}
           onSign={async (credentials) => {
-            await api('POST', `/api/settings/${approving.version.id}/approve`, credentials);
+            await api('POST', `/api/settings/${approving.version.id}/approve`, { ...credentials, contentHash: approving.version.contentHash });
             setApproving(null);
             await load();
           }}
-        />
+        >
+          <SettingsSummary v={approving.version} />
+        </SignDialog>
       )}
     </>
   );
@@ -90,15 +99,21 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
   const [s, setS] = useState<Settings>(start?.settings ?? blank);
   const [checklist, setChecklist] = useState(s.checklist.join('\n'));
   const [points, setPoints] = useState(pointsToText(s));
-  const [effective, setEffective] = useState(new Date().toISOString().slice(0, 16));
+  // Editing a draft keeps its planned date; a new version starts at now (local time).
+  const draft = type.versions.find((v) => v.id === draftId);
+  const [effective, setEffective] = useState(localInputValue(draft?.effectiveFrom ?? new Date()));
   const [error, setError] = useState('');
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
+    const pressurePoints = type.key === 'pressure_reading' ? textToPoints(points) : [];
+    if (pressurePoints.some((p) => !p.ccsRef || !Number.isFinite(p.min) || !Number.isFinite(p.max) || p.min > p.max)) {
+      return setError('Each pressure point needs: name; CCS reference; min; max (min not above max).');
+    }
     const settings = {
       ...s,
       checklist: checklist.split('\n').map((l) => l.trim()).filter(Boolean),
-      pressurePoints: type.key === 'pressure_reading' ? textToPoints(points) : [],
+      pressurePoints,
     };
     const effectiveFrom = new Date(effective).toISOString();
     try {
@@ -139,5 +154,21 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
         </div>
       </form>
     </div>
+  );
+}
+
+function SettingsSummary({ v }: { v: SettingsVersion }) {
+  const s = v.settings;
+  return (
+    <dl className="summary">
+      <dt>Switched on</dt><dd>{s.enabled ? 'Yes' : 'No'}</dd>
+      <dt>SOP</dt><dd>{s.sopRef || '—'}</dd>
+      <dt>Effective from</dt><dd>{plantTime(v.effectiveFrom)} (or the approval time, if later)</dd>
+      <dt>Second-person verification</dt><dd>{s.verificationRequired ? 'Required' : 'As the rules require'}</dd>
+      {s.checklist.length > 0 && (<><dt>Checklist</dt><dd><ul>{s.checklist.map((c) => <li key={c}>{c}</li>)}</ul></dd></>)}
+      {s.pressurePoints.length > 0 && (
+        <><dt>Pressure points</dt><dd><ul>{s.pressurePoints.map((p) => <li key={p.name}>{p.name}: {p.min}–{p.max} {p.unit} ({p.ccsRef})</li>)}</ul></dd></>
+      )}
+    </dl>
   );
 }

@@ -103,6 +103,8 @@ export interface SettingsVersion {
   approvedBy: string | null;
   approvedAt: string | null;
   status: string;
+  // Hash of exactly this content; sent back when signing (LB-19).
+  contentHash: string;
 }
 
 export interface LogbookTypeInfo {
@@ -121,3 +123,9 @@ export const MEANING_LABEL: Record<string, string> = {
   approved: 'Approved',
   corrected: 'Corrected',
 };
+
+// Value for a datetime-local input, in the browser's local time.
+export function localInputValue(iso: string | Date = new Date()): string {
+  const d = new Date(iso);
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}

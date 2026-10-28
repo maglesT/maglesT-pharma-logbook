@@ -35,6 +35,9 @@ const productUpdate = z.object({
 });
 
 
+// A concurrent insert of the same code (any case) hits the unique index: report it as taken.
+const uniqueViolation = (e: unknown) => (e as { code?: string })?.code === '23505';
+
 export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
   const anyUser = { preHandler: requireRole() };
   const admin = { preHandler: requireRole('admin') };
@@ -48,8 +51,8 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
     const { name, code, reason } = body.data;
     await sql.begin(async (tx) => {
       const [before] = await tx`select name, code from site where id = 1 for update`;
-      if (before) await tx`update site set name = ${name}, code = ${code} where id = 1`;
-      else await tx`insert into site (id, name, code) values (1, ${name}, ${code})`;
+      await tx`insert into site (id, name, code) values (1, ${name}, ${code})
+               on conflict (id) do update set name = excluded.name, code = excluded.code`;
       await audit(tx, { actorId: req.user!.id, action: before ? 'site.updated' : 'site.created', objectType: 'site', objectId: 1,
         old: before ?? undefined, new: { name, code }, reason });
     });
@@ -72,6 +75,9 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
         returning ${cols()}`;
       await audit(tx, { actorId: req.user!.id, action: 'equipment.created', objectType: 'equipment', objectId: row!.id, new: row });
       return row;
+    }).catch((err) => {
+      if (uniqueViolation(err)) return null;
+      throw err;
     });
     if (!created) return reply.code(409).send({ error: 'code_taken' });
     return reply.code(201).send(created);
@@ -109,6 +115,9 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
                              returning id::int, code, name, active`;
       await audit(tx, { actorId: req.user!.id, action: 'product.created', objectType: 'product', objectId: row!.id, new: row });
       return row;
+    }).catch((err) => {
+      if (uniqueViolation(err)) return null;
+      throw err;
     });
     if (!created) return reply.code(409).send({ error: 'code_taken' });
     return reply.code(201).send(created);
