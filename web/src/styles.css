@@ -51,3 +51,18 @@ h2 { margin: 0; }
 .summary dt { color: var(--muted); }
 .summary dd { margin: 0; }
 .summary ul { margin: 0; padding-left: 18px; }
+.wide { max-width: 720px; max-height: 92vh; overflow: auto; }
+.row { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.search { width: 100%; max-width: 480px; margin-bottom: 12px; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.tile { display: grid; gap: 4px; text-align: left; padding: 14px; }
+.chip-warn { background: #b26a00; }
+tr.pending { background: #fff8ec; }
+tr.clickable { cursor: pointer; }
+.actions-cell { display: flex; flex-wrap: wrap; gap: 6px; }
+.link.dark { color: var(--brand); padding-left: 0; }
+.checklist { border: 1px solid var(--line); border-radius: 6px; display: grid; gap: 6px; }
+.signbox { border: 2px solid var(--brand); border-radius: 8px; padding: 12px; display: grid; gap: 8px; }
+.signbox p { margin: 0; }
+.summary-box { background: var(--bg); padding: 10px; border-radius: 6px; }
+.version { border-bottom: 1px solid var(--line); padding: 8px 0; }

@@ -5,12 +5,14 @@ import { Home } from './pages/Home.js';
 import { Users } from './pages/Users.js';
 import { MasterData } from './pages/MasterData.js';
 import { LogbookSettings } from './pages/LogbookSettings.js';
+import { EquipmentPage } from './pages/EquipmentPage.js';
 
-type Page = 'home' | 'users' | 'password' | 'masterdata' | 'settings';
+type Page = 'home' | 'users' | 'password' | 'masterdata' | 'settings' | 'equipment';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
   const [page, setPage] = useState<Page>('home');
+  const [openId, setOpenId] = useState<number | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     try {
@@ -40,6 +42,7 @@ export function App() {
         <strong>Pharma Logbook</strong>
         <nav>
           <button className={page === 'home' ? 'tab on' : 'tab'} onClick={() => setPage('home')}>Home</button>
+          <button className={page === 'equipment' ? 'tab on' : 'tab'} onClick={() => { setOpenId(undefined); setPage('equipment'); }}>Logbooks</button>
           <button className={page === 'masterdata' ? 'tab on' : 'tab'} onClick={() => setPage('masterdata')}>Master data</button>
           {(me.roles.includes('admin') || me.roles.includes('qa')) && (
             <button className={page === 'settings' ? 'tab on' : 'tab'} onClick={() => setPage('settings')}>Logbook settings</button>
@@ -55,7 +58,8 @@ export function App() {
         </span>
       </header>
       <main className="page">
-        {page === 'home' && <Home me={me} />}
+        {page === 'home' && <Home me={me} onOpen={(id) => { setOpenId(id); setPage('equipment'); }} />}
+        {page === 'equipment' && <EquipmentPage me={me} openId={openId} />}
         {page === 'users' && <Users me={me} />}
         {page === 'masterdata' && <MasterData me={me} />}
         {page === 'settings' && <LogbookSettings me={me} />}

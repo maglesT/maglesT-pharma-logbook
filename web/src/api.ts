@@ -3,6 +3,8 @@ export class ApiError extends Error {
     public status: number,
     public code: string,
     message?: string,
+    // Validation problems listed by the server, shown to the user.
+    public problems: string[] = [],
   ) {
     super(message ?? code);
   }
@@ -20,7 +22,7 @@ export async function api<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT', url: stri
     credentials: 'same-origin',
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, data.error ?? 'error', data.message);
+  if (!res.ok) throw new ApiError(res.status, data.error ?? 'error', data.message, data.problems ?? []);
   return data as T;
 }
 
@@ -129,3 +131,49 @@ export function localInputValue(iso: string | Date = new Date()): string {
   const d = new Date(iso);
   return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }
+
+export interface EntrySignature {
+  printedName: string;
+  meaning: string;
+  signedAt: string;
+  valid: boolean;
+}
+
+export interface Entry {
+  id: number;
+  entryId: number;
+  version: number;
+  change: 'created' | 'completed' | 'corrected';
+  equipmentId: number;
+  logbookType: string;
+  activityStart: string;
+  activityEnd: string | null;
+  productId: number | null;
+  batch: string | null;
+  data: Record<string, unknown>;
+  late: boolean;
+  lateReason: string | null;
+  correctionReason: string | null;
+  enteredBy: string;
+  enteredAt: string;
+  contentHash: string;
+  signatures: EntrySignature[];
+  awaitingVerification?: boolean;
+  inProgress?: boolean;
+}
+
+export const TYPE_LABEL: Record<string, string> = {
+  equipment_use: 'Equipment use',
+  equipment_cleaning: 'Equipment cleaning',
+  maintenance: 'Maintenance / breakdown',
+  calibration: 'Calibration / check',
+  area_cleaning: 'Area cleaning',
+  general_log: 'General equipment log',
+  steriliser_cycle: 'Sterilisation cycle',
+  steriliser_test: 'Steriliser test',
+  glove_integrity: 'Glove integrity',
+  pressure_reading: 'Pressure reading',
+};
+
+// Mirrors the server (D-16): these types are signed by the performer.
+export const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test']);
