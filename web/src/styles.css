@@ -1,0 +1,13 @@
+:root {
+  --bg: #f7f8fa;
+  --fg: #1d2330;
+  --ok: #1f7a3d;
+  --bad: #b3261e;
+  font-family: system-ui, sans-serif;
+  font-size: 18px; /* large targets for gloved use on tablets */
+}
+body { margin: 0; background: var(--bg); color: var(--fg); }
+.page { max-width: 960px; margin: 0 auto; padding: 16px; }
+.chip { display: inline-block; padding: 6px 12px; border-radius: 999px; color: #fff; }
+.chip-ok { background: var(--ok); }
+.chip-bad { background: var(--bad); }
