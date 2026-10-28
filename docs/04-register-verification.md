@@ -74,3 +74,27 @@ each is listed below with how draft 2 handles it. **Please confirm or object.**
 - Schedule M sterile-products provisions not yet mapped clause by clause.
 - A second independent pass over draft 2 is planned after owner feedback, limited to the
   rows that changed.
+
+## 4. Schedule M numbering and section 20 (amendment, 2026-10-28)
+The lead session checked the † numbers against the official gazette. Source:
+G.S.R. 922(E), CDSCO copy, sha256 9187…d271, Part I extracted with `pdftotext -layout`.
+I re-read every clause below in that text myself.
+
+| Register row | Was | Now | Note |
+|--------------|-----|-----|------|
+| LB-01 | 17.3.10.17† | 17.3.10.17 | Number confirmed. |
+| LB-02 | 17.3.10.16 | 17.3.10.16 | Number confirmed. |
+| LB-04 | 17.2.8† | **17.2.7** | Number was wrong. |
+| LB-17 | 17.2.7† | **17.2.6** | Number was wrong. |
+| LB-11, LB-18, LB-21, LB-23 | "17.2 EDP para"† | **17.2.8** (+ 20.4 / 20.6 / 20.9) | Number now known. |
+| LB-23 | 17.2.8† | **17.2.7** for the retention period | Number was wrong. |
+| LB-24 | "17.2"† | **17.2.2, 17.2.4** | Number now known. |
+| CP-01 | "Part I 5 / 17.2 EDP"† | **20.1–20.3** | Number now known. |
+| CP-04 | 17.3.10.18† | 17.3.10.18, + 20.5 | Number confirmed. |
+
+**New: Part I section 20 (computerised systems), binding.** Minimum-compliance test applied:
+- **20.4, omissions in data → new LB-26.** Each save is all-or-nothing and confirmed. Open items are listed (a use not ended, entries awaiting verification, missed readings). Outages are covered by CP-08.
+- **20.6, additional check on critical manual data "by a second operator or by the system itself" → LB-11 made less strict.** A system check (type, limits, consistency) is enough. A *Verified* signature is needed only where no meaningful system check exists, or where another clause already requires one (211.182 cleaning/maintenance; A1 8.45 cycles). **This changes approved D-01**: critical fields no longer always need a second person.
+- **20.7, incidents → CP-07.** Handled in the site's quality system. No incident module in the product.
+- **20.8, change records → CP-07.** Release notes, plus an audit row when the software version changes.
+- **20.9, backup → LB-23.** **20.5 → CP-04.** **20.10 → CP-08.** **20.1–20.3 → CP-01.**
