@@ -1,5 +1,8 @@
 import type { Sql, Tx } from './db.js';
 
+// Plant time zone: calibration due dates are plant-local dates (D-19).
+export const PLANT_TZ = process.env.DISPLAY_TZ ?? 'Asia/Kolkata';
+
 // Equipment and area status (LB-05–08), computed from the latest entry versions. Nothing is stored:
 // the log is the single source of truth.
 
@@ -13,8 +16,10 @@ export interface EquipmentStatus {
   blockers: string[];
   warnings: string[];
   inUse: { entryId: number; productId: number | null; batch: string | null; stage: string; since: Date } | null;
+  lastUseEnd: Date | null;
   cleanUntil: Date | null;
-  calibrationDue: Date | null;
+  // Plant-local date (YYYY-MM-DD).
+  calibrationDue: string | null;
 }
 
 interface Facts {
@@ -32,22 +37,30 @@ interface Facts {
   last_clean_end: Date | null;
   unverified_cleanings: number;
   open_breakdowns: number;
-  calibration_result: string | null;
-  calibration_due: string | null;
+  calibrations_enabled: boolean;
+  // Newest calibration (latest version), verified or not.
+  cal_result: string | null;
+  cal_due: string | null;
+  cal_verified: boolean;
+  // Newest verified calibration.
+  vcal_result: string | null;
+  vcal_due: string | null;
+  today: string;
   now: Date;
 }
 
 const DUE_SOON_DAYS = 7;
 
-// One query for any number of items: the facts status is derived from.
+// One query for any number of items: the facts status is derived from. The entry scan is limited
+// to the requested items (review S4-4).
 async function facts(q: Sql | Tx, ids: number[] | null): Promise<Facts[]> {
+  const scope = ids === null ? q`true` : q`e.equipment_id = any(${ids}::bigint[])`;
   return q<Facts[]>`
     with latest as (
-      select e.* from entries e where not exists (select 1 from entries x where x.supersedes = e.id)
-    ),
-    verified as (
-      select l.* from latest l
-      where exists (select 1 from signatures g where g.object_type = 'entry' and g.object_id = l.id and g.meaning = 'verified')
+      select e.*,
+        exists (select 1 from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'verified') as verified
+      from entries e
+      where ${scope} and not exists (select 1 from entries x where x.supersedes = e.id)
     ),
     enabled as (
       select distinct on (s.logbook_type) s.logbook_type, (s.settings->>'enabled')::boolean as on
@@ -55,30 +68,42 @@ async function facts(q: Sql | Tx, ids: number[] | null): Promise<Facts[]> {
       join signatures g on g.object_type = 'settings' and g.object_id = s.id and g.meaning = 'approved'
       where s.effective_from <= now()
       order by s.logbook_type, s.version desc
+    ),
+    uses as (
+      select equipment_id, max(activity_end) as last_use_end from latest where logbook_type = 'equipment_use' group by equipment_id
     )
     select q.id::int, q.kind, q.clean_hold_hours, q.needs_calibration,
       coalesce((select en.on from enabled en
                 where en.logbook_type = case when q.kind = 'area' then 'area_cleaning' else 'equipment_cleaning' end), false) as tracks_cleaning,
+      coalesce((select en.on from enabled en where en.logbook_type = 'calibration'), false) as calibrations_enabled,
       u.id::int as open_use_id, u.product_id::int as open_use_product, u.batch as open_use_batch,
       u.data->>'stage' as open_use_stage, u.activity_start as open_use_since,
-      (select max(l.activity_end) from latest l where l.equipment_id = q.id and l.logbook_type = 'equipment_use') as last_use_end,
-      (select max(v.activity_end) from verified v where v.equipment_id = q.id
-         and v.logbook_type in ('equipment_cleaning', 'area_cleaning')) as last_clean_end,
-      (select count(*)::int from latest l where l.equipment_id = q.id and l.logbook_type in ('equipment_cleaning', 'area_cleaning')
-         and not exists (select 1 from signatures g where g.object_type = 'entry' and g.object_id = l.id and g.meaning = 'verified')) as unverified_cleanings,
+      us.last_use_end,
+      -- A cleaning counts only if it started after the last use ended (review S4-3).
+      (select max(l.activity_end) from latest l where l.equipment_id = q.id and l.verified
+         and l.logbook_type in ('equipment_cleaning', 'area_cleaning')
+         and (us.last_use_end is null or l.activity_start >= us.last_use_end)) as last_clean_end,
+      (select count(*)::int from latest l where l.equipment_id = q.id and not l.verified
+         and l.logbook_type in ('equipment_cleaning', 'area_cleaning')) as unverified_cleanings,
       (select count(*)::int from latest l where l.equipment_id = q.id and l.logbook_type = 'maintenance' and l.data->>'kind' = 'breakdown'
          and not exists (select 1 from signatures g where g.object_type = 'entry' and g.object_id = l.id and g.meaning = 'released')) as open_breakdowns,
-      c.data->>'result' as calibration_result, c.data->>'nextDue' as calibration_due,
+      c.data->>'result' as cal_result, c.data->>'nextDue' as cal_due, coalesce(c.verified, false) as cal_verified,
+      vc.data->>'result' as vcal_result, vc.data->>'nextDue' as vcal_due,
+      to_char((now() at time zone ${PLANT_TZ})::date, 'YYYY-MM-DD') as today,
       now() as now
     from equipment q
+    left join uses us on us.equipment_id = q.id
     left join lateral (
       select l.* from latest l where l.equipment_id = q.id and l.logbook_type = 'equipment_use' and l.activity_end is null
       order by l.activity_start desc limit 1
     ) u on true
     left join lateral (
-      select v.* from verified v where v.equipment_id = q.id and v.logbook_type = 'calibration'
-      order by v.activity_start desc limit 1
+      select l.* from latest l where l.equipment_id = q.id and l.logbook_type = 'calibration' order by l.activity_start desc limit 1
     ) c on true
+    left join lateral (
+      select l.* from latest l where l.equipment_id = q.id and l.logbook_type = 'calibration' and l.verified
+      order by l.activity_start desc limit 1
+    ) vc on true
     where ${ids === null ? q`true` : q`q.id = any(${ids}::bigint[])`}`;
 }
 
@@ -90,23 +115,33 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   // LB-06 / SchM 18.4.3: defective equipment is withdrawn until released.
   if (f.open_breakdowns > 0) blockers.push('Out of service: a breakdown has not been released by QA.');
 
-  // LB-05: calibration status, for items that need calibration.
-  let calibrationDue: Date | null = null;
+  // LB-05: calibration status, for items that need calibration. The newest calibration decides:
+  // a failed result blocks at once, verified or not; a newer pass awaiting verification falls back
+  // to the previous verified one only if that passed and is in date (review S4-1/2).
+  let calibrationDue: string | null = null;
   let calState: StatusCode | null = null;
+  const dueOk = (due: string | null) => !due || due.slice(0, 10) >= f.today;
   if (f.needs_calibration) {
-    if (!f.calibration_result) {
-      blockers.push('Not calibrated: no verified calibration on record.');
+    if (!f.calibrations_enabled) {
+      blockers.push('Not calibrated: the calibration logbook is not switched on at this site.');
       calState = 'not_calibrated';
+    } else if (f.cal_result === 'fail') {
+      blockers.push('Calibration failed: do not use until a passed calibration is verified.');
+      calState = 'calibration_failed';
     } else {
-      calibrationDue = f.calibration_due ? new Date(f.calibration_due) : null;
-      if (f.calibration_result === 'fail') {
-        blockers.push('Calibration failed: do not use until a passed calibration is verified.');
-        calState = 'calibration_failed';
-      } else if (calibrationDue && calibrationDue.getTime() < now) {
-        blockers.push(`Calibration overdue since ${calibrationDue.toISOString().slice(0, 10)}.`);
-        calState = 'calibration_overdue';
-      } else if (calibrationDue && calibrationDue.getTime() < now + DUE_SOON_DAYS * 86_400_000) {
-        warnings.push(`Calibration due on ${calibrationDue.toISOString().slice(0, 10)}.`);
+      const usable = f.cal_verified ? { result: f.cal_result, due: f.cal_due } : f.vcal_result === 'pass' ? { result: 'pass', due: f.vcal_due } : null;
+      if (!f.cal_verified && f.cal_result) warnings.push('A newer calibration is awaiting verification.');
+      if (!usable) {
+        blockers.push(f.cal_result ? 'Not calibrated: the calibration is awaiting verification.' : 'Not calibrated: no verified calibration on record.');
+        calState = 'not_calibrated';
+      } else {
+        calibrationDue = usable.due ? usable.due.slice(0, 10) : null;
+        if (!dueOk(usable.due)) {
+          blockers.push(`Calibration overdue since ${calibrationDue}.`);
+          calState = 'calibration_overdue';
+        } else if (calibrationDue && Date.parse(calibrationDue) - Date.parse(f.today) < DUE_SOON_DAYS * 86_400_000) {
+          warnings.push(`Calibration due on ${calibrationDue}.`);
+        }
       }
     }
   }
@@ -145,6 +180,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     inUse: f.open_use_id
       ? { entryId: f.open_use_id, productId: f.open_use_product, batch: f.open_use_batch, stage: f.open_use_stage ?? '', since: f.open_use_since! }
       : null,
+    lastUseEnd: f.last_use_end,
     cleanUntil,
     calibrationDue,
   };

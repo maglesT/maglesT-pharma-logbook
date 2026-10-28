@@ -115,6 +115,15 @@ function timing(now: Date, times: (Date | null | undefined)[], lateReason: strin
   return late;
 }
 
+// A cleaning is recorded only when the item is not in use, and starts after the last use ended
+// (review S4-3/7).
+function cleaningFits(status: { inUse: unknown; lastUseEnd: Date | null }, start: Date) {
+  if (status.inUse) throw new EntryError(409, 'in_use', ['End the current use before recording a cleaning.']);
+  if (status.lastUseEnd && start < status.lastUseEnd) {
+    throw new EntryError(400, 'check_failed', ['A cleaning cannot start before the last use ended.']);
+  }
+}
+
 async function dbNow(tx: Tx): Promise<Date> {
   const [r] = await tx<{ now: Date }[]>`select now() as now`;
   return r!.now;
@@ -200,9 +209,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         // The equipment row is locked, so the status cannot change before this entry commits.
         const status = (await statusOf(tx, equipmentId))!;
         if (isUse && status.blockers.length) throw new EntryError(409, 'not_fit_for_use', status.blockers);
-        if ((b.logbookType === 'equipment_cleaning' || b.logbookType === 'area_cleaning') && status.inUse) {
-          throw new EntryError(409, 'in_use', ['End the current use before recording a cleaning.']);
-        }
+        if (b.logbookType === 'equipment_cleaning' || b.logbookType === 'area_cleaning') cleaningFits(status, b.activityStart);
         if (isUse && (!b.productId || !b.batch)) throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
         if (isUse && b.activityEnd) throw new EntryError(400, 'check_failed', ['Record the end of use when it happens.']);
         const end = isUse ? null : (b.activityEnd ?? b.activityStart);
@@ -276,6 +283,9 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         }
         const eq = await loadEquipment(tx, prev.equipment_id);
         const [s] = await tx<{ settings: LogbookSettings }[]>`select settings from logbook_settings where id = ${prev.settings_id}`;
+        if (prev.logbook_type === 'equipment_cleaning' || prev.logbook_type === 'area_cleaning') {
+          cleaningFits((await statusOf(tx, prev.equipment_id))!, b.activityStart);
+        }
         // A correction keeps an open use open and a finished activity finished (review S3-2).
         if (prev.activity_end === null && b.activityEnd) throw new EntryError(400, 'check_failed', ['End the use with "End use", not by a correction.']);
         if (prev.activity_end !== null && b.activityEnd === null) throw new EntryError(400, 'check_failed', ['A finished activity cannot be reopened.']);

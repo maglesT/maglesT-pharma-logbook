@@ -68,6 +68,8 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
     const body = equipmentCreate.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'invalid_request', issues: body.error.issues });
     const e = body.data;
+    // Areas cannot be calibrated (review S4-6).
+    if (e.kind === 'area' && e.needsCalibration) return reply.code(400).send({ error: 'invalid_request', message: 'Areas cannot need calibration.' });
     const created = await sql.begin(async (tx) => {
       // Equipment IDs are never reused, including those of retired items.
       const [taken] = await tx`select 1 from equipment where lower(code) = lower(${e.code})`;
@@ -96,6 +98,7 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
       const [before] = await tx`select ${cols()} from equipment where id = ${id} for update`;
       if (!before) return null;
       const next = { ...before, ...Object.fromEntries(Object.entries(changes).filter(([, v]) => v !== undefined)) };
+      if (next.kind === 'area' && next.needsCalibration) return 'area_calibration' as const;
       const [after] = await tx`
         update equipment set name = ${next.name}, location = ${next.location}, sterile = ${next.sterile},
           classified = ${next.classified}, clean_hold_hours = ${next.cleanHoldHours},
@@ -105,6 +108,7 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
       return after;
     });
     if (!updated) return reply.code(404).send({ error: 'not_found' });
+    if (updated === 'area_calibration') return reply.code(400).send({ error: 'invalid_request', message: 'Areas cannot need calibration.' });
     return updated;
   });
 

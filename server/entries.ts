@@ -23,7 +23,8 @@ export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
   calibration: z.object({
     result: z.enum(['pass', 'fail']),
     certificateRef: z.string().trim().max(100).default(''),
-    nextDue: z.coerce.date(),
+    // Plant-local date YYYY-MM-DD (D-19).
+    nextDue: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
     remarks: z.string().trim().max(1000).default(''),
     ...outOfLimit,
   }),
@@ -85,7 +86,8 @@ export function checkData(
     problems.push('A breakdown of sterile equipment needs an impact assessment (Annex 1 5.7).');
   }
   if (type === 'calibration') {
-    if ((data.nextDue as Date).getTime() <= activityStart.getTime()) problems.push('The next due date must be after the calibration date.');
+    const calibrationDay = activityStart.toLocaleDateString('en-CA', { timeZone: process.env.DISPLAY_TZ ?? 'Asia/Kolkata' });
+    if (String(data.nextDue) <= calibrationDay) problems.push('The next due date must be after the calibration date.');
     if (data.result === 'fail' && (!String(data.comment ?? '').trim() || !String(data.deviationRef ?? '').trim())) {
       problems.push('A failed calibration needs a comment and a deviation reference.');
     }

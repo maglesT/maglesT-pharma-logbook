@@ -155,7 +155,7 @@ describe('calibration status (LB-05)', () => {
   it('LB-05: an overdue calibration blocks use; one due soon only warns', async () => {
     const id = await newItem({ kind: 'instrument' });
     await cleanAndVerify(id);
-    const soon = new Date(Date.now() + 3 * 86_400_000).toISOString();
+    const soon = new Date(Date.now() + 3 * 86_400_000).toISOString().slice(0, 10);
     const cal = (await calibrate(id, 'pass', soon)).json().id;
     await signEntry('qa', 'verify', cal);
     const s = await status(id);
@@ -179,5 +179,88 @@ describe('status list', () => {
     const res = await call(t.app, c.op1!, 'GET', '/api/equipment/status');
     expect(res.statusCode).toBe(200);
     expect(res.json().length).toBeGreaterThan(5);
+  });
+});
+
+describe('review fixes (S4)', () => {
+  const calibrate = (id: number, result: 'pass' | 'fail', nextDue: string) =>
+    entry('eng1', id, { logbookType: 'calibration', activityStart: now(), data: { result, nextDue, comment: 'x', deviationRef: 'DV-1' }, signature: sig('eng1') });
+
+  it('LB-05: a newly recorded failed calibration blocks at once, before verification', async () => {
+    const id = await newItem({ kind: 'instrument' });
+    await cleanAndVerify(id);
+    await signEntry('qa', 'verify', (await calibrate(id, 'pass', '2099-01-01')).json().id);
+    expect((await status(id)).state).toBe('clean');
+    await calibrate(id, 'fail', '2099-01-01');
+    expect((await status(id)).state).toBe('calibration_failed');
+  });
+
+  it('LB-05: correcting a failed calibration does not bring back an older pass', async () => {
+    const id = await newItem({ kind: 'instrument' });
+    await cleanAndVerify(id);
+    await signEntry('qa', 'verify', (await calibrate(id, 'pass', '2099-01-01')).json().id);
+    const failed = (await calibrate(id, 'fail', '2099-01-01')).json().id;
+    await signEntry('qa', 'verify', failed);
+    const v = (await call(t.app, c.qa!, 'GET', `/api/entries/${failed}/versions`)).json()[0];
+    await call(t.app, c.eng1!, 'POST', `/api/entries/${failed}/correct`, {
+      activityStart: v.activityStart, activityEnd: v.activityEnd, data: { ...v.data, remarks: 'typo fixed' }, reason: 'remarks', signature: sig('eng1'),
+    });
+    expect((await status(id)).state).toBe('calibration_failed');
+  });
+
+  it('LB-05: a newer pass awaiting verification keeps the older valid calibration in force, with a warning', async () => {
+    const id = await newItem({ kind: 'instrument' });
+    await cleanAndVerify(id);
+    await signEntry('qa', 'verify', (await calibrate(id, 'pass', '2099-01-01')).json().id);
+    await calibrate(id, 'pass', '2099-06-01');
+    const s = await status(id);
+    expect(s.state).toBe('clean');
+    expect(s.warnings).toContain('A newer calibration is awaiting verification.');
+  });
+
+  it('LB-05: an instrument is usable on its due day (plant-local date)', async () => {
+    const id = await newItem({ kind: 'instrument' });
+    await cleanAndVerify(id);
+    const cal = (await calibrate(id, 'pass', '2099-01-01')).json().id;
+    await signEntry('qa', 'verify', cal);
+    const [row] = await t.owner`select to_char((now() at time zone 'Asia/Kolkata')::date, 'YYYY-MM-DD') as today`;
+    const today = String(row!.today);
+    await t.owner`alter table entries disable trigger entries_version_chain`;
+    await t.owner`update entries set data = jsonb_set(data, '{nextDue}', to_jsonb(${today}::text)) where id = ${cal}`;
+    await t.owner`alter table entries enable trigger entries_version_chain`;
+    expect((await status(id)).state).toBe('clean');
+  });
+
+  it('LB-07: a cleaning that started before the last use ended is refused', async () => {
+    const id = await newItem();
+    await cleanAndVerify(id);
+    const use = (await startUse(id)).json().id;
+    const endedAt = new Date().toISOString();
+    await call(t.app, c.op1!, 'POST', `/api/entries/${use}/complete`, { activityEnd: endedAt });
+    const res = await entry('op1', id, { logbookType: 'equipment_cleaning', activityStart: new Date(Date.parse(endedAt) - 10 * 60_000).toISOString(), activityEnd: now(), data: { cleaningType: 'major', checklist: {} }, signature: sig('op1') });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().problems[0]).toMatch(/before the last use ended/);
+  });
+
+  it('LB-05: rooms cannot be set to need calibration', async () => {
+    const res = await call(t.app, c.admin!, 'POST', '/api/equipment', { code: `RM-${++n}`, name: 'Room', kind: 'area', needsCalibration: true });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('LB-06: correcting a released breakdown withdraws the release until re-verified and released (D-19)', async () => {
+    const id = await newItem();
+    await cleanAndVerify(id);
+    const bd = (await entry('eng1', id, { logbookType: 'maintenance', activityStart: now(), data: { kind: 'breakdown', description: 'Belt' }, signature: sig('eng1') })).json().id;
+    await signEntry('sup1', 'verify', bd);
+    await signEntry('qa', 'release', bd);
+    expect((await status(id)).state).toBe('clean');
+    const v = (await call(t.app, c.qa!, 'GET', `/api/entries/${bd}/versions`)).json()[0];
+    const corr = (await call(t.app, c.eng1!, 'POST', `/api/entries/${bd}/correct`, {
+      activityStart: v.activityStart, activityEnd: v.activityEnd, data: { ...v.data, description: 'Drive belt' }, reason: 'clarified', signature: sig('eng1'),
+    })).json().id;
+    expect((await status(id)).state).toBe('out_of_service');
+    await signEntry('sup1', 'verify', corr);
+    await signEntry('qa', 'release', corr);
+    expect((await status(id)).state).toBe('clean');
   });
 });

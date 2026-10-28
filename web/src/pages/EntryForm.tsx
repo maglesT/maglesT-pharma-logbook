@@ -72,7 +72,7 @@ export function EntryForm({
     setProblems([]);
     const body: Record<string, unknown> = {
       activityStart: new Date(start).toISOString(),
-      data: type === 'calibration' && data.nextDue ? { ...data, nextDue: new Date(String(data.nextDue)).toISOString() } : data,
+      data,
     };
     if (HAS_END.has(type) || (correcting && correcting.activityEnd)) body.activityEnd = new Date(end).toISOString();
     if (type === 'equipment_use') Object.assign(body, { productId: productId || undefined, batch: batch || undefined });
