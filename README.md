@@ -14,8 +14,9 @@ Needs Node 22 and PostgreSQL 16.
 
 ```sh
 npm install
-export DATABASE_URL=postgres://logbook_owner:dev@localhost:5432/logbook_dev
+export DATABASE_URL=postgres://logbook_owner:dev@localhost:5432/logbook_dev DB_APP_ROLE=logbook_app
 npm run migrate
+npm run create-admin -- admin "Site Admin"   # prints a temporary password
 npm run dev        # API on :3000
 npm run dev:web    # UI on :5173 (proxies /api)
 npm run ci         # typecheck, tests, build — run before pushing
@@ -28,6 +29,13 @@ each test file gets its own schema.
 ```sh
 DB_PASSWORD=... docker compose -f ops/docker-compose.yml up -d --build
 ```
+First time only, create the admin account (prints a temporary password):
+`docker compose -f ops/docker-compose.yml exec app node dist/db/create-admin.js admin "Site Admin"`
+
+**Database roles.** Migrations run as the database owner (`MIGRATION_DATABASE_URL`). The app runs as the
+restricted role `logbook_app`, which cannot update or delete entries, signatures or the audit trail (LB-18).
+Either give it its own login (`ALTER ROLE logbook_app LOGIN PASSWORD '...'`) and point `DATABASE_URL` at it,
+or, on a single box, let the owner login switch to it with `DB_APP_ROLE=logbook_app` (compose default).
 
 ## Conventions
 - One app: `server/` (Fastify), `web/` (React), `db/migrations/` (plain SQL), `test/`, `ops/`, `docs/`.
