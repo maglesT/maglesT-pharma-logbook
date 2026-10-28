@@ -1,6 +1,6 @@
 # Handover
 
-Updated: 2026-10-29, after slice S3.
+Updated: 2026-10-29, after slice S4.
 
 ## State
 - Planning deliverables (a)–(d) are approved: decisions D-01 to D-05 in `decisions.md`.
@@ -32,13 +32,19 @@ Updated: 2026-10-29, after slice S3.
 - **Late entries:** activity older than 30 min needs a reason; future times are refused (database clock).
 - **UI:** Logbooks (equipment tiles, then the log page with entry forms, verify, correct and history); Home lists open items.
 
-## Next: S4, status and blocking (LB-05–08)
-- Compute status from the latest entries:
-  - *In use* (open use), *Dirty* (use ended and no verified cleaning since), *Clean* or *Clean expired* (clean-hold);
-  - *Out of service* (maintenance of kind breakdown without *Released*), *Calibration due/failed* (latest calibration).
-- Block a new `equipment_use` while the status is not fit; return the reason.
-- Release after a breakdown: a *Released* signature by QA on the maintenance entry.
-- Home lists blocked equipment.
+## Done: S4, status and blocking (LB-05–08)
+- **`server/status.ts`:** one SQL query gathers the facts per item, and `deriveStatus()` turns them into a state, blockers and warnings (D-18).
+- **States:** in use, dirty, clean, clean expired, out of service, calibration failed, overdue or not calibrated.
+- **Blocking:** a use is refused while there are blockers; cleaning is refused while the item is in use.
+- **Release:** `POST /api/entries/:id/release` (QA, *Released* signature) on a verified breakdown.
+- **Equipment field:** `needs_calibration` (migration 0008).
+- **UI:** status chips on tiles, a status bar with the reasons on the logbook page, a Release button, and the "Not fit for use" list on Home.
+
+## Next: S5, review and exports (LB-22, LB-25)
+- **Period review:** QA *Reviewed* signature on a logbook period, as a settings-like object, or a new object type `review` in `signatures.object_type` (needs a migration to the check constraint). It shows open items and the audit trail for the period; a later correction in the period marks the review superseded.
+- **Audit-trail viewer:** filters by object, user and date.
+- **Batch view:** every entry referencing a batch, plus the audit rows for those entries.
+- **Exports:** one PDF layout (pdfmake) and one CSV, for a logbook period and for a batch view. Corrected entries are marked and all versions included.
 
 ## Notes
 - Official PDFs and extracted texts are in `sources/` (git-ignored). The gazette text of Schedule M Part I is in `maglesT/ebmr`, branch `docs/schedule-m-gazette`.

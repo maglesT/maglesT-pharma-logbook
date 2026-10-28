@@ -12,6 +12,8 @@ const equipmentFields = {
   sterile: z.boolean().default(false),
   classified: z.boolean().default(false),
   cleanHoldHours: z.number().int().positive().max(24 * 365).nullable().default(null),
+  // Defaults to true for instruments when not given.
+  needsCalibration: z.boolean().optional(),
 };
 const equipmentCreate = z.object({
   code: z.string().trim().regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,39}$/),
@@ -24,6 +26,7 @@ const equipmentUpdate = z.object({
   sterile: z.boolean().optional(),
   classified: z.boolean().optional(),
   cleanHoldHours: z.number().int().positive().max(24 * 365).nullable().optional(),
+  needsCalibration: z.boolean().optional(),
   active: z.boolean().optional(),
   reason: z.string().trim().min(1).max(500),
 });
@@ -41,7 +44,7 @@ const uniqueViolation = (e: unknown) => (e as { code?: string })?.code === '2350
 export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
   const anyUser = { preHandler: requireRole() };
   const admin = { preHandler: requireRole('admin') };
-  const cols = () => sql`id::int, code, name, kind, location, sterile, classified, clean_hold_hours as "cleanHoldHours", active`;
+  const cols = () => sql`id::int, code, name, kind, location, sterile, classified, clean_hold_hours as "cleanHoldHours", needs_calibration as "needsCalibration", active`;
 
   app.get('/api/site', anyUser, async () => (await sql`select name, code from site where id = 1`)[0] ?? null);
 
@@ -70,8 +73,9 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
       const [taken] = await tx`select 1 from equipment where lower(code) = lower(${e.code})`;
       if (taken) return null;
       const [row] = await tx`
-        insert into equipment (code, name, kind, location, sterile, classified, clean_hold_hours)
-        values (${e.code}, ${e.name}, ${e.kind}, ${e.location}, ${e.sterile}, ${e.classified}, ${e.cleanHoldHours})
+        insert into equipment (code, name, kind, location, sterile, classified, clean_hold_hours, needs_calibration)
+        values (${e.code}, ${e.name}, ${e.kind}, ${e.location}, ${e.sterile}, ${e.classified}, ${e.cleanHoldHours},
+                ${e.needsCalibration ?? e.kind === 'instrument'})
         returning ${cols()}`;
       await audit(tx, { actorId: req.user!.id, action: 'equipment.created', objectType: 'equipment', objectId: row!.id, new: row });
       return row;
@@ -94,7 +98,8 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
       const next = { ...before, ...Object.fromEntries(Object.entries(changes).filter(([, v]) => v !== undefined)) };
       const [after] = await tx`
         update equipment set name = ${next.name}, location = ${next.location}, sterile = ${next.sterile},
-          classified = ${next.classified}, clean_hold_hours = ${next.cleanHoldHours}, active = ${next.active}
+          classified = ${next.classified}, clean_hold_hours = ${next.cleanHoldHours},
+          needs_calibration = ${next.needsCalibration}, active = ${next.active}
         where id = ${id} returning ${cols()}`;
       await audit(tx, { actorId: req.user!.id, action: 'equipment.updated', objectType: 'equipment', objectId: id, old: before, new: after, reason });
       return after;

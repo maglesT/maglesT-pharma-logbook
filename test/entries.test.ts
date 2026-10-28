@@ -31,6 +31,18 @@ const verify = async (who: string, versionId: number) => {
   return call(t.app, cookies[who]!, 'POST', `/api/entries/${versionId}/verify`, { ...sig(who), contentHash: v.contentHash });
 };
 
+// A fresh item that has been cleaned and verified, so a use may start on it (S4 blocking).
+let readyCount = 0;
+async function ready(kind: 'equipment' | 'area' = 'equipment'): Promise<number> {
+  const id = (await call(t.app, cookies.admin!, 'POST', '/api/equipment', { code: `RDY-${++readyCount}`, name: 'Ready item', kind })).json().id as number;
+  const cleaning = kind === 'area'
+    ? { logbookType: 'area_cleaning', activityStart: now(), data: { cleaningType: 'daily' }, signature: sig('op2') }
+    : { logbookType: 'equipment_cleaning', activityStart: now(), data: { cleaningType: 'major', checklist: { 'Previous product removed': true } }, signature: sig('op2') };
+  const entry = (await create('op2', id, cleaning)).json().id;
+  expect((await verify('sup1', entry)).statusCode).toBe(200);
+  return id;
+}
+
 beforeAll(async () => {
   t = await freshApp();
   for (const [u, roles] of [['admin', ['admin']], ['qa1', ['qa']], ['op1', ['operator']], ['op2', ['operator']], ['sup1', ['supervisor']], ['eng1', ['engineering']]] as const) {
@@ -54,7 +66,7 @@ afterAll(() => t.close());
 
 describe('equipment use (LB-01, LB-10)', () => {
   it('LB-01: a use entry records product, batch and start/end with the logged-in user', async () => {
-    const res = await create('op1', mixer, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B2401', data: { stage: 'Granulation' } });
+    const res = await create('op1', await ready(), { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B2401', data: { stage: 'Granulation' } });
     expect(res.statusCode).toBe(201);
     const id = res.json().id;
     const done = await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/complete`, { activityEnd: now() });
@@ -66,12 +78,12 @@ describe('equipment use (LB-01, LB-10)', () => {
   });
 
   it('LB-01: product and batch are required for a use entry', async () => {
-    const res = await create('op1', mixer, { logbookType: 'equipment_use', activityStart: now(), data: {} });
+    const res = await create('op1', await ready(), { logbookType: 'equipment_use', activityStart: now(), data: {} });
     expect(res.statusCode).toBe(400);
   });
 
   it('LB-10: the end of use cannot be before its start', async () => {
-    const id = (await create('op1', mixer, { logbookType: 'equipment_use', activityStart: minutesAgo(10), productId: product, batch: 'B2402', data: {} })).json().id;
+    const id = (await create('op1', await ready(), { logbookType: 'equipment_use', activityStart: minutesAgo(10), productId: product, batch: 'B2402', data: {} })).json().id;
     const res = await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/complete`, { activityEnd: minutesAgo(20) });
     expect(res.statusCode).toBe(400);
     await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/complete`, { activityEnd: now() });
@@ -175,7 +187,7 @@ describe('signatures and verification (LB-03, LB-11)', () => {
 
 describe('corrections (LB-17)', () => {
   it('LB-17: a correction keeps the original visible, needs a reason and a Corrected e-signature', async () => {
-    const id = (await create('op1', mixer, { logbookType: 'equipment_use', activityStart: minutesAgo(5), productId: product, batch: 'B2405', data: { stage: 'Drying' } })).json().id;
+    const id = (await create('op1', await ready(), { logbookType: 'equipment_use', activityStart: minutesAgo(5), productId: product, batch: 'B2405', data: { stage: 'Drying' } })).json().id;
     const noReason = await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/correct`, { activityStart: minutesAgo(5), batch: 'B2406', data: { stage: 'Drying' }, signature: sig('op1') });
     expect(noReason.statusCode).toBe(400);
     const res = await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/correct`, { activityStart: minutesAgo(5), batch: 'B2406', data: { stage: 'Drying' }, reason: 'Wrong batch number typed', signature: sig('op1') });
@@ -203,7 +215,7 @@ describe('corrections (LB-17)', () => {
   });
 
   it('LB-17: other operators cannot correct someone else\'s entry', async () => {
-    const id = (await create('op1', mixer, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B2407', data: {} })).json().id;
+    const id = (await create('op1', await ready(), { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B2407', data: {} })).json().id;
     const res = await call(t.app, cookies.op2!, 'POST', `/api/entries/${id}/correct`, { activityStart: now(), data: {}, reason: 'x', signature: sig('op2') });
     expect(res.statusCode).toBe(403);
     await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/complete`, { activityEnd: now() });
@@ -223,7 +235,7 @@ describe('corrections (LB-17)', () => {
 
 describe('open items (LB-26)', () => {
   it('LB-26: unfinished uses and entries awaiting verification are listed', async () => {
-    const id = (await create('op2', room, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B9', data: {} })).json().id;
+    const id = (await create('op2', await ready('area'), { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B9', data: {} })).json().id;
     const open = (await call(t.app, cookies.qa!, 'GET', '/api/entries/open')).json();
     expect(open.some((e: { id: number; inProgress: boolean }) => e.id === id && e.inProgress)).toBe(true);
     expect(open.some((e: { awaitingVerification: boolean }) => e.awaitingVerification)).toBe(true);
@@ -244,7 +256,7 @@ describe('review fixes (S3)', () => {
   });
 
   it('LB-10: a correction cannot end an open use or reopen a finished activity', async () => {
-    const id = (await create('op1', mixer, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B3001', data: {} })).json().id;
+    const id = (await create('op1', await ready(), { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B3001', data: {} })).json().id;
     const close = await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/correct`, { activityStart: now(), activityEnd: now(), data: {}, reason: 'x', signature: sig('op1') });
     expect(close.statusCode).toBe(400);
     const ended = (await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/complete`, { activityEnd: now() })).json().id;
@@ -253,7 +265,7 @@ describe('review fixes (S3)', () => {
   });
 
   it('LB-21: QA cannot rewrite entries; a supervisor may correct entries of types they may record', async () => {
-    const id = (await create('op1', mixer, { logbookType: 'equipment_use', activityStart: minutesAgo(1), productId: product, batch: 'B3002', data: {} })).json().id;
+    const id = (await create('op1', await ready(), { logbookType: 'equipment_use', activityStart: minutesAgo(1), productId: product, batch: 'B3002', data: {} })).json().id;
     const ended = (await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/complete`, { activityEnd: now() })).json().id;
     const v = (await versions(ended))[1];
     const body = { activityStart: v.activityStart, activityEnd: v.activityEnd, batch: 'B3003', data: {}, reason: 'typo' };
@@ -262,15 +274,16 @@ describe('review fixes (S3)', () => {
   });
 
   it('LB-17: the database refuses a version that does not follow its predecessor', async () => {
-    const a = (await create('op1', mixer, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B3004', data: {} })).json().id;
+    const a = (await create('op1', await ready(), { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B3004', data: {} })).json().id;
     const [row] = await t.owner`select * from entries where id = ${a}`;
+    const other = row!.equipment_id === mixer ? room : mixer;
     await expect(t.sql`
       insert into entries (equipment_id, logbook_type, settings_id, entry_id, version, supersedes, change, activity_start, data, entered_by)
-      values (${room}, ${row!.logbook_type}, ${row!.settings_id}, ${row!.entry_id}, 2, ${a}, 'completed', now(), '{}', ${row!.entered_by})`,
+      values (${other}, ${row!.logbook_type}, ${row!.settings_id}, ${row!.entry_id}, 2, ${a}, 'completed', now(), '{}', ${row!.entered_by})`,
     ).rejects.toThrow(/does not follow/);
     await expect(t.sql`
       insert into entries (equipment_id, logbook_type, settings_id, entry_id, version, supersedes, change, activity_start, data, entered_by)
-      values (${mixer}, ${row!.logbook_type}, ${row!.settings_id}, ${row!.entry_id}, 5, ${a}, 'completed', now(), '{}', ${row!.entered_by})`,
+      values (${row!.equipment_id}, ${row!.logbook_type}, ${row!.settings_id}, ${row!.entry_id}, 5, ${a}, 'completed', now(), '{}', ${row!.entered_by})`,
     ).rejects.toThrow(/does not follow/);
     await call(t.app, cookies.op1!, 'POST', `/api/entries/${a}/complete`, { activityEnd: now() });
   });

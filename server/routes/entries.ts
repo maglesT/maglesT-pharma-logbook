@@ -7,6 +7,7 @@ import { LOGBOOK_TYPES, typeByKey, type LogbookSettings } from '../logbook-types
 import { DATA_SCHEMAS, VERIFIERS, checkData, mayRecord, performerSigns, verificationNeeded, type EquipmentInfo } from '../entries.js';
 import { SignError, authenticateSigner, contentHash, sign, signBody, type SignInput } from '../signatures.js';
 import { settingsInForce } from './settings.js';
+import { allStatuses, statusOf } from '../status.js';
 
 // Product default (LB-04): an activity time older than this makes the entry a late entry.
 export const LATE_MINUTES = 30;
@@ -195,6 +196,13 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (type.sterile && !eq.sterile) throw new EntryError(400, 'type_not_for_equipment');
         const { id: settingsId, settings } = await settingsFor(tx, b.logbookType);
         const isUse = b.logbookType === 'equipment_use';
+        // LB-05–07: a new use is refused unless the item is fit; the reasons are shown to the user.
+        // The equipment row is locked, so the status cannot change before this entry commits.
+        const status = (await statusOf(tx, equipmentId))!;
+        if (isUse && status.blockers.length) throw new EntryError(409, 'not_fit_for_use', status.blockers);
+        if ((b.logbookType === 'equipment_cleaning' || b.logbookType === 'area_cleaning') && status.inUse) {
+          throw new EntryError(409, 'in_use', ['End the current use before recording a cleaning.']);
+        }
         if (isUse && (!b.productId || !b.batch)) throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
         if (isUse && b.activityEnd) throw new EntryError(400, 'check_failed', ['Record the end of use when it happens.']);
         const end = isUse ? null : (b.activityEnd ?? b.activityStart);
@@ -330,6 +338,35 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
     } catch (e) {
       return send(reply, e);
     }
+  });
+
+  // LB-06: QA returns equipment to service after a breakdown, with a "Released" e-signature on
+  // the verified breakdown entry (SchM 18.4.3; Annex 1 5.6).
+  app.post<{ Params: { id: string } }>('/api/entries/:id/release', { preHandler: requireRole('qa') }, async (req, reply) => {
+    const id = parseId(req.params.id);
+    const body = signBody.safeParse(req.body);
+    if (id === null || !body.success) return reply.code(400).send({ error: 'invalid_request' });
+    try {
+      const signer = await authenticateSigner(sql, req.user!, body.data, { objectType: 'entry', objectId: id, meaning: 'released' });
+      await sql.begin(async (tx) => {
+        const row = await latestVersion(tx, id);
+        if (row.logbook_type !== 'maintenance' || row.data.kind !== 'breakdown') throw new EntryError(409, 'not_a_breakdown');
+        const [verified] = await tx`select 1 from signatures where object_type = 'entry' and object_id = ${row.id} and meaning = 'verified'`;
+        if (!verified) throw new EntryError(409, 'not_verified', ['The breakdown entry must be verified before release.']);
+        await sign(tx, { signer, objectType: 'entry', objectId: row.id, meaning: 'released', content: entryContent(row), shownHash: body.data.contentHash });
+      });
+      return { ok: true };
+    } catch (e) {
+      return send(reply, e);
+    }
+  });
+
+  // Status of every item (home screen, tiles) and of one item (logbook page).
+  app.get('/api/equipment/status', anyUser, async () => allStatuses(sql));
+  app.get<{ Params: { id: string } }>('/api/equipment/:id/status', anyUser, async (req, reply) => {
+    const id = parseId(req.params.id);
+    if (id === null) return reply.code(400).send({ error: 'invalid_request' });
+    return (await statusOf(sql, id)) ?? reply.code(404).send({ error: 'not_found' });
   });
 
   // The logbook of one equipment item or area: latest version of each entry, newest first.

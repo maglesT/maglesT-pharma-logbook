@@ -66,3 +66,7 @@ tr.clickable { cursor: pointer; }
 .signbox p { margin: 0; }
 .summary-box { background: var(--bg); padding: 10px; border-radius: 6px; }
 .version { border-bottom: 1px solid var(--line); padding: 8px 0; }
+.statusbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px; border-radius: 8px; margin: 8px 0; }
+.statusbar.blocked { background: #fdecea; }
+.statusbar.fit { background: #e8f5ec; }
+.statusbar .reason { font-weight: 600; }

@@ -77,6 +77,7 @@ export interface Equipment {
   sterile: boolean;
   classified: boolean;
   cleanHoldHours: number | null;
+  needsCalibration: boolean;
   active: boolean;
 }
 
@@ -177,3 +178,25 @@ export const TYPE_LABEL: Record<string, string> = {
 
 // Mirrors the server (D-16): these types are signed by the performer.
 export const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test']);
+
+export interface EquipmentStatus {
+  equipmentId: number;
+  state: string;
+  blockers: string[];
+  warnings: string[];
+  inUse: { entryId: number; productId: number | null; batch: string | null; stage: string; since: string } | null;
+  cleanUntil: string | null;
+  calibrationDue: string | null;
+}
+
+export const STATE_LABEL: Record<string, [string, string]> = {
+  in_use: ['In use', 'chip-warn'],
+  dirty: ['Dirty', 'chip-bad'],
+  clean: ['Clean', 'chip-ok'],
+  clean_expired: ['Clean expired', 'chip-bad'],
+  out_of_service: ['Out of service', 'chip-bad'],
+  calibration_overdue: ['Calibration overdue', 'chip-bad'],
+  calibration_failed: ['Calibration failed', 'chip-bad'],
+  not_calibrated: ['Not calibrated', 'chip-bad'],
+  available: ['Available', 'chip-ok'],
+};

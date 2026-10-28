@@ -23,7 +23,7 @@ export function MasterData({ me }: { me: Me }) {
 }
 
 function EquipmentList({ isAdmin }: { isAdmin: boolean }) {
-  const empty = { code: '', name: '', kind: 'equipment' as Equipment['kind'], location: '', sterile: false, classified: false, cleanHoldHours: '' };
+  const empty = { code: '', name: '', kind: 'equipment' as Equipment['kind'], location: '', sterile: false, classified: false, needsCalibration: false, cleanHoldHours: '' };
   const [items, setItems] = useState<Equipment[]>([]);
   const [form, setForm] = useState(empty);
   const [error, setError] = useState('');
@@ -36,7 +36,11 @@ function EquipmentList({ isAdmin }: { isAdmin: boolean }) {
     e.preventDefault();
     setError('');
     try {
-      await api('POST', '/api/equipment', { ...form, cleanHoldHours: form.cleanHoldHours ? Number(form.cleanHoldHours) : null });
+      await api('POST', '/api/equipment', {
+        ...form,
+        needsCalibration: form.needsCalibration || form.kind === 'instrument',
+        cleanHoldHours: form.cleanHoldHours ? Number(form.cleanHoldHours) : null,
+      });
       setForm(empty);
       await load();
     } catch (err) {
@@ -73,6 +77,7 @@ function EquipmentList({ isAdmin }: { isAdmin: boolean }) {
           <input placeholder="Clean-hold hours" inputMode="numeric" value={form.cleanHoldHours} onChange={(e) => setForm({ ...form, cleanHoldHours: e.target.value })} />
           <label className="check"><input type="checkbox" checked={form.sterile} onChange={(e) => setForm({ ...form, sterile: e.target.checked })} />Sterile</label>
           <label className="check"><input type="checkbox" checked={form.classified} onChange={(e) => setForm({ ...form, classified: e.target.checked })} />Classified room</label>
+          <label className="check"><input type="checkbox" checked={form.needsCalibration || form.kind === 'instrument'} onChange={(e) => setForm({ ...form, needsCalibration: e.target.checked })} />Needs calibration</label>
           <button className="primary" type="submit">Add</button>
           {error && <p className="error">{error}</p>}
         </form>
@@ -87,7 +92,7 @@ function EquipmentList({ isAdmin }: { isAdmin: boolean }) {
               <td>{KIND_LABEL[eq.kind]}</td>
               <td>{eq.location}</td>
               <td>{eq.cleanHoldHours ? `${eq.cleanHoldHours} h` : '—'}</td>
-              <td>{[eq.sterile && 'Sterile', eq.classified && 'Classified'].filter(Boolean).join(', ')}</td>
+              <td>{[eq.sterile && 'Sterile', eq.classified && 'Classified', eq.needsCalibration && 'Calibrated'].filter(Boolean).join(', ')}</td>
               <td>{eq.active ? 'Active' : 'Retired'}</td>
               {isAdmin && (
                 <td>

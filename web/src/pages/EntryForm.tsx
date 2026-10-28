@@ -91,6 +91,8 @@ export function EntryForm({
         late_reason_required: 'This is a late entry: give the reason below.',
         future_time: 'A time cannot be in the future.',
         type_not_configured: 'This logbook type has no approved settings yet.',
+        not_fit_for_use: 'This equipment is not fit for use:',
+        in_use: 'The equipment is in use.',
         forbidden: 'Your role may not make this entry.',
       };
       const details = err instanceof ApiError ? err.problems : [];
