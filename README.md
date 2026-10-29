@@ -20,6 +20,7 @@ npm run create-admin -- admin "Site Admin"   # prints a temporary password
 npm run dev        # API on :3000
 npm run dev:web    # UI on :5173 (proxies /api)
 npm run ci         # typecheck, tests, build — run before pushing
+npm run test:e2e   # browser tests of the main flows (Playwright; once: npx playwright install chromium)
 ```
 
 Tests use `TEST_DATABASE_URL` (default `postgres://logbook_owner:dev@localhost:5432/logbook_test`);
@@ -64,7 +65,7 @@ Investigate any failure as a data-integrity incident (CP-07).
 rule in force has no test. Together with the CI test report it supports the site's validation.
 
 ## Conventions
-- One app: `server/` (Fastify), `web/` (React), `db/migrations/` (plain SQL), `test/`, `ops/`, `docs/`.
+- One app: `server/` (Fastify), `web/` (React), `db/migrations/` (plain SQL), `test/`, `e2e/` (browser tests), `ops/`, `docs/`.
 - A test that proves a register rule starts its name with the rule ID, e.g. `LB-17: correction keeps the original visible`.
 - Paraphrase regulations; never paste more than a short phrase.
 - Work on a branch, CI green, one review pass, then squash-merge.

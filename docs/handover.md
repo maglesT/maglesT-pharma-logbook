@@ -1,6 +1,6 @@
 # Handover
 
-Updated: 2026-10-29, after slice S7 (all planned slices done).
+Updated: 2026-10-29, after slice S8 (browser tests; all planned slices done).
 
 ## State
 - Planning deliverables (a)–(d) are approved: decisions D-01 to D-05 in `decisions.md`.
@@ -56,18 +56,26 @@ Updated: 2026-10-29, after slice S7 (all planned slices done).
   - The pressure out-of-limit flag is set by the server from the approved point limits.
 - **Cycle ID:** unique per steriliser (`checkCycleId` in `routes/entries.ts`), checked under the equipment lock.
 - **Status (`status.ts`):** a failed steriliser test or glove port means out of service, and the item also gets `cycleBlockers`, which stop new cycles. A failed last cycle and out-of-limit pressure readings are warnings.
-- **UI:** forms for the four types; they show only on ster## Done: S7, integrity, backup and traceability (LB-23, CP-01 support)
+- **UI:** forms for the four types; they show only on sterile equipment and rooms.
+
+## Done: S7, integrity, backup and traceability (LB-23, CP-01 support)
 - **`server/integrity.ts`:** recomputes every signature hash, checks version chains and that every entry version has its audit row, and writes `integrity.passed` or `integrity.failed` to the audit trail. It runs daily from the server process (`scheduleIntegrityCheck`); `/api/integrity` and `npm run integrity` are also available.
 - **Scripts:** `ops/backup.sh` (pg_dump, SHA-256 file, 365-day retention) and `ops/restore-check.sh` (scratch restore, migrate, integrity). CI runs both.
 - **Traceability:** `scripts/traceability.ts` writes `docs/traceability.md`. `--check` runs in CI and in `npm run ci`.
 - **README:** "Operating the system" section.
+
+## Done: S8, browser tests (main flows)
+- **Playwright (chromium), `e2e/`:** `npm run test:e2e` builds the UI and starts the real server (`e2e/server.ts`) on its own schema `e2e` of the test database, with seeded users (`admin`, `qa1`, `op1`, `sup1`, `eng1`, `locky`, password as in `test/helpers.ts`), a product and approved core settings. Each spec creates its own equipment; set-up that is not the point of a test goes through the API, and time is moved with the owner connection as in the server tests.
+- **Flows (10 tests):** log-in and forced password change, lockout with the on-screen alert to QA and Admin (LB-21); use → Dirty → blocked → cleaning signed by the operator and verified in the sign dialog → Clean → use, and clean-hold expiry (LB-07); correction keeps the original with its reason, late entry needs a reason (LB-17, LB-04); breakdown → Out of service → QA release (LB-06); overdue calibration blocks (LB-05); QA period review signed, batch view, PDF exports (LB-25); a failed steriliser test blocks the steriliser (LB-12).
+- **Traceability:** `scripts/traceability.ts` also reads `test(` names in `e2e/*.spec.ts`.
+- **CI:** job `browser` (`npx playwright install --with-deps chromium`, then `npm run test:e2e`); the HTML report is uploaded on failure.
+- **Defect found and fixed (D-24):** a cleaning entered in the same minute as the end of the use (the form enters whole minutes) was accepted and verified, but the equipment stayed Dirty. `status.ts` now counts such a cleaning when it was first entered after the use ended; server test in `status.test.ts`.
 
 ## Possible next steps (not planned; owner to decide)
 - Validation package for a first site: IQ/OQ protocol templates that use `docs/traceability.md` and the CI report.
 - Training material: one-page guides per role.
 - Later extensions recorded in decisions: multi-site, mobile app, offline mode, QR codes, ERP or BMS interfaces.
 
-llation and first setup.
 
 ## Notes
 - Official PDFs and extracted texts are in `sources/` (git-ignored). The gazette text of Schedule M Part I is in `maglesT/ebmr`, branch `docs/schedule-m-gazette`.
