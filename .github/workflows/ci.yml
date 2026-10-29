@@ -26,3 +26,16 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      # CP-01 / D-10: every product rule in force has tests, and the traceability list is current.
+      - run: npm run traceability -- --check
+      # LB-23: a backup of a migrated database restores and passes the integrity check.
+      - name: Backup and restore check
+        env:
+          PGPASSWORD: dev
+        run: |
+          psql -q postgres://logbook_owner:dev@localhost:5432/postgres -c "create database logbook_ci"
+          export DATABASE_URL=postgres://logbook_owner:dev@localhost:5432/logbook_ci
+          MIGRATION_DATABASE_URL=$DATABASE_URL node dist/db/migrate.js
+          MIGRATION_DATABASE_URL=$DATABASE_URL node dist/db/create-admin.js admin "CI Admin" > /dev/null
+          BACKUP_DIR=./backups ops/backup.sh
+          ADMIN_URL=postgres://logbook_owner:dev@localhost:5432/postgres ops/restore-check.sh "$(ls ./backups/*.dump | tail -1)"

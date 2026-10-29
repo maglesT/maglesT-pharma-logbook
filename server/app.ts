@@ -14,6 +14,7 @@ import { settingsRoutes } from './routes/settings.js';
 import { entryRoutes } from './routes/entries.js';
 import { reviewRoutes } from './routes/review.js';
 import { exportRoutes } from './routes/exports.js';
+import { integrityRoutes } from './routes/integrity.js';
 
 export const VERSION = '0.1.0';
 
@@ -58,6 +59,7 @@ export async function buildApp({ sql, logger = false, webRoot, cookieSecure = tr
   entryRoutes(app, sql);
   reviewRoutes(app, sql);
   exportRoutes(app, sql);
+  integrityRoutes(app, sql);
 
   // In production the built web UI is served from the same process.
   const root = webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');

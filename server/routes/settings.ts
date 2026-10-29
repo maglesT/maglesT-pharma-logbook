@@ -13,7 +13,7 @@ const draftBody = z.object({
 });
 const editBody = z.object({ settings: settingsSchema, effectiveFrom: z.coerce.date(), reason: z.string().trim().min(1).max(500) });
 
-interface SettingsRow {
+export interface SettingsRow {
   id: number;
   logbook_type: string;
   version: number;
@@ -24,7 +24,7 @@ interface SettingsRow {
 }
 
 // What the QA approval signature covers (LB-24 + LB-19).
-const signedContent = (r: SettingsRow) => ({
+export const signedContent = (r: SettingsRow) => ({
   logbookType: r.logbook_type,
   version: r.version,
   settings: r.settings,
