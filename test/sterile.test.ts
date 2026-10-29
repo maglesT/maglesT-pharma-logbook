@@ -30,6 +30,13 @@ const cycle = (eq: number, cycleId: string, result: 'pass' | 'fail' = 'pass', ex
 const test = (eq: number, kind: 'leak' | 'air_removal', result: 'pass' | 'fail') =>
   entry('op1', eq, { logbookType: 'steriliser_test', activityStart: now(), data: { test: kind, result, comment: 'c', deviationRef: 'DV-9' }, signature: sig('op1') });
 
+// A verified passed steriliser test, needed before steam cycles (D-22).
+async function passedTest(eq: number, kind: 'leak' | 'air_removal' = 'air_removal') {
+  const id = (await test(eq, kind, 'pass')).json().id;
+  const v = (await call(t.app, c.qa!, 'GET', `/api/entries/${id}/versions`)).json()[0];
+  expect((await call(t.app, c.sup1!, 'POST', `/api/entries/${id}/verify`, { ...sig('sup1'), contentHash: v.contentHash })).statusCode).toBe(200);
+}
+
 beforeAll(async () => {
   t = await freshApp();
   for (const [u, roles] of [['admin', ['admin']], ['qa1', ['qa']], ['op1', ['operator']], ['sup1', ['supervisor']]] as const) await seedUser(t.owner, u, [...roles]);
@@ -41,6 +48,8 @@ beforeAll(async () => {
   nonSterile = await eq({ kind: 'equipment' });
   for (const type of ['steriliser_cycle', 'steriliser_test', 'glove_integrity']) await approve(type);
   await approve('pressure_reading', { pressurePoints: [{ name: 'Filling B / corridor', critical: false, ccsRef: 'CCS-4.2', min: 10, max: 30, unit: 'Pa' }] });
+  await passedTest(autoclave);
+  await passedTest(isolator);
 });
 afterAll(() => t.close());
 
@@ -82,7 +91,12 @@ describe('steriliser tests (LB-12, A1 8.60–8.61)', () => {
     expect(s.state).toBe('out_of_service');
     expect(s.blockers[0]).toMatch(/leak test failed/);
     expect((await cycle(ac, 'C-1')).json().error).toBe('not_fit_for_use');
+    // An unverified pass does not clear the failure (review S6-2); a verified one does.
     await test(ac, 'leak', 'pass');
+    expect((await status(ac)).blockers.some((b: string) => /leak/.test(b))).toBe(true);
+    expect((await cycle(ac, 'C-1')).statusCode).toBe(409);
+    const [latest] = (await call(t.app, c.qa!, 'GET', `/api/equipment/${ac}/entries`)).json();
+    await call(t.app, c.sup1!, 'POST', `/api/entries/${latest.id}/verify`, { ...sig('sup1'), contentHash: latest.contentHash });
     expect((await status(ac)).blockers.some((b: string) => /leak/.test(b))).toBe(false);
     expect((await cycle(ac, 'C-1')).statusCode).toBe(201);
   });
@@ -90,8 +104,10 @@ describe('steriliser tests (LB-12, A1 8.60–8.61)', () => {
   it('LB-12: each test type is judged on its own latest result', async () => {
     const ac = (await call(t.app, c.admin!, 'POST', '/api/equipment', { code: `AC-${++n}`, name: 'Autoclave 3', kind: 'equipment', sterile: true })).json().id;
     await test(ac, 'air_removal', 'fail');
-    await test(ac, 'leak', 'pass');
-    expect((await status(ac)).blockers[0]).toMatch(/air-removal/);
+    await passedTest(ac, 'leak');
+    const s = await status(ac);
+    expect(s.blockers).toHaveLength(1);
+    expect(s.blockers[0]).toMatch(/air-removal/);
   });
 });
 
@@ -128,5 +144,32 @@ describe('pressure readings (LB-16)', () => {
   it('LB-16: the client cannot set the out-of-limit flag', async () => {
     const res = await entry('op1', room, { logbookType: 'pressure_reading', activityStart: now(), data: { point: 'Filling B / corridor', value: 50, outOfLimit: false } });
     expect(res.statusCode).toBe(400);
+  });
+});
+
+describe('review fixes (S6)', () => {
+  it('LB-12: a steam cycle is refused on a steriliser without a verified passed test (D-22)', async () => {
+    const ac = (await call(t.app, c.admin!, 'POST', '/api/equipment', { code: `AC-${++n}`, name: 'New autoclave', kind: 'equipment', sterile: true })).json().id;
+    expect((await cycle(ac, 'C-1')).json().problems[0]).toMatch(/No verified passed steriliser test/);
+    // Dry heat is not subject to the steam tests.
+    expect((await cycle(ac, 'D-1', 'pass', { cycleType: 'dry_heat' })).statusCode).toBe(201);
+  });
+
+  it('LB-12: a cycle cannot be recorded while the steriliser is in use', async () => {
+    await approve('equipment_use');
+    const ac = (await call(t.app, c.admin!, 'POST', '/api/equipment', { code: `AC-${++n}`, name: 'Busy autoclave', kind: 'equipment', sterile: true })).json().id;
+    await passedTest(ac);
+    const product = (await call(t.app, c.admin!, 'POST', '/api/products', { code: `PR-${n}`, name: 'Vials' })).json().id;
+    expect((await entry('op1', ac, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'V1', data: {} })).statusCode).toBe(201);
+    expect((await cycle(ac, 'C-9')).json().problems).toContain('In use: end the current use first.');
+  });
+
+  it('LB-12: the database refuses a duplicate cycle number on the same steriliser', async () => {
+    const [row] = await t.owner`select * from entries where equipment_id = ${autoclave} and logbook_type = 'steriliser_cycle' limit 1`;
+    await expect(t.sql`
+      insert into entries (equipment_id, logbook_type, settings_id, version, change, activity_start, activity_end, data, entered_by)
+      values (${autoclave}, 'steriliser_cycle', ${row!.settings_id}, 1, 'created', now(), now(),
+              ${t.sql.json({ ...row!.data, cycleId: ` ${String(row!.data.cycleId).toLowerCase()} ` })}, ${row!.entered_by})`,
+    ).rejects.toThrow(/already recorded/);
   });
 });

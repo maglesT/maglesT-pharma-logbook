@@ -86,7 +86,15 @@ export function EntryForm({
     const body: Record<string, unknown> = {
       activityStart: new Date(start).toISOString(),
       // The server decides whether a reading is out of limits.
-      data: type === 'pressure_reading' ? { point: data.point, value: Number(data.value), comment: data.comment, deviationRef: data.deviationRef } : data,
+      data: type === 'pressure_reading'
+        ? {
+            point: data.point,
+            // An empty field is sent as missing, never as 0; a decimal comma is accepted (review S6-3).
+            value: String(data.value ?? '').trim() === '' ? null : Number(String(data.value).trim().replace(',', '.')),
+            comment: data.comment,
+            deviationRef: data.deviationRef,
+          }
+        : data,
     };
     if (HAS_END.has(type) || (correcting && correcting.activityEnd)) body.activityEnd = new Date(end).toISOString();
     if (type === 'equipment_use') Object.assign(body, { productId: productId || undefined, batch: batch || undefined });

@@ -225,6 +225,10 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (isUse && status.blockers.length) throw new EntryError(409, 'not_fit_for_use', status.blockers);
         // A sterilisation cycle needs a steriliser that is in service, calibrated and has passed its tests.
         if (b.logbookType === 'steriliser_cycle' && status.cycleBlockers.length) throw new EntryError(409, 'not_fit_for_use', status.cycleBlockers);
+        // D-22: a steam steriliser needs a verified passed leak or air-removal test on record (A1 8.60–8.61).
+        if (b.logbookType === 'steriliser_cycle' && b.data.cycleType === 'steam' && !status.hasPassedSterilizerTest) {
+          throw new EntryError(409, 'not_fit_for_use', ['No verified passed steriliser test on record: test the steriliser first.']);
+        }
         if (b.logbookType === 'equipment_cleaning' || b.logbookType === 'area_cleaning') cleaningFits(status, b.activityStart);
         if (isUse && (!b.productId || !b.batch)) throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
         if (isUse && b.activityEnd) throw new EntryError(400, 'check_failed', ['Record the end of use when it happens.']);
