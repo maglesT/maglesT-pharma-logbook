@@ -78,7 +78,9 @@ async function facts(q: Sql | Tx, ids: number[] | null): Promise<Facts[]> {
       order by s.logbook_type, s.version desc
     ),
     uses as (
-      select distinct on (equipment_id) equipment_id, activity_end as last_use_end, entered_at as last_use_entered_at
+      -- When the end of use was first recorded; a later correction of the use does not move it (S8 review).
+      select distinct on (equipment_id) equipment_id, activity_end as last_use_end,
+        (select min(x.entered_at) from entries x where x.entry_id = latest.entry_id and x.activity_end is not null) as last_use_entered_at
       from latest where logbook_type = 'equipment_use' and activity_end is not null
       order by equipment_id, activity_end desc
     )

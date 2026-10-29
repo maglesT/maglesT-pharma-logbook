@@ -44,7 +44,7 @@ export async function apiAs(username: string): Promise<APIRequestContext> {
   return ctx;
 }
 
-async function post(ctx: APIRequestContext, url: string, data: object) {
+export async function post(ctx: APIRequestContext, url: string, data: object) {
   const res = await ctx.post(url, { data });
   expect(res.ok(), `${url}: ${await res.text()}`).toBe(true);
   return res.json();

@@ -61,10 +61,11 @@ test('LB-05: an instrument with an overdue calibration is shown as overdue and c
   const cal = await recordAndVerify(id, { logbookType: 'calibration', data: { result: 'pass', nextDue: '2099-01-01', certificateRef: 'CAL-1' } }, 'eng1', 'qa1');
   // As if the due date had passed.
   const sql = owner();
-  await sql`alter table entries disable trigger entries_version_chain`;
-  await sql`update entries set data = jsonb_set(data, '{nextDue}', '"2020-01-01"') where id = ${cal}`;
-  await sql`alter table entries enable trigger entries_version_chain`;
-  await sql.end();
+  try {
+    await sql`update entries set data = jsonb_set(data, '{nextDue}', '"2020-01-01"') where id = ${cal}`;
+  } finally {
+    await sql.end();
+  }
 
   await logIn(page, 'op1');
   await page.getByRole('button', { name: 'Logbooks' }).click();

@@ -243,6 +243,13 @@ describe('review fixes (S4)', () => {
     expect(e.statusCode).toBe(201);
     expect((await signEntry('sup1', 'verify', e.json().id)).statusCode).toBe(200);
     expect((await status(id)).state).toBe('clean');
+    // A later correction of the use does not undo the cleaning.
+    const v = (await call(t.app, c.op1!, 'GET', `/api/entries/${use}/versions`)).json().at(-1);
+    const fixed = await call(t.app, c.op1!, 'POST', `/api/entries/${v.id}/correct`, {
+      activityStart: v.activityStart, activityEnd: v.activityEnd, productId: v.productId, batch: v.batch, data: { ...v.data, stage: 'Mixing' }, reason: 'stage', signature: sig('op1'),
+    });
+    expect(fixed.statusCode, fixed.body).toBe(200);
+    expect((await status(id)).state).toBe('clean');
   });
 
   it('LB-07: a cleaning that started before the last use ended is refused', async () => {

@@ -1,11 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { logIn, newEquipment, openLogbook, sign } from './helpers.js';
 
-const minutesAgo = (m: number) => {
-  // datetime-local value in the browser zone (Asia/Kolkata, see playwright.config.ts).
-  const d = new Date(Date.now() - m * 60_000 + 330 * 60_000);
-  return d.toISOString().slice(0, 16);
-};
 
 test('LB-17: a correction keeps the original readable, with the reason and a signature', async ({ page }) => {
   const { code } = await newEquipment();
@@ -38,7 +33,12 @@ test('LB-04: an entry for an activity more than 30 minutes ago needs a reason an
   await openLogbook(page, code);
   await page.getByRole('button', { name: '+ General equipment log' }).click();
   const form = page.getByRole('dialog');
-  await form.getByLabel('Date and time').fill(minutesAgo(120));
+  // A datetime-local value two hours ago, in the browser's own time zone.
+  const twoHoursAgo = await page.evaluate(() => {
+    const d = new Date(Date.now() - 120 * 60_000);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  });
+  await form.getByLabel('Date and time').fill(twoHoursAgo);
   await form.getByLabel('Notes').fill('Noise from the gearbox');
   await form.getByRole('button', { name: 'Save' }).click();
   await expect(form.locator('.error')).toContainText('This is a late entry: give the reason below.');

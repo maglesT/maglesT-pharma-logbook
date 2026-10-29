@@ -62,10 +62,11 @@ test('LB-07: past its clean-hold time the equipment shows Clean expired and use 
   await cleanVerified(id);
   // As if a day had passed since the cleaning.
   const sql = owner();
-  await sql`alter table entries disable trigger entries_version_chain`;
-  await sql`update entries set activity_start = activity_start - interval '25 hours', activity_end = activity_end - interval '25 hours' where equipment_id = ${id}`;
-  await sql`alter table entries enable trigger entries_version_chain`;
-  await sql.end();
+  try {
+    await sql`update entries set activity_start = activity_start - interval '25 hours', activity_end = activity_end - interval '25 hours' where equipment_id = ${id}`;
+  } finally {
+    await sql.end();
+  }
 
   await logIn(page, 'op1');
   await openLogbook(page, code);

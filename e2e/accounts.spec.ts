@@ -8,8 +8,9 @@ test('LB-21: a new user logs in with the temporary password and must change it f
   await page.getByPlaceholder('User ID').fill(username);
   await page.getByPlaceholder('Full name').fill('Neha New');
   await page.getByRole('button', { name: 'Add user' }).click();
-  const notice = await page.locator('.notice').textContent();
-  const temporary = /shown once\): (\S+)/.exec(notice ?? '')![1]!;
+  await expect(page.locator('.notice')).toContainText(`User ${username} created`);
+  const temporary = /shown once\): (\S+)/.exec((await page.locator('.notice').textContent()) ?? '')?.[1] ?? '';
+  expect(temporary).not.toBe('');
   await logOut(page);
 
   await logIn(page, username, temporary);
