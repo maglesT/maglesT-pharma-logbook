@@ -37,6 +37,32 @@ restricted role `logbook_app`, which cannot update or delete entries, signatures
 Either give it its own login (`ALTER ROLE logbook_app LOGIN PASSWORD '...'`) and point `DATABASE_URL` at it,
 or, on a single box, let the owner login switch to it with `DB_APP_ROLE=logbook_app` (compose default).
 
+## Operating the system
+
+**First setup**
+1. Start the stack (see *Run*) and create the first admin. It gets a temporary password, valid for 24 hours, which must be changed at first login.
+2. As Admin:
+   - set the site name and code (Master data → Site);
+   - add equipment, instruments and rooms (flags: sterile, classified room, needs calibration, clean-hold hours) and products;
+   - create user accounts with their roles. Hand each temporary password directly to its user (D-15).
+3. As Admin, draft the settings for each logbook type the site uses. As QA, approve each version with an e-signature (Logbook settings). A type cannot be used until its settings are approved and in force.
+4. Clean and verify each item once before its first use: new equipment counts as dirty (D-18). Sterilisers need a verified passed leak or air-removal test before steam cycles (D-22).
+
+**Backups (LB-23).** Run `ops/backup.sh` daily, e.g. from cron on the host:
+`15 1 * * * DATABASE_URL=postgres://logbook_owner:...@localhost/logbook BACKUP_DIR=/srv/backups /opt/logbook/ops/backup.sh`.
+Backups are kept for 365 days (`KEEP_DAYS`). Copy them to storage outside the server.
+
+**Restore check (CP-03).** Periodically, e.g. monthly, run
+`ADMIN_URL=postgres://owner:...@localhost/postgres ops/restore-check.sh /srv/backups/<file>.dump` and file the output.
+It restores into a scratch database, checks the schema and runs the integrity check. CI runs the same check on every change.
+
+**Integrity check (LB-23).** The server runs it once a day and writes the result to the audit trail (`integrity.passed` or
+`integrity.failed`). QA or Admin can also run it on demand (`POST /api/integrity/run`), or run `npm run integrity` from the command line.
+Investigate any failure as a data-integrity incident (CP-07).
+
+**Traceability (CP-01).** `npm run traceability` regenerates `docs/traceability.md`, the rule-to-test list. CI fails if a
+rule in force has no test. Together with the CI test report it supports the site's validation.
+
 ## Conventions
 - One app: `server/` (Fastify), `web/` (React), `db/migrations/` (plain SQL), `test/`, `ops/`, `docs/`.
 - A test that proves a register rule starts its name with the rule ID, e.g. `LB-17: correction keeps the original visible`.

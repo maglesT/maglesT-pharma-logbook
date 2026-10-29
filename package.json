@@ -15,9 +15,11 @@
     "migrate:prod": "node dist/db/migrate.js",
     "migrate": "tsx db/migrate.ts",
     "create-admin": "tsx db/create-admin.ts",
+    "integrity": "tsx db/integrity.ts",
+    "traceability": "tsx scripts/traceability.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "ci": "npm run typecheck && npm test && npm run build"
+    "ci": "npm run typecheck && npm test && npm run build && npm run traceability -- --check"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.5",

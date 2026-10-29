@@ -1,6 +1,6 @@
 # Handover
 
-Updated: 2026-10-29, after slice S6.
+Updated: 2026-10-29, after slice S7 (all planned slices done).
 
 ## State
 - Planning deliverables (a)–(d) are approved: decisions D-01 to D-05 in `decisions.md`.
@@ -56,13 +56,18 @@ Updated: 2026-10-29, after slice S6.
   - The pressure out-of-limit flag is set by the server from the approved point limits.
 - **Cycle ID:** unique per steriliser (`checkCycleId` in `routes/entries.ts`), checked under the equipment lock.
 - **Status (`status.ts`):** a failed steriliser test or glove port means out of service, and the item also gets `cycleBlockers`, which stop new cycles. A failed last cycle and out-of-limit pressure readings are warnings.
-- **UI:** forms for the four types; they show only on sterile equipment and rooms.
+- **UI:** forms for the four types; they show only on ster## Done: S7, integrity, backup and traceability (LB-23, CP-01 support)
+- **`server/integrity.ts`:** recomputes every signature hash, checks version chains and that every entry version has its audit row, and writes `integrity.passed` or `integrity.failed` to the audit trail. It runs daily from the server process (`scheduleIntegrityCheck`); `/api/integrity` and `npm run integrity` are also available.
+- **Scripts:** `ops/backup.sh` (pg_dump, SHA-256 file, 365-day retention) and `ops/restore-check.sh` (scratch restore, migrate, integrity). CI runs both.
+- **Traceability:** `scripts/traceability.ts` writes `docs/traceability.md`. `--check` runs in CI and in `npm run ci`.
+- **README:** "Operating the system" section.
 
-## Next: S7, integrity, backup and traceability (LB-23, CP-01 support)
-- **Integrity check:** `npm run integrity` (and a nightly job via cron or systemd in ops). It re-reads all entries, settings and reviews, recomputes their signature hashes, checks that entry version chains are complete, and writes one audit row `integrity.checked` with counts and failures.
-- **Backup and restore:** `ops/backup.sh` (pg_dump custom format, keeps 365 days) and `ops/restore-check.sh` (restore into a scratch database, run migrations to check the schema, run the integrity check). CI runs the restore check on the test database.
-- **Traceability:** `npm run traceability` writes `docs/traceability.md` from the test names (rule ID → tests), and CI fails if a product rule (LB-xx in force) has no test.
-- **Handover:** a final README section covering installation and first setup.
+## Possible next steps (not planned; owner to decide)
+- Validation package for a first site: IQ/OQ protocol templates that use `docs/traceability.md` and the CI report.
+- Training material: one-page guides per role.
+- Later extensions recorded in decisions: multi-site, mobile app, offline mode, QR codes, ERP or BMS interfaces.
+
+llation and first setup.
 
 ## Notes
 - Official PDFs and extracted texts are in `sources/` (git-ignored). The gazette text of Schedule M Part I is in `maglesT/ebmr`, branch `docs/schedule-m-gazette`.
