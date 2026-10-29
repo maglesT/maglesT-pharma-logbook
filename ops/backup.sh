@@ -8,8 +8,11 @@ set -eu
 BACKUP_DIR="${BACKUP_DIR:-./backups}"
 KEEP_DAYS="${KEEP_DAYS:-365}"
 mkdir -p "$BACKUP_DIR"
-file="$BACKUP_DIR/logbook-$(date -u +%Y%m%dT%H%M%SZ).dump"
-pg_dump --format=custom --no-owner --file="$file" "$DATABASE_URL"
-sha256sum "$file" > "$file.sha256"
+name="logbook-$(date -u +%Y%m%dT%H%M%SZ).dump"
+# Dump to a temporary name; only a complete dump with its checksum gets the final name.
+pg_dump --format=custom --no-owner --file="$BACKUP_DIR/$name.tmp" "$DATABASE_URL"
+mv "$BACKUP_DIR/$name.tmp" "$BACKUP_DIR/$name"
+# The checksum file names the dump without a path, so it verifies from inside BACKUP_DIR.
+(cd "$BACKUP_DIR" && sha256sum "$name" > "$name.sha256")
 find "$BACKUP_DIR" -name 'logbook-*.dump*' -mtime +"$KEEP_DAYS" -delete
-echo "backup written: $file"
+echo "backup written: $BACKUP_DIR/$name"

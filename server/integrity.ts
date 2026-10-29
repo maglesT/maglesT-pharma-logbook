@@ -16,6 +16,19 @@ export interface IntegrityResult {
 }
 
 export async function runIntegrityCheck(sql: Sql, actorId: number | null = null): Promise<IntegrityResult> {
+  // All reads from one snapshot, so records saved during the check cannot look inconsistent (review S7-1).
+  const result = await sql.begin('isolation level repeatable read read only', (tx) => check(tx as unknown as Sql));
+  await audit(sql, {
+    actorId,
+    action: result.problems.length ? 'integrity.failed' : 'integrity.passed',
+    objectType: 'system',
+    objectId: 'integrity',
+    new: { entries: result.entries, signatures: result.signatures, problems: result.problems.slice(0, 200), problemCount: result.problems.length },
+  });
+  return result;
+}
+
+async function check(sql: Sql): Promise<IntegrityResult> {
   const problems: string[] = [];
 
   const entries = await sql.unsafe<EntryRow[]>(`select ${ENTRY_COLS} from entries order by entry_id, version`);
@@ -56,15 +69,7 @@ export async function runIntegrityCheck(sql: Sql, actorId: number | null = null)
     }
   }
 
-  const result = { checkedAt: new Date(), entries: entries.length, signatures: sigs.length, problems };
-  await audit(sql, {
-    actorId,
-    action: problems.length ? 'integrity.failed' : 'integrity.passed',
-    objectType: 'system',
-    objectId: 'integrity',
-    new: { entries: result.entries, signatures: result.signatures, problems: problems.slice(0, 200), problemCount: problems.length },
-  });
-  return result;
+  return { checkedAt: new Date(), entries: entries.length, signatures: sigs.length, problems };
 }
 
 // Runs the check once a day from the server process (LB-23, "periodically").
