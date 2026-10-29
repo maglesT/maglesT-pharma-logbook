@@ -4,7 +4,9 @@ import { SignDialog } from '../components/SignDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
 
-const CORE_TYPES = ['equipment_use', 'equipment_cleaning', 'maintenance', 'calibration', 'area_cleaning', 'general_log'];
+const CORE_TYPES = ['equipment_use', 'equipment_cleaning', 'maintenance', 'calibration', 'area_cleaning', 'general_log',
+  'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading'];
+const STERILE_TYPES = new Set(['steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading']);
 const APPLIES: Record<string, Equipment['kind'][]> = {
   equipment_use: ['equipment', 'instrument', 'area'],
   equipment_cleaning: ['equipment', 'instrument'],
@@ -12,6 +14,10 @@ const APPLIES: Record<string, Equipment['kind'][]> = {
   calibration: ['equipment', 'instrument'],
   area_cleaning: ['area'],
   general_log: ['equipment', 'instrument', 'area'],
+  steriliser_cycle: ['equipment'],
+  steriliser_test: ['equipment'],
+  glove_integrity: ['equipment'],
+  pressure_reading: ['area'],
 };
 
 // Equipment list, then one equipment item's logbook (FRS screen 2).
@@ -76,7 +82,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
     }
     return m;
   }, [types]);
-  const available = CORE_TYPES.filter((k) => APPLIES[k]!.includes(equipment.kind) && inForce.has(k));
+  const available = CORE_TYPES.filter((k) => APPLIES[k]!.includes(equipment.kind) && inForce.has(k) && (!STERILE_TYPES.has(k) || equipment.sterile));
   const productName = (id: number | null) => products.find((p) => p.id === id)?.code ?? '';
   const isVerifier = me.roles.includes('supervisor') || me.roles.includes('qa');
 
@@ -225,6 +231,8 @@ const LABELS: Record<string, string> = {
   stage: 'Stage', remarks: 'Remarks', cleaningType: 'Cleaning', kind: 'Type', description: 'Description', workDone: 'Work done',
   impactAssessment: 'Impact assessment', result: 'Result', certificateRef: 'Certificate', nextDue: 'Next due', comment: 'Comment',
   deviationRef: 'Deviation', agent: 'Agent', sporicidal: 'Sporicidal', disinfectantLot: 'Disinfectant lot', notes: 'Notes',
+  cycleType: 'Cycle', cycleId: 'Cycle no.', programme: 'Programme', load: 'Load', controllerRecordRef: 'Controller record',
+  indicators: 'Indicators', test: 'Test', port: 'Port', method: 'Method', point: 'Point', value: 'Reading', outOfLimit: 'OUT OF LIMITS',
 };
 
 function Summary({ e, full = false }: { e: Entry; full?: boolean }) {

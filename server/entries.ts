@@ -37,6 +37,40 @@ export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
     remarks: z.string().trim().max(1000).default(''),
   }),
   general_log: z.object({ checklist: checklistAnswers, notes: z.string().trim().max(2000).default('') }),
+  // Sterile types (S6; Annex 1).
+  steriliser_cycle: z.object({
+    cycleType: z.enum(['steam', 'dry_heat', 'sip', 'vhp']),
+    // A1 8.45: each cycle has a unique identifier (unique per steriliser, checked on save).
+    cycleId: z.string().trim().min(1).max(40),
+    programme: z.string().trim().max(80).default(''),
+    load: z.string().trim().max(500).default(''),
+    result: z.enum(['pass', 'fail']),
+    // A1 8.50: the controller printout or electronic record is referenced (or attached elsewhere).
+    controllerRecordRef: z.string().trim().min(1).max(100),
+    indicators: z.string().trim().max(200).default(''),
+    remarks: z.string().trim().max(1000).default(''),
+    ...outOfLimit,
+  }),
+  steriliser_test: z.object({
+    test: z.enum(['leak', 'air_removal']),
+    result: z.enum(['pass', 'fail']),
+    remarks: z.string().trim().max(1000).default(''),
+    ...outOfLimit,
+  }),
+  glove_integrity: z.object({
+    port: z.string().trim().min(1).max(40),
+    method: z.string().trim().max(80).default(''),
+    result: z.enum(['pass', 'fail']),
+    remarks: z.string().trim().max(1000).default(''),
+    ...outOfLimit,
+  }),
+  pressure_reading: z.object({
+    point: z.string().trim().min(1).max(80),
+    value: z.number().finite(),
+    // Set by the server from the point's limits (LB-16).
+    outOfLimit: z.boolean().default(false),
+    ...outOfLimit,
+  }),
 };
 
 // D-16: types whose performer signs with an e-signature (a clause requires the signature).
@@ -55,6 +89,10 @@ const RECORDERS: Record<string, Role[]> = {
   general_log: ['operator', 'supervisor', 'engineering'],
   maintenance: ['operator', 'supervisor', 'engineering'],
   calibration: ['engineering'],
+  steriliser_cycle: ['operator', 'supervisor'],
+  steriliser_test: ['operator', 'supervisor', 'engineering'],
+  glove_integrity: ['operator', 'supervisor'],
+  pressure_reading: ['operator', 'supervisor'],
 };
 export const mayRecord = (type: string, roles: Role[]) => (RECORDERS[type] ?? []).some((r) => roles.includes(r));
 export const VERIFIERS: Role[] = ['supervisor', 'qa'];
@@ -90,6 +128,23 @@ export function checkData(
     if (String(data.nextDue) <= calibrationDay) problems.push('The next due date must be after the calibration date.');
     if (data.result === 'fail' && (!String(data.comment ?? '').trim() || !String(data.deviationRef ?? '').trim())) {
       problems.push('A failed calibration needs a comment and a deviation reference.');
+    }
+  }
+  // A failed sterile check needs a comment and a deviation reference (A1 3.2 non-conformities).
+  if (['steriliser_cycle', 'steriliser_test', 'glove_integrity'].includes(type) && data.result === 'fail'
+      && (!String(data.comment ?? '').trim() || !String(data.deviationRef ?? '').trim())) {
+    problems.push('A failed result needs a comment and a deviation reference.');
+  }
+  if (type === 'pressure_reading') {
+    const point = settings.pressurePoints.find((p) => p.name === data.point);
+    if (!point) problems.push('Unknown pressure point: choose one of the approved non-critical points.');
+    else {
+      // LB-16: out-of-limit readings are flagged and need a comment and a deviation reference.
+      const value = data.value as number;
+      data.outOfLimit = value < point.min || value > point.max;
+      if (data.outOfLimit && (!String(data.comment ?? '').trim() || !String(data.deviationRef ?? '').trim())) {
+        problems.push(`Reading outside ${point.min}–${point.max} ${point.unit}: give a comment and a deviation reference.`);
+      }
     }
   }
   if (type === 'area_cleaning' && equipment.classified) {

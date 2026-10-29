@@ -11,6 +11,10 @@ const EMPTY: Record<string, Data> = {
   calibration: { result: 'pass', certificateRef: '', nextDue: '', remarks: '', comment: '', deviationRef: '' },
   area_cleaning: { cleaningType: 'daily', agent: '', sporicidal: false, disinfectantLot: '', checklist: {}, remarks: '' },
   general_log: { checklist: {}, notes: '' },
+  steriliser_cycle: { cycleType: 'steam', cycleId: '', programme: '', load: '', result: 'pass', controllerRecordRef: '', indicators: '', remarks: '', comment: '', deviationRef: '' },
+  steriliser_test: { test: 'air_removal', result: 'pass', remarks: '', comment: '', deviationRef: '' },
+  glove_integrity: { port: '', method: '', result: 'pass', remarks: '', comment: '', deviationRef: '' },
+  pressure_reading: { point: '', value: '', comment: '', deviationRef: '' },
 };
 
 const OPTIONS: Record<string, Record<string, [string, string][]>> = {
@@ -18,6 +22,9 @@ const OPTIONS: Record<string, Record<string, [string, string][]>> = {
   maintenance: { kind: [['preventive', 'Preventive'], ['breakdown', 'Breakdown'], ['repair', 'Repair']] },
   calibration: { result: [['pass', 'Pass'], ['fail', 'Fail']] },
   area_cleaning: { cleaningType: [['daily', 'Daily'], ['weekly', 'Weekly'], ['product_change', 'Product changeover'], ['other', 'Other']] },
+  steriliser_cycle: { cycleType: [['steam', 'Steam (autoclave)'], ['dry_heat', 'Dry heat / depyrogenation'], ['sip', 'Steam in place'], ['vhp', 'VHP bio-decontamination']], result: [['pass', 'Pass'], ['fail', 'Fail']] },
+  steriliser_test: { test: [['air_removal', 'Air removal (Bowie-Dick)'], ['leak', 'Leak (vacuum) test']], result: [['pass', 'Pass'], ['fail', 'Fail']] },
+  glove_integrity: { result: [['pass', 'Pass'], ['fail', 'Fail']] },
 };
 
 const TEXT_FIELDS: Record<string, [string, string, boolean?][]> = {
@@ -27,10 +34,16 @@ const TEXT_FIELDS: Record<string, [string, string, boolean?][]> = {
   calibration: [['certificateRef', 'Certificate / report reference'], ['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
   area_cleaning: [['agent', 'Cleaning / disinfecting agent'], ['disinfectantLot', 'Disinfectant lot'], ['remarks', 'Remarks', true]],
   general_log: [['notes', 'Notes', true]],
+  steriliser_cycle: [['cycleId', 'Cycle number'], ['programme', 'Programme'], ['load', 'Load', true], ['controllerRecordRef', 'Controller printout / record reference'], ['indicators', 'Indicators (BI/CI) used'], ['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
+  steriliser_test: [['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
+  glove_integrity: [['port', 'Glove port'], ['method', 'Test method'], ['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
+  pressure_reading: [['comment', 'Comment (needed if out of limits)', true], ['deviationRef', 'Deviation reference (needed if out of limits)']],
 };
 
+const OPTION_LABEL: Record<string, string> = { kind: 'Type', result: 'Result', cleaningType: 'Cleaning type', cycleType: 'Cycle type', test: 'Test' };
+
 const HAS_CHECKLIST = new Set(['equipment_cleaning', 'area_cleaning', 'general_log']);
-const HAS_END = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning']);
+const HAS_END = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'steriliser_cycle']);
 
 // One form for every core logbook type. With `correcting`, it edits a copy of that version and
 // asks for a reason; the server stores a new version (LB-17).
@@ -72,7 +85,16 @@ export function EntryForm({
     setProblems([]);
     const body: Record<string, unknown> = {
       activityStart: new Date(start).toISOString(),
-      data,
+      // The server decides whether a reading is out of limits.
+      data: type === 'pressure_reading'
+        ? {
+            point: data.point,
+            // An empty field is sent as missing, never as 0; a decimal comma is accepted (review S6-3).
+            value: String(data.value ?? '').trim() === '' ? null : Number(String(data.value).trim().replace(',', '.')),
+            comment: data.comment,
+            deviationRef: data.deviationRef,
+          }
+        : data,
     };
     if (HAS_END.has(type) || (correcting && correcting.activityEnd)) body.activityEnd = new Date(end).toISOString();
     if (type === 'equipment_use') Object.assign(body, { productId: productId || undefined, batch: batch || undefined });
@@ -126,7 +148,7 @@ export function EntryForm({
 
         {Object.entries(OPTIONS[type] ?? {}).map(([k, opts]) => (
           <label key={k}>
-            {k === 'kind' ? 'Type' : k === 'result' ? 'Result' : 'Cleaning type'}
+            {OPTION_LABEL[k] ?? k}
             <select value={String(data[k])} onChange={(e) => set(k, e.target.value)}>
               {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
@@ -134,6 +156,18 @@ export function EntryForm({
         ))}
         {type === 'calibration' && (
           <label>Next due<input type="date" value={String(data.nextDue ?? '').slice(0, 10)} onChange={(e) => set('nextDue', e.target.value)} /></label>
+        )}
+        {type === 'pressure_reading' && (
+          <>
+            <label>
+              Pressure point
+              <select value={String(data.point)} onChange={(e) => set('point', e.target.value)}>
+                <option value="">Choose…</option>
+                {settings.pressurePoints.map((p) => <option key={p.name} value={p.name}>{p.name} ({p.min}–{p.max} {p.unit})</option>)}
+              </select>
+            </label>
+            <label>Reading (Pa)<input inputMode="decimal" value={String(data.value ?? '')} onChange={(e) => set('value', e.target.value)} /></label>
+          </>
         )}
         {type === 'area_cleaning' && (
           <label className="check"><input type="checkbox" checked={Boolean(data.sporicidal)} onChange={(e) => set('sporicidal', e.target.checked)} />Sporicidal agent</label>
