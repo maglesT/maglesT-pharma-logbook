@@ -231,6 +231,20 @@ describe('review fixes (S4)', () => {
     expect((await status(id)).state).toBe('clean');
   });
 
+  it('LB-07: a cleaning entered in the minute the use ended makes the equipment clean once verified', async () => {
+    const id = await newItem();
+    await cleanAndVerify(id);
+    const use = (await startUse(id)).json().id;
+    const endedAt = now();
+    await call(t.app, c.op1!, 'POST', `/api/entries/${use}/complete`, { activityEnd: endedAt });
+    // Forms enter whole minutes: the cleaning is entered as starting and ending in that minute.
+    const at = new Date(Math.floor(Date.parse(endedAt) / 60_000) * 60_000).toISOString();
+    const e = await entry('op1', id, { logbookType: 'equipment_cleaning', activityStart: at, activityEnd: at, data: { cleaningType: 'major', checklist: {} }, signature: sig('op1') });
+    expect(e.statusCode).toBe(201);
+    expect((await signEntry('sup1', 'verify', e.json().id)).statusCode).toBe(200);
+    expect((await status(id)).state).toBe('clean');
+  });
+
   it('LB-07: a cleaning that started before the last use ended is refused', async () => {
     const id = await newItem();
     await cleanAndVerify(id);

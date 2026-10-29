@@ -78,7 +78,9 @@ async function facts(q: Sql | Tx, ids: number[] | null): Promise<Facts[]> {
       order by s.logbook_type, s.version desc
     ),
     uses as (
-      select equipment_id, max(activity_end) as last_use_end from latest where logbook_type = 'equipment_use' group by equipment_id
+      select distinct on (equipment_id) equipment_id, activity_end as last_use_end, entered_at as last_use_entered_at
+      from latest where logbook_type = 'equipment_use' and activity_end is not null
+      order by equipment_id, activity_end desc
     )
     select q.id::int, q.kind, q.clean_hold_hours, q.needs_calibration,
       coalesce((select en.on from enabled en
@@ -87,10 +89,13 @@ async function facts(q: Sql | Tx, ids: number[] | null): Promise<Facts[]> {
       u.id::int as open_use_id, u.product_id::int as open_use_product, u.batch as open_use_batch,
       u.data->>'stage' as open_use_stage, u.activity_start as open_use_since,
       us.last_use_end,
-      -- A cleaning counts only if it started after the last use ended (review S4-3).
+      -- A cleaning counts only if it started after the last use ended (review S4-3). Forms enter whole
+      -- minutes, so one in the minute the use ended counts if it was first entered after the use ended (S8).
       (select max(l.activity_end) from latest l where l.equipment_id = q.id and l.verified
          and l.logbook_type in ('equipment_cleaning', 'area_cleaning')
-         and (us.last_use_end is null or l.activity_start >= date_trunc('minute', us.last_use_end))) as last_clean_end,
+         and (us.last_use_end is null or l.activity_start >= us.last_use_end
+              or (l.activity_start >= date_trunc('minute', us.last_use_end)
+                  and (select min(x.entered_at) from entries x where x.entry_id = l.entry_id) > us.last_use_entered_at))) as last_clean_end,
       (select count(*)::int from latest l where l.equipment_id = q.id and not l.verified
          and l.logbook_type in ('equipment_cleaning', 'area_cleaning')) as unverified_cleanings,
       (select count(*)::int from latest l where l.equipment_id = q.id and l.logbook_type = 'maintenance' and l.data->>'kind' = 'breakdown'
@@ -188,7 +193,8 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   let cleanUntil: Date | null = null;
   let cleanState: StatusCode | null = null;
   if (f.tracks_cleaning && !f.open_use_id) {
-    const cleanedAfterUse = f.last_clean_end && (!f.last_use_end || f.last_clean_end >= f.last_use_end);
+    // The query only returns cleanings that followed the last use.
+    const cleanedAfterUse = Boolean(f.last_clean_end);
     if (!cleanedAfterUse) {
       blockers.push(f.unverified_cleanings > 0 ? 'Dirty: the cleaning is awaiting verification.' : 'Dirty: clean and verify before the next use.');
       cleanState = 'dirty';

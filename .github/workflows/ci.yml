@@ -39,3 +39,28 @@ jobs:
           MIGRATION_DATABASE_URL=$DATABASE_URL node dist/db/create-admin.js admin "CI Admin" > /dev/null
           BACKUP_DIR=./backups ops/backup.sh
           ADMIN_URL=postgres://logbook_owner:dev@localhost:5432/postgres ops/restore-check.sh "$(ls ./backups/*.dump | tail -1)"
+  # Browser tests of the main flows (docs/05 section 5) against the built UI and the real server.
+  browser:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: logbook_owner
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: logbook_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U logbook_owner" --health-interval 5s --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://logbook_owner:dev@localhost:5432/logbook_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with: { name: playwright-report, path: playwright-report, retention-days: 14 }
