@@ -1,6 +1,6 @@
 # Handover
 
-Updated: 2026-10-29, after slice S5.
+Updated: 2026-10-29, after slice S6.
 
 ## State
 - Planning deliverables (a)–(d) are approved: decisions D-01 to D-05 in `decisions.md`.
@@ -50,14 +50,19 @@ Updated: 2026-10-29, after slice S5.
 - **Exports (`server/routes/exports.ts`):** `/api/export/period.(pdf|csv)` and `/api/export/batch.(pdf|csv)`, using pdfmake with Helvetica.
 - **UI:** Review page with logbook review, batch view and audit trail tabs.
 
-## Next: S6, sterile types (LB-12, LB-14–16)
-- **Data schemas** (`server/entries.ts`):
-  - `steriliser_cycle`: type (steam/dry heat/SIP/VHP), cycleId unique per equipment (partial unique index on `(equipment_id, data->>'cycleId')` for latest versions, or a server check), programme, load, result, controller record ref;
-  - `steriliser_test`: test (leak/Bowie-Dick), result;
-  - `glove_integrity`: port, result;
-  - `pressure_reading`: point (from settings), value, out of limit, which needs a comment and deviation reference.
-- **Status:** a failed steriliser test or cycle blocks the steriliser; a failed glove test blocks the isolator. Add these to `status.ts` as blockers.
-- **Recording:** add the four types to RECORDERS, the UI form and the PERFORMER_SIGNS lists.
+## Done: S6, sterile types (LB-12, LB-14–16)
+- **Entry rules (`server/entries.ts`):** schemas for steriliser_cycle, steriliser_test, glove_integrity and pressure_reading.
+  - Failed results need a comment and deviation reference.
+  - The pressure out-of-limit flag is set by the server from the approved point limits.
+- **Cycle ID:** unique per steriliser (`checkCycleId` in `routes/entries.ts`), checked under the equipment lock.
+- **Status (`status.ts`):** a failed steriliser test or glove port means out of service, and the item also gets `cycleBlockers`, which stop new cycles. A failed last cycle and out-of-limit pressure readings are warnings.
+- **UI:** forms for the four types; they show only on sterile equipment and rooms.
+
+## Next: S7, integrity, backup and traceability (LB-23, CP-01 support)
+- **Integrity check:** `npm run integrity` (and a nightly job via cron or systemd in ops). It re-reads all entries, settings and reviews, recomputes their signature hashes, checks that entry version chains are complete, and writes one audit row `integrity.checked` with counts and failures.
+- **Backup and restore:** `ops/backup.sh` (pg_dump custom format, keeps 365 days) and `ops/restore-check.sh` (restore into a scratch database, run migrations to check the schema, run the integrity check). CI runs the restore check on the test database.
+- **Traceability:** `npm run traceability` writes `docs/traceability.md` from the test names (rule ID → tests), and CI fails if a product rule (LB-xx in force) has no test.
+- **Handover:** a final README section covering installation and first setup.
 
 ## Notes
 - Official PDFs and extracted texts are in `sources/` (git-ignored). The gazette text of Schedule M Part I is in `maglesT/ebmr`, branch `docs/schedule-m-gazette`.

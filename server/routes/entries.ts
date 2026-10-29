@@ -126,6 +126,18 @@ function cleaningFits(status: { inUse: unknown; lastUseEnd: Date | null }, start
   }
 }
 
+// A1 8.45: a cycle identifier is unique per steriliser. Checked under the equipment lock.
+async function checkCycleId(tx: Tx, type: string, equipmentId: number, data: Record<string, unknown>, entryId: number | null) {
+  if (type !== 'steriliser_cycle') return;
+  const [dup] = await tx`
+    select 1 from entries e
+    where e.equipment_id = ${equipmentId} and e.logbook_type = 'steriliser_cycle'
+      and lower(e.data->>'cycleId') = lower(${String(data.cycleId)})
+      and e.entry_id <> ${entryId ?? -1}
+      and not exists (select 1 from entries x where x.supersedes = e.id)`;
+  if (dup) throw new EntryError(409, 'check_failed', [`Cycle ID ${String(data.cycleId)} is already recorded on this steriliser.`]);
+}
+
 async function dbNow(tx: Tx): Promise<Date> {
   const [r] = await tx<{ now: Date }[]>`select now() as now`;
   return r!.now;
@@ -211,6 +223,8 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         // The equipment row is locked, so the status cannot change before this entry commits.
         const status = (await statusOf(tx, equipmentId))!;
         if (isUse && status.blockers.length) throw new EntryError(409, 'not_fit_for_use', status.blockers);
+        // A sterilisation cycle needs a steriliser that is in service, calibrated and has passed its tests.
+        if (b.logbookType === 'steriliser_cycle' && status.cycleBlockers.length) throw new EntryError(409, 'not_fit_for_use', status.cycleBlockers);
         if (b.logbookType === 'equipment_cleaning' || b.logbookType === 'area_cleaning') cleaningFits(status, b.activityStart);
         if (isUse && (!b.productId || !b.batch)) throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
         if (isUse && b.activityEnd) throw new EntryError(400, 'check_failed', ['Record the end of use when it happens.']);
@@ -222,6 +236,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         }
         const late = timing(await dbNow(tx), [b.activityStart, end], b.lateReason);
         const data = validate(b.logbookType, b.data, settings, eq, b.activityStart);
+        await checkCycleId(tx, b.logbookType, equipmentId, data, null);
         const row = await insertVersion(tx, {
           equipment_id: equipmentId, logbook_type: b.logbookType, settings_id: settingsId, version: 1, supersedes: null,
           change: 'created', activity_start: b.activityStart, activity_end: end, product_id: b.productId ?? null,
@@ -306,6 +321,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           throw new EntryError(400, 'late_reason_required', [`The corrected time is more than ${LATE_MINUTES} minutes before the entry was made: give a reason.`]);
         }
         const data = validate(prev.logbook_type, b.data, s!.settings, eq, b.activityStart);
+        await checkCycleId(tx, prev.logbook_type, prev.equipment_id, data, prev.entry_id);
         const next = await insertVersion(tx, {
           ...prev, entry_id: prev.entry_id, version: prev.version + 1, supersedes: prev.id, change: 'corrected',
           activity_start: b.activityStart, activity_end: end, late, late_reason: lateReason,

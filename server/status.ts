@@ -14,6 +14,8 @@ export interface EquipmentStatus {
   state: StatusCode;
   // Why a new use is refused; empty when the item is fit for use.
   blockers: string[];
+  // Blockers other than cleaning: these also stop a sterilisation cycle (S6).
+  cycleBlockers: string[];
   warnings: string[];
   inUse: { entryId: number; productId: number | null; batch: string | null; stage: string; since: Date } | null;
   lastUseEnd: Date | null;
@@ -45,6 +47,10 @@ interface Facts {
   // Newest verified calibration.
   vcal_result: string | null;
   vcal_due: string | null;
+  failed_steriliser_tests: string[] | null;
+  failed_glove_ports: string[] | null;
+  last_cycle_result: string | null;
+  pressure_out_of_limit: string[] | null;
   today: string;
   now: Date;
 }
@@ -89,6 +95,22 @@ async function facts(q: Sql | Tx, ids: number[] | null): Promise<Facts[]> {
          and not exists (select 1 from signatures g where g.object_type = 'entry' and g.object_id = l.id and g.meaning = 'released')) as open_breakdowns,
       c.data->>'result' as cal_result, c.data->>'nextDue' as cal_due, coalesce(c.verified, false) as cal_verified,
       vc.data->>'result' as vcal_result, vc.data->>'nextDue' as vcal_due,
+      -- S6: the latest result per steriliser test type and per glove port, the latest cycle, and
+      -- the latest reading per pressure point.
+      (select array_agg(t.test) from (
+         select distinct on (l.data->>'test') l.data->>'test' as test, l.data->>'result' as result
+         from latest l where l.equipment_id = q.id and l.logbook_type = 'steriliser_test'
+         order by l.data->>'test', l.activity_start desc) t where t.result = 'fail') as failed_steriliser_tests,
+      (select array_agg(g.port) from (
+         select distinct on (l.data->>'port') l.data->>'port' as port, l.data->>'result' as result
+         from latest l where l.equipment_id = q.id and l.logbook_type = 'glove_integrity'
+         order by l.data->>'port', l.activity_start desc) g where g.result = 'fail') as failed_glove_ports,
+      (select l.data->>'result' from latest l where l.equipment_id = q.id and l.logbook_type = 'steriliser_cycle'
+         order by l.activity_start desc limit 1) as last_cycle_result,
+      (select array_agg(p.point) from (
+         select distinct on (l.data->>'point') l.data->>'point' as point, (l.data->>'outOfLimit')::boolean as oos
+         from latest l where l.equipment_id = q.id and l.logbook_type = 'pressure_reading'
+         order by l.data->>'point', l.activity_start desc) p where p.oos) as pressure_out_of_limit,
       to_char((now() at time zone ${PLANT_TZ})::date, 'YYYY-MM-DD') as today,
       now() as now
     from equipment q
@@ -146,6 +168,14 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     }
   }
 
+  // S6 (Annex 1): sterile checks.
+  const TEST_LABEL: Record<string, string> = { leak: 'leak test', air_removal: 'air-removal (Bowie-Dick) test' };
+  for (const test of f.failed_steriliser_tests ?? []) blockers.push(`Steriliser ${TEST_LABEL[test] ?? test} failed: repeat and pass before use.`);
+  for (const port of f.failed_glove_ports ?? []) blockers.push(`Glove integrity failed on port ${port}: replace and pass before use.`);
+  if (f.last_cycle_result === 'fail') warnings.push('The last sterilisation cycle failed: see its deviation.');
+  for (const point of f.pressure_out_of_limit ?? []) warnings.push(`Last pressure reading out of limits: ${point}.`);
+  const cycleBlockers = [...blockers];
+
   // LB-07: cleaning status, where the site tracks cleaning for this kind of item.
   let cleanUntil: Date | null = null;
   let cleanState: StatusCode | null = null;
@@ -168,7 +198,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
 
   const state: StatusCode = f.open_use_id
     ? 'in_use'
-    : f.open_breakdowns > 0
+    : f.open_breakdowns > 0 || (f.failed_steriliser_tests?.length ?? 0) > 0 || (f.failed_glove_ports?.length ?? 0) > 0
       ? 'out_of_service'
       : (calState ?? cleanState ?? 'available');
 
@@ -176,6 +206,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     equipmentId: f.id,
     state,
     blockers,
+    cycleBlockers,
     warnings,
     inUse: f.open_use_id
       ? { entryId: f.open_use_id, productId: f.open_use_product, batch: f.open_use_batch, stage: f.open_use_stage ?? '', since: f.open_use_since! }
