@@ -31,7 +31,7 @@ export function adviceRoutes(app: FastifyInstance, sql: Sql, advisor: AdviceProv
     if (row.logbook_type !== 'maintenance' || row.data.kind !== 'breakdown') {
       return reply.code(409).send({ error: 'not_a_breakdown', problems: ['Suggestions are for breakdown entries.'] });
     }
-    const similar = await similarBreakdowns(sql, row.entry_id, row.equipment_id);
+    const similar = await similarBreakdowns(sql, row.entry_id, row.equipment_id, (row.data.failureCategory as string | undefined) ?? null);
     const listed = similar.map((s) => ({ ...s, relationLabel: RELATION_LABEL[s.relation] }));
 
     const s = await settingsInForce(sql, 'breakdown_advice');

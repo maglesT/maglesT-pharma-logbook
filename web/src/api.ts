@@ -198,10 +198,10 @@ export interface EquipmentStatus {
 }
 
 export const STATE_LABEL: Record<string, [string, string]> = {
-  in_use: ['In use', 'chip-warn'],
-  dirty: ['Dirty', 'chip-bad'],
+  in_use: ['In use', 'chip-info'],
+  dirty: ['Dirty', 'chip-warn'],
   clean: ['Clean', 'chip-ok'],
-  clean_expired: ['Clean expired', 'chip-bad'],
+  clean_expired: ['Clean expired', 'chip-warn'],
   out_of_service: ['Out of service', 'chip-bad'],
   calibration_overdue: ['Calibration overdue', 'chip-bad'],
   calibration_failed: ['Calibration failed', 'chip-bad'],
@@ -326,7 +326,7 @@ export interface SimilarBreakdown {
   equipmentId: number;
   code: string;
   name: string;
-  relation: 'same_machine' | 'same_model' | 'same_type';
+  relation: 'same_machine' | 'same_model' | 'same_type' | 'same_failure_type';
   relationLabel: string;
   occurredAt: string;
   failureCategory: string | null;

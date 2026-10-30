@@ -70,21 +70,20 @@ export function Breakdowns({ onOpen }: { onOpen: (equipmentId: number) => void }
 
       {data && (
         <>
+          <div className="table-wrap">
           <table className="register">
             <thead>
-              <tr><th>Machine</th><th>Location</th><th>Occurred</th><th>Repair end</th><th>QA released</th><th>Downtime</th><th>Failure type</th><th>What happened</th><th>Root cause</th><th>Work done</th><th>Parts used</th><th>Done by</th><th>WO</th><th>Status</th></tr>
+              <tr><th>Machine</th><th>Occurred</th><th>Repaired / QA released</th><th>Downtime</th><th>Failure type</th><th>What happened</th><th>Root cause</th><th>Work done</th><th>Parts used</th><th>Done by</th><th>WO</th><th>Status</th></tr>
             </thead>
             <tbody>
-              {data.items.length === 0 && <tr><td colSpan={14} className="muted">No breakdowns in this period.</td></tr>}
+              {data.items.length === 0 && <tr><td colSpan={12} className="muted">No breakdowns in this period.</td></tr>}
               {data.items.map((b) => {
                 const [label, cls] = BREAKDOWN_STATUS_LABEL[b.status] ?? [b.status, 'chip-warn'];
                 return (
                   <tr key={b.entryId} className="clickable" onClick={() => onOpen(b.equipmentId)}>
-                    <td>{b.code}<br /><span className="muted">{b.name}</span></td>
-                    <td>{b.location}</td>
+                    <td><strong>{b.code}</strong><br /><span className="muted">{b.name}<br />{b.location}</span></td>
                     <td>{plantTime(b.occurredAt)}</td>
-                    <td>{plantTime(b.repairEnd)}</td>
-                    <td>{plantTime(b.releasedAt)}</td>
+                    <td>{plantTime(b.repairEnd)}<br /><span className="muted">QA: {plantTime(b.releasedAt)}</span></td>
                     <td>{downtimeText(b)}</td>
                     <td>{b.failureCategory ?? '—'}</td>
                     <td>{b.description}</td>
@@ -99,6 +98,7 @@ export function Breakdowns({ onOpen }: { onOpen: (equipmentId: number) => void }
               })}
             </tbody>
           </table>
+          </div>
 
           <h2>Per machine</h2>
           <p className="muted">Downtime runs from the breakdown to the QA release. MTTR: mean downtime of released breakdowns. MTBF: operating time in the period (from installation, if later) per failure.</p>

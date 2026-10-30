@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Part, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
+import { api, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
 import { HistoryCard } from './HistoryCard.js';
 import { VoiceNoteDialog } from '../components/VoiceNote.js';
 import { AdviceDialog } from '../components/AdviceDialog.js';
+import { Fields } from '../fields.js';
 
 const CORE_TYPES = ['equipment_use', 'equipment_cleaning', 'maintenance', 'calibration', 'area_cleaning', 'general_log',
   'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading'];
@@ -43,10 +44,11 @@ export function EquipmentPage({ me, openId }: { me: Me; openId?: number }) {
     <>
       <h1>Equipment and areas</h1>
       <input className="search" placeholder="Search by ID, name or location" value={filter} onChange={(e) => setFilter(e.target.value)} />
+      <p className="muted">{shown.length} of {items.filter((i) => i.active).length} logbooks</p>
       {statuses === null && <p className="muted">Loading status…</p>}
       <div className="tiles">
         {shown.map((i) => (
-          <button key={i.id} className="tile" onClick={() => setSelected(i.id)}>
+          <button key={i.id} className={`tile state-${statuses?.find((x) => x.equipmentId === i.id)?.state ?? 'loading'}`} onClick={() => setSelected(i.id)}>
             <strong>{i.code} <StatusChip status={statuses?.find((x) => x.equipmentId === i.id)} /></strong>
             <span>{i.name}</span>
             <span className="muted">{i.location}</span>
@@ -260,29 +262,6 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
   );
 }
 
-// Field labels in the order they are shown; a breakdown reads top to bottom from failure to repair.
-const LABELS: Record<string, string> = {
-  kind: 'Type', occurredAt: 'Occurred', reportedBy: 'Reported by', failureCategory: 'Failure category', description: 'What happened',
-  impactAssessment: 'Impact assessment', rootCause: 'Root cause', workDone: 'Work done', parts: 'Parts used', partsNone: 'Parts used',
-  toolsUsed: 'Tools / consumables', doneBy: 'Done by', vendorName: 'Vendor', serviceReportRef: 'Service report', workOrderRef: 'Work order',
-  postRepairChecks: 'Post-repair checks', recalibrationNeeded: 'Re-calibration needed',
-  stage: 'Stage', cleaningType: 'Cleaning', agent: 'Agent', sporicidal: 'Sporicidal', disinfectantLot: 'Disinfectant lot',
-  cycleType: 'Cycle', cycleId: 'Cycle no.', programme: 'Programme', load: 'Load', controllerRecordRef: 'Controller record', indicators: 'Indicators',
-  test: 'Test', port: 'Port', method: 'Method', point: 'Point', value: 'Reading', outOfLimit: 'OUT OF LIMITS',
-  result: 'Result', certificateRef: 'Certificate', nextDue: 'Next due', notes: 'Notes', remarks: 'Remarks', comment: 'Comment', deviationRef: 'Deviation',
-};
-const ORDER = Object.keys(LABELS);
-const rank = (k: string) => (ORDER.includes(k) ? ORDER.indexOf(k) : ORDER.length);
-
-const partsLine = (parts: Part[]) => parts.map((p) => `${p.quantity} × ${p.name}${p.partNumber ? ` (P/N ${p.partNumber})` : ''}${p.lotSerial ? `, lot/SN ${p.lotSerial}` : ''}`).join('; ');
-const value = (k: string, v: unknown) =>
-  k === 'nextDue' ? String(v).slice(0, 10)
-  : k === 'occurredAt' ? plantTime(String(v))
-  : k === 'parts' ? partsLine(v as Part[])
-  : k === 'partsNone' ? 'none'
-  : k === 'doneBy' ? (v === 'vendor' ? 'external vendor' : 'in-house')
-  : v === true ? 'yes' : String(v).replaceAll('_', ' ');
-
 // D-26: the signed text is shown in the entry; the original voice note opens from here.
 export function VoiceLinks({ e, onOpen }: { e: Entry; onOpen: (id: number) => void }) {
   if (!e.voiceNotes?.length) return null;
@@ -298,17 +277,6 @@ export function VoiceLinks({ e, onOpen }: { e: Entry; onOpen: (id: number) => vo
 }
 
 export function Summary({ e, full = false }: { e: Entry; full?: boolean }) {
-  const parts = Object.entries(e.data)
-    .filter(([k, v]) => k !== 'checklist' && v !== '' && v !== false && v !== null && !(Array.isArray(v) && v.length === 0))
-    .sort(([a], [b]) => rank(a) - rank(b))
-    .map(([k, v]): [string, string] => [LABELS[k] ?? k, value(k, v)]);
   const checklist = Object.entries((e.data.checklist ?? {}) as Record<string, boolean>).filter(([, v]) => v).map(([k]) => k);
-  if (full && checklist.length) parts.push(['Checklist confirmed', checklist.join('; ')]);
-  if (!parts.length) return <span>—</span>;
-  // One field per line, so a long breakdown record stays readable.
-  return (
-    <dl className="fields">
-      {parts.map(([label, v]) => <div key={label}><dt>{label}</dt><dd>{v}</dd></div>)}
-    </dl>
-  );
+  return <Fields data={e.data} extra={full && checklist.length ? [['Checklist confirmed', checklist.join('; ')]] : []} />;
 }

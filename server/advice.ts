@@ -8,11 +8,12 @@ import { downtimeText } from './routes/history.js';
 // switched it on, a language model reads them and suggests causes, checks and parts. Advice only:
 // nothing from it enters a logbook entry; the engineer records and signs what was actually done.
 
-export type Relation = 'same_machine' | 'same_model' | 'same_type';
+export type Relation = 'same_machine' | 'same_model' | 'same_type' | 'same_failure_type';
 export const RELATION_LABEL: Record<Relation, string> = {
   same_machine: 'same machine',
   same_model: 'same make and model',
   same_type: 'same machine type',
+  same_failure_type: 'same failure type, other machine',
 };
 
 export interface Similar {
@@ -35,6 +36,8 @@ export interface Similar {
 
 const YEARS_BACK = 3;
 const MAX_SIMILAR = 40;
+// Other machines with the same failure category add context, but never crowd out closer records.
+const MAX_SAME_FAILURE_TYPE = 12;
 
 // "Rotary tablet compression machine (standby)" and "Rotary tablet compression machine" are one type.
 const machineType = (name: string) => name.toLowerCase().replace(/\([^)]*\)/g, '').replace(/\s+\d+\s*$/, '').replace(/\s+/g, ' ').trim();
@@ -50,7 +53,7 @@ async function latestDetails(sql: Sql) {
 }
 
 // Past breakdowns related to this one, closest relation first, newest first within a relation.
-export async function similarBreakdowns(sql: Sql, entryId: number, equipmentId: number, now = new Date()): Promise<Similar[]> {
+export async function similarBreakdowns(sql: Sql, entryId: number, equipmentId: number, failureCategory: string | null, now = new Date()): Promise<Similar[]> {
   const [eq] = await sql<{ name: string }[]>`select name from equipment where id = ${equipmentId}`;
   if (!eq) return [];
   const [items, details, recent] = await Promise.all([
@@ -65,14 +68,16 @@ export async function similarBreakdowns(sql: Sql, entryId: number, equipmentId: 
     if (b.equipmentId === equipmentId) return 'same_machine';
     if (ownModel && makeModel(details.get(b.equipmentId)) === ownModel) return 'same_model';
     if (machineType(names.get(b.equipmentId) ?? '') === ownType) return 'same_type';
+    if (failureCategory && b.failureCategory === failureCategory) return 'same_failure_type';
     return null;
   };
-  const rank: Record<Relation, number> = { same_machine: 0, same_model: 1, same_type: 2 };
+  const rank: Record<Relation, number> = { same_machine: 0, same_model: 1, same_type: 2, same_failure_type: 3 };
   return recent
     .filter((b) => b.entryId !== entryId)
     .map((b) => ({ b, relation: relationOf(b) }))
     .filter((x): x is { b: Breakdown; relation: Relation } => x.relation !== null)
     .sort((x, y) => rank[x.relation] - rank[y.relation] || y.b.occurredAt.getTime() - x.b.occurredAt.getTime())
+    .filter((x, i, all) => x.relation !== 'same_failure_type' || i - all.findIndex((y) => y.relation === 'same_failure_type') < MAX_SAME_FAILURE_TYPE)
     .slice(0, MAX_SIMILAR)
     .map(({ b, relation }) => ({
       entryId: b.entryId, equipmentId: b.equipmentId, code: b.code, name: b.name, relation, occurredAt: b.occurredAt,
@@ -113,7 +118,8 @@ export const ADVICE_INSTRUCTIONS = `You help maintenance engineers in a GMP phar
 You get the new breakdown and the plant's own records of related past breakdowns, each with an entry number (#).
 Use only these records: do not add causes, parts or part numbers that are not in them. Every cause, check and part
 names the entry numbers it rests on. Prefer what fixed the problem on the same machine, then on the same make and
-model, then on the same machine type. Point out repeat failures. If the records do not cover this failure, say so,
+model, then on the same machine type; records of the same failure type on other machines are weaker evidence, use
+them only where the failure clearly matches (for example the same kind of motor or drive trip). Point out repeat failures. If the records do not cover this failure, say so,
 set enoughHistory to false and keep the lists short or empty. Write plain, short English for an engineer on the shop floor.
 This is advice only: the engineer decides, and the repair is recorded and signed in the logbook as usual.`;
 

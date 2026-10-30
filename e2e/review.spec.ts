@@ -35,7 +35,7 @@ test('LB-25: QA signs a period review; the batch view and the PDF exports open',
   await page.getByRole('button', { name: 'Batch view' }).click();
   await page.getByPlaceholder('Batch number').fill(batch);
   await page.getByRole('button', { name: 'Show' }).click();
-  const row = page.getByRole('row').filter({ hasText: 'Equipment use' }).filter({ hasText: 'completed' });
+  const row = page.locator('table').first().getByRole('row').filter({ hasText: 'Equipment use' }).filter({ hasText: 'completed' });
   await expect(row).toContainText(code);
   await expect(row).toContainText(`Batch ${batch}`);
   expect(await pdf('PDF')).toMatch(/\.pdf$/);

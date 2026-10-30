@@ -18,8 +18,10 @@ export function Login({ onLoggedIn }: { onLoggedIn: () => void }) {
   };
 
   return (
-    <main className="page narrow">
+    <main className="page narrow login">
+      <div className="login-brand" aria-hidden="true" />
       <h1>Pharma Logbook</h1>
+      <p className="muted">Electronic GMP logbooks for equipment, rooms and breakdowns. Log in with your own user ID.</p>
       <form className="card" onSubmit={submit}>
         <label>
           User ID

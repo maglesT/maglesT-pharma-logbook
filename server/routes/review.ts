@@ -33,12 +33,26 @@ export interface AuditRow {
   oldValue: unknown;
   newValue: unknown;
   reason: string | null;
+  // What the row is about, in words people know: machine, logbook, entry number, user, settings version.
+  subject: { code?: string; name?: string; logbookType?: string; entryId?: number; username?: string; version?: number } | null;
 }
 
 const AUDIT_SELECT = (q: Sql | Tx) => q`
   select a.id::int, a.at, u.full_name as actor, a.action, a.object_type as "objectType", a.object_id as "objectId",
-    a.old_value as "oldValue", a.new_value as "newValue", a.reason
-  from audit_log a left join users u on u.id = a.actor_id`;
+    a.old_value as "oldValue", a.new_value as "newValue", a.reason,
+    case a.object_type
+      when 'entry' then (select json_build_object('code', q.code, 'name', q.name, 'logbookType', e.logbook_type, 'entryId', e.entry_id)
+        from entries e join equipment q on q.id = e.equipment_id where e.id = o.id)
+      when 'voice_note' then (select json_build_object('code', q.code, 'name', q.name, 'logbookType', v.logbook_type)
+        from voice_notes v join equipment q on q.id = v.equipment_id where v.id = o.id)
+      when 'equipment' then (select json_build_object('code', q.code, 'name', q.name) from equipment q where q.id = o.id)
+      when 'review' then (select json_build_object('code', q.code, 'name', q.name) from reviews r join equipment q on q.id = r.equipment_id where r.id = o.id)
+      when 'product' then (select json_build_object('code', p.code, 'name', p.name) from products p where p.id = o.id)
+      when 'user' then (select json_build_object('username', x.username, 'name', x.full_name) from users x where x.id = o.id)
+      when 'settings' then (select json_build_object('logbookType', g.logbook_type, 'version', g.version) from logbook_settings g where g.id = o.id)
+    end as subject
+  from audit_log a left join users u on u.id = a.actor_id
+  cross join lateral (select case when a.object_id ~ '^[0-9]{1,18}$' then a.object_id::bigint end as id) o`;
 
 // Every version of the entries with any version starting in the period, so an entry corrected into
 // another period still shows in its original one (review S5-1).

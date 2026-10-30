@@ -70,6 +70,7 @@ describe('breakdown suggestions (D-27)', () => {
     await breakdown(sister, 'Punch sticking');
     await breakdown(sameType, 'Turret noise');
     await breakdown(other, 'Blower trips');
+    await breakdown(other, 'Heater fails', { failureCategory: 'electrical' });
     const current = await breakdown(press, 'Upper punch sticking again');
 
     const before = await ask('eng1', current);
@@ -77,8 +78,9 @@ describe('breakdown suggestions (D-27)', () => {
     expect(before.json().advice).toBeNull();
     expect(before.json().adviceNote).toMatch(/not switched on/);
     expect(prompts).toHaveLength(0);
-    // Same machine first, then same make and model, then same machine type; never other machines or itself.
-    expect(before.json().similar.map((s: { relation: string }) => s.relation)).toEqual(['same_machine', 'same_model', 'same_type']);
+    // Same machine first, then same make and model, then same machine type, then the same failure type elsewhere;
+    // never another failure type on another machine, nor itself.
+    expect(before.json().similar.map((s: { relation: string }) => s.relation)).toEqual(['same_machine', 'same_model', 'same_type', 'same_failure_type']);
     expect(before.json().similar[0].entryId).toBe((await t.owner`select entry_id::int from entries where id = ${old}`)[0]!.entry_id);
 
     await approve('breakdown_advice');
@@ -94,8 +96,8 @@ describe('breakdown suggestions (D-27)', () => {
 
   it('LB-18: each suggestion is kept in the audit trail with the model and the records it used; no names are sent', async () => {
     const id = await newItem('Blister packing machine');
-    await breakdown(id, 'Camera rejects good blisters');
-    const current = await breakdown(id, 'Camera rejects again');
+    await breakdown(id, 'Camera rejects good blisters', { failureCategory: 'instrumentation' });
+    const current = await breakdown(id, 'Camera rejects again', { failureCategory: 'instrumentation' });
     answer = GOOD([]);
     expect((await ask('op1', current)).statusCode).toBe(200);
     const [row] = await t.owner<{ new_value: { modelVersion: string; basedOn: number[]; advice: { summary: string } } }[]>`
@@ -117,8 +119,8 @@ describe('breakdown suggestions (D-27)', () => {
 
   it('LB-26: an outage or a malformed answer is reported, and the related breakdowns still come back', async () => {
     const id = await newItem('Autocoater');
-    await breakdown(id, 'Spray gun clogged');
-    const current = await breakdown(id, 'Spray gun clogged again');
+    await breakdown(id, 'Spray gun clogged', { failureCategory: 'utility' });
+    const current = await breakdown(id, 'Spray gun clogged again', { failureCategory: 'utility' });
     outage = new AdviceError('unavailable', 'The suggestion service is not available (503).');
     const down = await ask('eng1', current);
     expect(down.statusCode).toBe(503);
