@@ -124,6 +124,8 @@ const RECORDERS: Record<string, Role[]> = {
   pressure_reading: ['operator', 'supervisor'],
 };
 export const mayRecord = (type: string, roles: Role[]) => (RECORDERS[type] ?? []).some((r) => roles.includes(r));
+// D-17: a correction needs the right to record the type, and being the author or a supervisor.
+export const mayCorrect = (type: string, roles: Role[], own: boolean) => mayRecord(type, roles) && (own || roles.includes('supervisor'));
 export const VERIFIERS: Role[] = ['supervisor', 'qa'];
 
 export interface EquipmentInfo {

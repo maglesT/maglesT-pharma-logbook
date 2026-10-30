@@ -273,6 +273,29 @@ describe('review fixes (S3)', () => {
     expect((await call(t.app, cookies.sup1!, 'POST', `/api/entries/${ended}/correct`, { ...body, signature: sig('sup1') })).statusCode).toBe(200);
   });
 
+  it('S11: the logbook tells each user which entries they may correct (D-17) and which types they may record', async () => {
+    const item = await ready();
+    const id = (await create('op1', item, { logbookType: 'equipment_use', activityStart: minutesAgo(1), productId: product, batch: 'B3010', data: {} })).json().id;
+    const flag = async (who: string) => (await call(t.app, cookies[who]!, 'GET', `/api/equipment/${item}/entries`)).json().find((x: { id: number }) => x.id === id).mayCorrect;
+    expect(await flag('op1')).toBe(true);
+    expect(await flag('sup1')).toBe(true);
+    expect(await flag('op2')).toBe(false);
+    expect(await flag('qa')).toBe(false);
+    expect(await flag('admin')).toBe(false);
+    const mayRecord = async (who: string) => Object.fromEntries((await call(t.app, cookies[who]!, 'GET', '/api/logbook-types')).json().map((x: { key: string; mayRecord: boolean }) => [x.key, x.mayRecord]));
+    expect(Object.values(await mayRecord('qa')).some(Boolean)).toBe(false);
+    expect(Object.values(await mayRecord('admin')).some(Boolean)).toBe(false);
+    expect(await mayRecord('op1')).toMatchObject({ equipment_use: true, general_log: true, calibration: false });
+    expect(await mayRecord('eng1')).toMatchObject({ equipment_use: false, maintenance: true, calibration: true });
+  });
+
+  it('S11: a refused correction says what is missing', async () => {
+    const id = (await create('op1', await ready(), { logbookType: 'equipment_use', activityStart: minutesAgo(1), productId: product, batch: 'B3011', data: {} })).json().id;
+    const res = await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/correct`, { activityStart: minutesAgo(1), data: {}, reason: '  ', signature: sig('op1') });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: 'invalid_request', problems: ['Give the reason for the correction.'] });
+  });
+
   it('LB-17: the database refuses a version that does not follow its predecessor', async () => {
     const a = (await create('op1', await ready(), { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B3004', data: {} })).json().id;
     const [row] = await t.owner`select * from entries where id = ${a}`;

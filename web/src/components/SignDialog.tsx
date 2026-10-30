@@ -35,6 +35,10 @@ export function SignDialog({
             ? 'Your role may not sign.'
             : err instanceof ApiError && err.code === 'content_changed'
               ? 'The content changed while this dialog was open. Close it and review the new content.'
+            : err instanceof ApiError && err.code === 'forbidden'
+              ? 'Your role may not sign this.'
+            : err instanceof ApiError && err.problems.length
+              ? err.problems.join(' ')
             : (err as Error).message,
       );
       setBusy(false);
