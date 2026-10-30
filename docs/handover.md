@@ -1,6 +1,6 @@
 # Handover
 
-Updated: 2026-10-30, after slice S11 (screens follow the server rules).
+Updated: 2026-10-30, after S11b (faster equipment list, readable history card).
 
 ## State
 - Planning deliverables (a)–(d) are approved: decisions D-01 to D-05 in `decisions.md`.
@@ -96,6 +96,11 @@ Updated: 2026-10-30, after slice S11 (screens follow the server rules).
 - **Server:** `mayCorrect()` in `server/entries.ts` is the one D-17 rule, used by the correct route. `GET /api/equipment/:id/entries` adds `mayCorrect` per entry for the logged-in user, and `GET /api/logbook-types` adds `mayRecord` per type. A refused entry, complete, correct, verify or release body now lists its problems (e.g. "Give the reason for the correction.").
 - **UI:** "+ <type>", "Complete repair" and "Correct" follow those flags, so QA and Admin see none. The correction reason is required and blocks "Sign and save" while empty. Forms and sign dialogs show the server's problems instead of the bare code.
 - **Tests:** two in `test/entries.test.ts` and one in `e2e/entries.spec.ts` (QA, engineering, supervisor and author views). Version 0.3.1.
+
+## Done: S11b, faster equipment list and readable history card
+- **Equipment list:** `allStatuses()` derives the status in groups of 25 items. One query for all 317 items of the trial plant scanned every latest entry once per item and took about 2.3 s, so tiles first showed without a status. Results are identical; about 140 ms on a copy of the trial data. The list shows "Loading status…" until statuses arrive.
+- **History card:** master-data events (item created, master data changed, equipment details changed) show the changed fields in words, e.g. "Location: Line A → Line B", from `server/changes.ts`; the history export uses the same text. The audit trail keeps the raw old and new values.
+- **Version:** `VERSION` in `server/app.ts` now matches `package.json` (0.3.2); it had stayed at 0.3.0 in S11.
 
 ## Possible next steps (not planned; owner to decide)
 - Validation package for a first site: IQ/OQ protocol templates that use `docs/traceability.md` and the CI report.

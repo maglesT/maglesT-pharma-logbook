@@ -153,10 +153,10 @@ function EventRow({ ev, onVoice }: { ev: HistoryEvent; onVoice: (id: number) => 
     <tr className="masterdata">
       <td>{plantTime(ev.at)}</td>
       <td>{ACTION_LABEL[ev.action] ?? ev.action}</td>
-      <td className="mono">
-        {ev.reason && <div>Reason: {ev.reason}</div>}
-        {ev.old != null && <div>Old: {JSON.stringify(ev.old)}</div>}
-        {ev.new != null && <div>New: {JSON.stringify(ev.new)}</div>}
+      <td>
+        {ev.reason && <div><strong>Reason:</strong> {ev.reason}</div>}
+        {ev.lines.map((l) => <div key={l}>{l}</div>)}
+        {ev.lines.length === 0 && <div className="muted">No field changed.</div>}
       </td>
       <td>{ev.actor ?? 'system'}</td>
       <td />

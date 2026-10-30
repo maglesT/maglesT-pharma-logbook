@@ -27,7 +27,7 @@ export function EquipmentPage({ me, openId }: { me: Me; openId?: number }) {
   const [items, setItems] = useState<Equipment[]>([]);
   const [filter, setFilter] = useState('');
   const [selected, setSelected] = useState<number | undefined>(openId);
-  const [statuses, setStatuses] = useState<EquipmentStatus[]>([]);
+  const [statuses, setStatuses] = useState<EquipmentStatus[] | null>(null);
   useEffect(() => {
     void api<Equipment[]>('GET', '/api/equipment').then(setItems);
     void api<EquipmentStatus[]>('GET', '/api/equipment/status').then(setStatuses);
@@ -42,10 +42,11 @@ export function EquipmentPage({ me, openId }: { me: Me; openId?: number }) {
     <>
       <h1>Equipment and areas</h1>
       <input className="search" placeholder="Search by ID, name or location" value={filter} onChange={(e) => setFilter(e.target.value)} />
+      {statuses === null && <p className="muted">Loading status…</p>}
       <div className="tiles">
         {shown.map((i) => (
           <button key={i.id} className="tile" onClick={() => setSelected(i.id)}>
-            <strong>{i.code} <StatusChip status={statuses.find((x) => x.equipmentId === i.id)} /></strong>
+            <strong>{i.code} <StatusChip status={statuses?.find((x) => x.equipmentId === i.id)} /></strong>
             <span>{i.name}</span>
             <span className="muted">{i.location}</span>
           </button>

@@ -257,6 +257,13 @@ export async function statusOf(q: Sql | Tx, equipmentId: number): Promise<Equipm
   return f ? deriveStatus(f) : null;
 }
 
+// In groups: each group's lookups scan only its own entries, not every entry once per item
+// (S11: 317 items in one query took over 2 s on the trial server).
+const GROUP = 25;
+
 export async function allStatuses(q: Sql | Tx): Promise<EquipmentStatus[]> {
-  return (await facts(q, null)).map(deriveStatus);
+  const ids = (await q<{ id: number }[]>`select id::int from equipment order by id`).map((r) => r.id);
+  const out: Facts[] = [];
+  for (let i = 0; i < ids.length; i += GROUP) out.push(...(await facts(q, ids.slice(i, i + GROUP))));
+  return out.map(deriveStatus);
 }
