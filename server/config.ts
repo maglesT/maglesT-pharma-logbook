@@ -12,6 +12,12 @@ const schema = z.object({
   HOST: z.string().default('0.0.0.0'),
   // Plant-local display time zone (register LB-19); storage is always UTC.
   DISPLAY_TZ: z.string().default('Asia/Kolkata'),
+  // Voice notes (D-26): the speech service key stays on the server. Without it voice notes are off.
+  // An empty value (e.g. an unset compose variable) means "not configured".
+  SARVAM_API_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional()),
+  SARVAM_BASE_URL: z.string().url().default('https://api.sarvam.ai'),
+  SARVAM_MODEL: z.string().default('saaras:v3'),
+  SARVAM_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
 });
 
 export type Config = z.infer<typeof schema>;

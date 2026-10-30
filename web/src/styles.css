@@ -80,3 +80,8 @@ dl.details { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16p
 dl.details dt { font-weight: 600; }
 dl.details dd { margin: 0; }
 .row.part input { flex: 1; min-width: 80px; }
+/* S10: voice notes (touch-friendly on phones and tablets) */
+.voice { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: -4px 0 8px; }
+.voice button, .voice select { min-height: 44px; }
+.voice button.recording { background: #b3261e; color: #fff; border-color: #b3261e; }
+.voice-draft { background: #fff8ec; border: 1px solid #f0c36d; border-radius: 6px; padding: 8px; margin: -4px 0 8px; }

@@ -6,7 +6,7 @@ import type { SessionUser } from './auth.js';
 import { recordFailure } from './lockout.js';
 import { verifyPassword } from './passwords.js';
 
-export const MEANINGS = ['performed', 'verified', 'released', 'reviewed', 'approved', 'corrected'] as const;
+export const MEANINGS = ['performed', 'verified', 'released', 'reviewed', 'approved', 'corrected', 'voice_confirmed'] as const;
 export type Meaning = (typeof MEANINGS)[number];
 
 // What the signer types: both components, every time (P11 11.200(a)(1); LB-20).
@@ -80,7 +80,7 @@ export interface SignRequest {
   signer: AuthenticatedSigner;
   // The hash the signer was shown (from SignInput); must equal the hash of `content`.
   shownHash: string;
-  objectType: 'entry' | 'settings' | 'review';
+  objectType: 'entry' | 'settings' | 'review' | 'voice_note';
   objectId: number;
   meaning: Meaning;
   content: unknown;

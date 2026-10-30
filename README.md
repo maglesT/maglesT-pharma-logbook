@@ -49,6 +49,16 @@ or, on a single box, let the owner login switch to it with `DB_APP_ROLE=logbook_
 3. As Admin, draft the settings for each logbook type the site uses. As QA, approve each version with an e-signature (Logbook settings). A type cannot be used until its settings are approved and in force.
 4. Clean and verify each item once before its first use: new equipment counts as dirty (D-18). Sterilisers need a verified passed leak or air-removal test before steam cycles (D-22).
 
+**Voice notes (D-26, optional).** Voice notes send the speaker's audio to Sarvam AI for transcription and translation.
+Before switching them on, the site must assess the supplier and have a service agreement (Annex 11 section 3, CP-06), and
+must have the consent of the staff who record (CP-10). Then:
+1. Put the key in `ops/.env` as `SARVAM_API_KEY=...` (never in the repository; the browser never receives it) and restart the app.
+   Optional: `SARVAM_MODEL` (default `saaras:v3`), `SARVAM_TIMEOUT_MS` (default 30000).
+2. As Admin, draft the *Voice notes (site setting)* with the allowed languages; as QA, approve it.
+The microphone works only over HTTPS (or on localhost). Clips are up to 30 seconds; each user may send 20 an hour.
+The audio and both texts are stored in the database, so they are in every backup. Without a key, or when the service is
+down, entries are typed as before.
+
 **Backups (LB-23).** Run `ops/backup.sh` daily, e.g. from cron on the host:
 `15 1 * * * DATABASE_URL=postgres://logbook_owner:...@localhost/logbook BACKUP_DIR=/srv/backups /opt/logbook/ops/backup.sh`.
 Backups are kept for 365 days (`KEEP_DAYS`). Copy them to storage outside the server.

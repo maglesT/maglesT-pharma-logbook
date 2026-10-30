@@ -95,6 +95,7 @@ export interface Settings {
   verificationRequired: boolean;
   limits: Record<string, { min?: number; max?: number; unit: string }>;
   pressurePoints: { name: string; critical: false; ccsRef: string; min: number; max: number; unit: string }[];
+  voiceLanguages?: string[];
 }
 
 export interface SettingsVersion {
@@ -125,6 +126,7 @@ export const MEANING_LABEL: Record<string, string> = {
   reviewed: 'Reviewed',
   approved: 'Approved',
   corrected: 'Corrected',
+  voice_confirmed: 'Voice note confirmed',
 };
 
 // Value for a datetime-local input, in the browser's local time.
@@ -161,6 +163,8 @@ export interface Entry {
   signatures: EntrySignature[];
   awaitingVerification?: boolean;
   inProgress?: boolean;
+  // D-26: voice notes whose signed English text is in this version.
+  voiceNotes?: { id: number; field: string; language: string | null; edited: boolean; carried: boolean }[];
 }
 
 export const TYPE_LABEL: Record<string, string> = {
@@ -284,3 +288,29 @@ export type HistoryEvent =
   | { kind: 'entry'; at: string; entry: Entry & { latest: boolean }; breakdown?: { downtime: string; parts: string; status: string } }
   | { kind: 'review'; at: string; review: { id: number; periodFrom: string; periodTo: string; reviewedBy: string | null; reviewedAt: string | null; superseded: boolean; valid: boolean } }
   | { kind: 'masterdata'; at: string; actor: string | null; action: string; old: unknown; new: unknown; reason: string | null };
+
+// S10 voice notes (D-26).
+export const VOICE_LANGUAGE_LABEL: Record<string, string> = {
+  'hi-IN': 'Hindi', 'mr-IN': 'Marathi', 'gu-IN': 'Gujarati', 'ta-IN': 'Tamil', 'te-IN': 'Telugu', 'kn-IN': 'Kannada', 'ml-IN': 'Malayalam',
+  'bn-IN': 'Bengali', 'pa-IN': 'Punjabi', 'od-IN': 'Odia', 'en-IN': 'Indian English', unknown: 'Detect automatically',
+};
+export interface VoiceConfig { enabled: boolean; switchedOn: boolean; configured: boolean; languages: string[]; fields: Record<string, string[]>; maxClipMs: number; statement: string }
+export interface VoiceDraft { id: number; transcript: string; translation: string; detectedLanguage: string | null; shownHash: string }
+export interface VoiceNote {
+  id: number;
+  field: string;
+  speaker: string;
+  requestedLanguage: string;
+  detectedLanguage: string | null;
+  audioMime: string;
+  audioBytes: number;
+  audioSha256: string;
+  durationMs: number | null;
+  transcript: string;
+  translation: string;
+  provider: string;
+  model: string;
+  requestedAt: string;
+  statement: string;
+  confirmation: { entryVersionId: number; finalText: string; edited: boolean; confirmedAt: string; signedBy: string | null; signedAt: string | null } | null;
+}

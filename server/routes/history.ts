@@ -10,7 +10,7 @@ import {
   type Breakdown,
 } from '../breakdowns.js';
 import { present, type EntryRow } from './entries.js';
-import { csvText, plant, sendCopy, tablesPdf, type PdfTable } from './exports.js';
+import { csvText, plant, sendCopy, tablesPdf, voiceNoteText, type PdfTable } from './exports.js';
 import { periodVersions, plantRange, reviewsFor } from './review.js';
 
 // S9 (D-25): equipment details, the site-wide breakdown register and the equipment history card.
@@ -104,7 +104,7 @@ function eventRow(ev: Event): { at: Date; kind: string; what: string; detail: st
       at: ev.at,
       kind: e.logbookType,
       what: `#${e.entryId} v${e.version} · ${e.change}${e.latest ? '' : ' (superseded)'}${e.correctionReason ? ` · reason: ${e.correctionReason}` : ''}`,
-      detail: `${e.batch ? `Batch ${e.batch} · ` : ''}${flat(e.data)}${e.activityEnd ? ` · until ${plant(e.activityEnd)}` : ''}`,
+      detail: `${e.batch ? `Batch ${e.batch} · ` : ''}${flat(e.data)}${e.activityEnd ? ` · until ${plant(e.activityEnd)}` : ''}${e.voiceNotes.length ? ` · ${voiceNoteText(e).replaceAll('\n', ' · ')}` : ''}`,
       who: `${e.enteredBy ?? ''}, ${plant(e.enteredAt)}`,
       signatures: sigText(e),
       breakdown: ev.breakdown ? `Downtime ${ev.breakdown.downtime} · parts: ${ev.breakdown.parts || '—'} · ${ev.breakdown.status}` : '',

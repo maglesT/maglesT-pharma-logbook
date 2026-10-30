@@ -7,6 +7,9 @@ const limit = z
   .object({ min: z.number().finite().optional(), max: z.number().finite().optional(), unit: z.string().max(20).default('') })
   .refine((l) => l.min === undefined || l.max === undefined || l.min <= l.max, 'min must not exceed max');
 
+// Languages a speaker may use for voice notes (S10, D-26): Sarvam BCP-47 codes.
+export const VOICE_LANGUAGES = ['hi-IN', 'mr-IN', 'gu-IN', 'ta-IN', 'te-IN', 'kn-IN', 'ml-IN', 'bn-IN', 'pa-IN', 'od-IN', 'en-IN'] as const;
+
 export const settingsSchema = z.object({
   enabled: z.boolean(),
   sopRef: z.string().trim().max(100).default(''),
@@ -30,6 +33,8 @@ export const settingsSchema = z.object({
     )
     .max(100)
     .default([]),
+  // Voice notes site setting only: the languages a speaker may use (D-26).
+  voiceLanguages: z.array(z.enum(VOICE_LANGUAGES)).max(VOICE_LANGUAGES.length).default([]),
 });
 export type LogbookSettings = z.infer<typeof settingsSchema>;
 
@@ -53,6 +58,8 @@ export const LOGBOOK_TYPES: LogbookType[] = [
   { key: 'steriliser_test', label: 'Steriliser test (leak, air removal)', appliesTo: ['equipment'], sterile: true, alwaysVerified: true },
   { key: 'glove_integrity', label: 'Glove integrity (isolator/RABS)', appliesTo: ['equipment'], sterile: true, alwaysVerified: false },
   { key: 'pressure_reading', label: 'Pressure reading (non-critical points)', appliesTo: ['area'], sterile: true, alwaysVerified: false },
+  // A site setting, not a logbook: switches voice notes on and selects the languages (D-26).
+  { key: 'voice_notes', label: 'Voice notes (site setting)', appliesTo: [], sterile: false, alwaysVerified: false },
 ];
 
 export const typeByKey = (key: string) => LOGBOOK_TYPES.find((t) => t.key === key);

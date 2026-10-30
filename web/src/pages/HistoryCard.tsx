@@ -4,7 +4,8 @@ import {
   type Details, type Equipment, type EquipmentCard, type HistoryEvent, type Me,
 } from '../api.js';
 import { StatusChip } from '../components/StatusChip.js';
-import { Summary } from './EquipmentPage.js';
+import { Summary, VoiceLinks } from './EquipmentPage.js';
+import { VoiceNoteDialog } from '../components/VoiceNote.js';
 
 const day = (offset: number) => {
   const d = new Date();
@@ -22,6 +23,7 @@ export function HistoryCard({ me, equipment }: { me: Me; equipment: Equipment })
   const [type, setType] = useState('');
   const [data, setData] = useState<(EquipmentCard & { events: HistoryEvent[] }) | null>(null);
   const [editing, setEditing] = useState(false);
+  const [listening, setListening] = useState<number | null>(null);
   const [error, setError] = useState('');
 
   const query = () => `fromDay=${fromDay}&toDay=${toDay}${type ? `&types=${type}` : ''}`;
@@ -95,10 +97,11 @@ export function HistoryCard({ me, equipment }: { me: Me; equipment: Equipment })
           <thead><tr><th>When</th><th>What</th><th>Details</th><th>By</th><th>Signatures</th></tr></thead>
           <tbody>
             {data.events.length === 0 && <tr><td colSpan={5} className="muted">Nothing in this period.</td></tr>}
-            {data.events.map((ev, i) => <EventRow key={i} ev={ev} />)}
+            {data.events.map((ev, i) => <EventRow key={i} ev={ev} onVoice={setListening} />)}
           </tbody>
         </table>
       )}
+      {listening !== null && <VoiceNoteDialog id={listening} onClose={() => setListening(null)} />}
       {editing && (
         <DetailsDialog
           equipmentId={equipment.id}
@@ -114,7 +117,7 @@ export function HistoryCard({ me, equipment }: { me: Me; equipment: Equipment })
   );
 }
 
-function EventRow({ ev }: { ev: HistoryEvent }) {
+function EventRow({ ev, onVoice }: { ev: HistoryEvent; onVoice: (id: number) => void }) {
   if (ev.kind === 'entry') {
     const e = ev.entry;
     return (
@@ -127,7 +130,7 @@ function EventRow({ ev }: { ev: HistoryEvent }) {
         </td>
         <td>
           {ev.breakdown && <div><strong>Downtime {ev.breakdown.downtime}</strong> · parts: {ev.breakdown.parts || '—'} · {ev.breakdown.status}</div>}
-          {e.batch && <>Batch {e.batch} · </>}<Summary e={e} />
+          {e.batch && <>Batch {e.batch} · </>}<Summary e={e} /> <VoiceLinks e={e} onOpen={onVoice} />
         </td>
         <td>{e.enteredBy}<br /><span className="muted">{plantTime(e.enteredAt)}</span></td>
         <td>{e.signatures.map((s) => <div key={s.meaning}>{MEANING_LABEL[s.meaning]}: {s.printedName}, {plantTime(s.signedAt)}{!s.valid && ' (INVALID)'}</div>)}</td>

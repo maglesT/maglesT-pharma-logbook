@@ -6,6 +6,15 @@ import { buildApp } from '../server/app.js';
 import globalSetup from '../test/global-setup.js';
 import { PASSWORD, TEST_DATABASE_URL, login, seedUser, call } from '../test/helpers.js';
 import { E2E_PORT, E2E_SCHEMA, USERS } from './config.js';
+import type { SpeechProvider } from '../server/voice.js';
+
+// A stand-in for the Sarvam service: no real API calls in tests (D-26).
+const speech: SpeechProvider = {
+  name: 'sarvam',
+  async transcribe(_audio, _mime, language) {
+    return { transcript: 'मोटर अचानक बंद हो गई', translation: 'The motor stopped suddenly.', detectedLanguage: language === 'unknown' ? 'hi-IN' : language, model: 'saaras:v3', requestIds: { transcribe: 'mock-1', translate: 'mock-2' } };
+  },
+};
 
 await globalSetup();
 const owner = connect(TEST_DATABASE_URL);
@@ -19,7 +28,7 @@ for (const [username, roles] of Object.entries(USERS)) await seedUser(schemaOwne
 await schemaOwner.end();
 
 const sql = connect(TEST_DATABASE_URL, { role: 'logbook_app', searchPath: E2E_SCHEMA });
-const app = await buildApp({ sql, webRoot: new URL('../dist/web', import.meta.url).pathname, cookieSecure: false });
+const app = await buildApp({ sql, webRoot: new URL('../dist/web', import.meta.url).pathname, cookieSecure: false, speech });
 
 const admin = (await login(app, 'admin')).cookie;
 const qa = (await login(app, 'qa1')).cookie;

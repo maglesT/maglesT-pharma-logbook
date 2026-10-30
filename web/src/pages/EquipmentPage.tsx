@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, type Entry, type Part, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
+import { api, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Part, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
 import { HistoryCard } from './HistoryCard.js';
+import { VoiceNoteDialog } from '../components/VoiceNote.js';
 
 const CORE_TYPES = ['equipment_use', 'equipment_cleaning', 'maintenance', 'calibration', 'area_cleaning', 'general_log',
   'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading'];
@@ -64,6 +65,11 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
   const [releasing, setReleasing] = useState<Entry | null>(null);
   const [status, setStatus] = useState<EquipmentStatus | null>(null);
   const [history, setHistory] = useState<Entry[] | null>(null);
+  const [voice, setVoice] = useState<VoiceConfig | undefined>(undefined);
+  const [listening, setListening] = useState<number | null>(null);
+  useEffect(() => {
+    void api<VoiceConfig>('GET', '/api/voice-notes/config').then(setVoice).catch(() => setVoice(undefined));
+  }, []);
   const [error, setError] = useState('');
 
   const load = async () => {
@@ -146,6 +152,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
               <td>
                 {e.batch && <>{productName(e.productId)} · batch {e.batch}<br /></>}
                 <Summary e={e} />
+                <VoiceLinks e={e} onOpen={setListening} />
                 {e.change === 'corrected' && <><br /><span className="muted">Corrected (version {e.version}): {e.correctionReason}</span></>}
               </td>
               <td>{e.enteredBy}</td>
@@ -186,6 +193,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
           products={products}
           correcting={form.correcting}
           completing={form.completing}
+          voice={voice}
           onCancel={() => setForm(null)}
           onDone={async () => {
             setForm(null);
@@ -221,6 +229,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
           <div className="summary-box"><Summary e={releasing} full /></div>
         </SignDialog>
       )}
+      {listening !== null && <VoiceNoteDialog id={listening} onClose={() => setListening(null)} />}
       {history && (
         <div className="overlay" role="dialog" aria-modal="true">
           <div className="card dialog wide">
@@ -229,7 +238,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
               <div key={v.id} className="version">
                 <strong>Version {v.version}</strong> · {v.change} by {v.enteredBy}, entered {plantTime(v.enteredAt)}
                 {v.correctionReason && <> · reason: {v.correctionReason}</>}
-                <div><Summary e={v} full /></div>
+                <div><Summary e={v} full /> <VoiceLinks e={v} onOpen={setListening} /></div>
                 <div className="muted">{v.signatures.map((s) => `${MEANING_LABEL[s.meaning]}: ${s.printedName}, ${plantTime(s.signedAt)}`).join(' · ')}</div>
               </div>
             ))}
@@ -260,6 +269,20 @@ const value = (k: string, v: unknown) =>
   : k === 'partsNone' ? 'none'
   : k === 'doneBy' ? (v === 'vendor' ? 'external vendor' : 'in-house')
   : v === true ? 'yes' : String(v).replaceAll('_', ' ');
+
+// D-26: the signed text is shown in the entry; the original voice note opens from here.
+export function VoiceLinks({ e, onOpen }: { e: Entry; onOpen: (id: number) => void }) {
+  if (!e.voiceNotes?.length) return null;
+  return (
+    <>
+      {e.voiceNotes.map((v) => (
+        <button key={v.id} type="button" className="link dark" onClick={() => onOpen(v.id)}>
+          🎤 Voice note ({VOICE_LANGUAGE_LABEL[v.language ?? ''] ?? v.language}, {v.field})
+        </button>
+      ))}
+    </>
+  );
+}
 
 export function Summary({ e, full = false }: { e: Entry; full?: boolean }) {
   const parts = Object.entries(e.data)
