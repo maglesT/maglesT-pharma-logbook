@@ -60,6 +60,8 @@ export const LOGBOOK_TYPES: LogbookType[] = [
   { key: 'pressure_reading', label: 'Pressure reading (non-critical points)', appliesTo: ['area'], sterile: true, alwaysVerified: false },
   // A site setting, not a logbook: switches voice notes on and selects the languages (D-26).
   { key: 'voice_notes', label: 'Voice notes (site setting)', appliesTo: [], sterile: false, alwaysVerified: false },
+  // A site setting: lets a language model suggest from breakdown history (D-27).
+  { key: 'breakdown_advice', label: 'Breakdown suggestions from history (site setting)', appliesTo: [], sterile: false, alwaysVerified: false },
 ];
 
 export const typeByKey = (key: string) => LOGBOOK_TYPES.find((t) => t.key === key);

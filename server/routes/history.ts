@@ -56,7 +56,9 @@ type Event =
 // The life history of one item: every entry version, QA reviews and master-data changes, oldest first.
 async function history(sql: Sql, id: number, fromDay: string, toDay: string, types: Set<string> | null) {
   const { from, to } = await plantRange(sql, fromDay, toDay);
-  const versions: EntryRow[] = (await periodVersions(sql, id, from, to)).filter((v) => !types || types.has(v.logbook_type));
+  const versions: EntryRow[] = (await periodVersions(sql, id, from, to))
+    // "breakdown" picks the breakdown entries out of the maintenance logbook (S12).
+    .filter((v) => !types || types.has(v.logbook_type) || (types.has('breakdown') && v.logbook_type === 'maintenance' && v.data.kind === 'breakdown'));
   const latestIds = new Set(versions.filter((v) => !versions.some((x) => x.supersedes === v.id)).map((v) => v.id));
   const bdIds = [...new Set(versions.filter((v) => v.logbook_type === 'maintenance').map((v) => v.entry_id))];
   const bds = new Map((bdIds.length ? await breakdowns(sql, new Date(0), new Date('9999-01-01'), { equipmentId: id, entryIds: bdIds }) : []).map((b) => [b.entryId, b]));
@@ -184,10 +186,10 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     const filters = [q.data.equipmentId && `machine ${items[0]?.code ?? q.data.equipmentId}`, q.data.location && `location ${q.data.location}`,
       q.data.category && `category ${q.data.category}`, q.data.status && `status ${STATUS_LABEL[q.data.status]}`].filter(Boolean).join(', ');
     const tables: PdfTable[] = [
-      { heading: `Breakdowns (${items.length})`, columns: ['Machine', 'Occurred', 'Repair end', 'QA released', 'Downtime', 'Category', 'Failure / root cause', 'Work done', 'Parts used', 'Done by / WO', 'Status'],
-        widths: [55, 50, 50, 50, 45, 50, '*', '*', 80, 65, 50],
+      { heading: `Breakdowns (${items.length})`, columns: ['Machine', 'Occurred', 'Repair end', 'QA released', 'Downtime', 'Failure type', 'What happened', 'Root cause', 'Work done', 'Parts used', 'Done by / WO', 'Status'],
+        widths: [55, 48, 48, 48, 42, 48, '*', '*', '*', 70, 60, 48],
         rows: items.map((b) => ({ cells: [`${b.code}\n${b.name}\n${b.location}`, plant(b.occurredAt), plant(b.repairEnd), plant(b.releasedAt), downtimeText(b),
-          b.failureCategory ?? '', `${b.description}${b.rootCause ? `\nRoot cause: ${b.rootCause}` : ''}`, b.workDone, b.partsText, `${b.doneBy}${b.workOrderRef ? `\nWO ${b.workOrderRef}` : ''}`, STATUS_LABEL[b.status]!] })) },
+          b.failureCategory ?? '', b.description, b.rootCause, b.workDone, b.partsText, `${b.doneBy}${b.workOrderRef ? `\nWO ${b.workOrderRef}` : ''}`, STATUS_LABEL[b.status]!] })) },
       { heading: 'Per machine', columns: ['Machine', 'Failures', 'Downtime (h)', 'MTTR (h)', 'MTBF (h)'], widths: ['*', 60, 70, 60, 60],
         rows: stats.machines.map((m) => ({ cells: [`${m.code} · ${m.name}`, String(m.failures), String(m.downtimeHours), m.mttrHours === null ? '—' : String(m.mttrHours), m.mtbfHours === null ? '—' : String(m.mtbfHours)] })) },
       { heading: 'Per failure category', columns: ['Category', 'Failures'], widths: ['*', 60], rows: stats.categories.map((c) => ({ cells: [c.category, String(c.failures)] })) },

@@ -5,6 +5,7 @@ import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
 import { HistoryCard } from './HistoryCard.js';
 import { VoiceNoteDialog } from '../components/VoiceNote.js';
+import { AdviceDialog } from '../components/AdviceDialog.js';
 
 const CORE_TYPES = ['equipment_use', 'equipment_cleaning', 'maintenance', 'calibration', 'area_cleaning', 'general_log',
   'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading'];
@@ -68,6 +69,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
   const [history, setHistory] = useState<Entry[] | null>(null);
   const [voice, setVoice] = useState<VoiceConfig | undefined>(undefined);
   const [listening, setListening] = useState<number | null>(null);
+  const [advising, setAdvising] = useState<number | null>(null);
   useEffect(() => {
     void api<VoiceConfig>('GET', '/api/voice-notes/config').then(setVoice).catch(() => setVoice(undefined));
   }, []);
@@ -174,6 +176,9 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
                 {e.inProgress && e.logbookType === 'maintenance' && mayRecord('maintenance') && (
                   <button onClick={() => setForm({ type: 'maintenance', completing: e })}>Complete repair</button>
                 )}
+                {e.logbookType === 'maintenance' && e.data.kind === 'breakdown' && !me.roles.every((r) => r === 'admin') && (
+                  <button onClick={() => setAdvising(e.id)}>💡 Suggest from history</button>
+                )}
                 {e.awaitingVerification && isVerifier && !e.inProgress && <button onClick={() => setVerifying(e)}>Verify</button>}
                 {e.logbookType === 'maintenance' && e.data.kind === 'breakdown' && me.roles.includes('qa') &&
                   e.signatures.some((g) => g.meaning === 'verified') && !e.signatures.some((g) => g.meaning === 'released') && (
@@ -234,6 +239,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
         </SignDialog>
       )}
       {listening !== null && <VoiceNoteDialog id={listening} onClose={() => setListening(null)} />}
+      {advising !== null && <AdviceDialog versionId={advising} code={equipment.code} onClose={() => setAdvising(null)} />}
       {history && (
         <div className="overlay" role="dialog" aria-modal="true">
           <div className="card dialog wide">
@@ -254,16 +260,19 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
   );
 }
 
+// Field labels in the order they are shown; a breakdown reads top to bottom from failure to repair.
 const LABELS: Record<string, string> = {
-  stage: 'Stage', remarks: 'Remarks', cleaningType: 'Cleaning', kind: 'Type', description: 'Description', workDone: 'Work done',
-  impactAssessment: 'Impact assessment', result: 'Result', certificateRef: 'Certificate', nextDue: 'Next due', comment: 'Comment',
-  deviationRef: 'Deviation', agent: 'Agent', sporicidal: 'Sporicidal', disinfectantLot: 'Disinfectant lot', notes: 'Notes',
-  cycleType: 'Cycle', cycleId: 'Cycle no.', programme: 'Programme', load: 'Load', controllerRecordRef: 'Controller record',
-  indicators: 'Indicators', test: 'Test', port: 'Port', method: 'Method', point: 'Point', value: 'Reading', outOfLimit: 'OUT OF LIMITS',
-  occurredAt: 'Occurred', reportedBy: 'Reported by', failureCategory: 'Category', rootCause: 'Root cause', parts: 'Parts', partsNone: 'Parts',
-  toolsUsed: 'Tools / consumables', doneBy: 'Done by', vendorName: 'Vendor', serviceReportRef: 'Service report', workOrderRef: 'WO',
+  kind: 'Type', occurredAt: 'Occurred', reportedBy: 'Reported by', failureCategory: 'Failure category', description: 'What happened',
+  impactAssessment: 'Impact assessment', rootCause: 'Root cause', workDone: 'Work done', parts: 'Parts used', partsNone: 'Parts used',
+  toolsUsed: 'Tools / consumables', doneBy: 'Done by', vendorName: 'Vendor', serviceReportRef: 'Service report', workOrderRef: 'Work order',
   postRepairChecks: 'Post-repair checks', recalibrationNeeded: 'Re-calibration needed',
+  stage: 'Stage', cleaningType: 'Cleaning', agent: 'Agent', sporicidal: 'Sporicidal', disinfectantLot: 'Disinfectant lot',
+  cycleType: 'Cycle', cycleId: 'Cycle no.', programme: 'Programme', load: 'Load', controllerRecordRef: 'Controller record', indicators: 'Indicators',
+  test: 'Test', port: 'Port', method: 'Method', point: 'Point', value: 'Reading', outOfLimit: 'OUT OF LIMITS',
+  result: 'Result', certificateRef: 'Certificate', nextDue: 'Next due', notes: 'Notes', remarks: 'Remarks', comment: 'Comment', deviationRef: 'Deviation',
 };
+const ORDER = Object.keys(LABELS);
+const rank = (k: string) => (ORDER.includes(k) ? ORDER.indexOf(k) : ORDER.length);
 
 const partsLine = (parts: Part[]) => parts.map((p) => `${p.quantity} × ${p.name}${p.partNumber ? ` (P/N ${p.partNumber})` : ''}${p.lotSerial ? `, lot/SN ${p.lotSerial}` : ''}`).join('; ');
 const value = (k: string, v: unknown) =>
@@ -291,9 +300,15 @@ export function VoiceLinks({ e, onOpen }: { e: Entry; onOpen: (id: number) => vo
 export function Summary({ e, full = false }: { e: Entry; full?: boolean }) {
   const parts = Object.entries(e.data)
     .filter(([k, v]) => k !== 'checklist' && v !== '' && v !== false && v !== null && !(Array.isArray(v) && v.length === 0))
-    .map(([k, v]) => `${LABELS[k] ?? k}: ${value(k, v)}`);
+    .sort(([a], [b]) => rank(a) - rank(b))
+    .map(([k, v]): [string, string] => [LABELS[k] ?? k, value(k, v)]);
   const checklist = Object.entries((e.data.checklist ?? {}) as Record<string, boolean>).filter(([, v]) => v).map(([k]) => k);
-  if (full && checklist.length) parts.push(`Checklist confirmed: ${checklist.join('; ')}`);
-  return <span>{parts.join(' · ') || '—'}</span>;
+  if (full && checklist.length) parts.push(['Checklist confirmed', checklist.join('; ')]);
+  if (!parts.length) return <span>—</span>;
+  // One field per line, so a long breakdown record stays readable.
+  return (
+    <dl className="fields">
+      {parts.map(([label, v]) => <div key={label}><dt>{label}</dt><dd>{v}</dd></div>)}
+    </dl>
+  );
 }
-

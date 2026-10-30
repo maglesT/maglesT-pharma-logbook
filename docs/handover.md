@@ -103,6 +103,12 @@ Updated: 2026-10-30, after S11b (faster equipment list, readable history card).
 - **Version:** `VERSION` in `server/app.ts` now matches `package.json` (0.3.2); it had stayed at 0.3.0 in S11.
 - **Breakdown register (0.3.3):** the register, its PDF and its CSV (`work_done`) now show the repair's "Work done" text next to the failure, so how a machine was repaired is readable without opening the machine.
 
+## S12: breakdown suggestions from history (0.4.0)
+- **What:** on a breakdown entry, **💡 Suggest from history** (operator, supervisor, engineering, QA; not Admin) lists related past breakdowns from the last 3 years (same machine, then same make and model from the equipment details, then same machine type by name) and, when switched on, asks a language model for likely causes, checks, parts and a preventive measure. Each point names the past entries it rests on; entry numbers the model was not given are dropped (`server/advice.ts`, `server/routes/advice.ts`).
+- **Control (D-27):** site setting `breakdown_advice`, drafted by Admin and approved by QA like voice notes. Without the setting or without `GEMINI_API_KEY` only the related breakdowns are listed. Advice is never written into an entry and is not signed.
+- **Model:** Google Gemini `generateContent` with a JSON response schema, `GEMINI_MODEL` default `gemini-pro-latest` (Google's newest Pro; on 2026-10-30 that was `gemini-3.1-pro-preview`; `gemini-2.5-pro` is closed to new keys). The exact model version, response id, records used and the advice are written to the audit trail (`breakdown_advice.generated`). No people's names are sent. 20 requests per user per hour.
+- **Readability:** entry details show one labelled field per line in reading order (a breakdown reads failure → root cause → work done → parts → checks). The register, its PDF and CSV have separate columns for failure type, what happened, root cause and work done. The history card has a **Breakdowns only** filter.
+
 ## Possible next steps (not planned; owner to decide)
 - Validation package for a first site: IQ/OQ protocol templates that use `docs/traceability.md` and the CI report.
 - Training material: one-page guides per role.

@@ -98,6 +98,7 @@ export interface Breakdown {
   description: string;
   rootCause: string;
   workDone: string;
+  postRepairChecks: string;
   parts: Part[];
   partsNone: boolean;
   partsText: string;
@@ -166,6 +167,7 @@ export async function breakdowns(q: Sql | Tx, from: Date, to: Date, f: Partial<R
       description: String(r.data.description ?? ''),
       rootCause: String(r.data.rootCause ?? ''),
       workDone: String(r.data.workDone ?? ''),
+      postRepairChecks: String(r.data.postRepairChecks ?? ''),
       parts: (r.data.parts ?? []) as Part[],
       partsNone: Boolean(r.data.partsNone),
       partsText: partsText(r.data),

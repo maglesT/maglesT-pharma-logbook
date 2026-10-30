@@ -319,3 +319,32 @@ export interface VoiceNote {
   statement: string;
   confirmation: { entryVersionId: number; finalText: string; edited: boolean; confirmedAt: string; signedBy: string | null; signedAt: string | null } | null;
 }
+
+// S12 breakdown suggestions (D-27).
+export interface SimilarBreakdown {
+  entryId: number;
+  equipmentId: number;
+  code: string;
+  name: string;
+  relation: 'same_machine' | 'same_model' | 'same_type';
+  relationLabel: string;
+  occurredAt: string;
+  failureCategory: string | null;
+  description: string;
+  rootCause: string;
+  workDone: string;
+  partsText: string;
+  doneBy: string;
+  downtime: string;
+  status: string;
+}
+export interface Advice {
+  summary: string;
+  likelyCauses: { cause: string; basis: number[] }[];
+  checks: { step: string; basis: number[] }[];
+  parts: { name: string; partNumber: string; basis: number[] }[];
+  preventive: string;
+  confidence: 'low' | 'medium' | 'high';
+  enoughHistory: boolean;
+}
+export interface AdviceResponse { entryId: number; similar: SimilarBreakdown[]; advice: Advice | null; adviceNote: string | null; model?: string; generatedAt?: string }

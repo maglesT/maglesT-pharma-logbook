@@ -33,7 +33,7 @@ test('LB-20: a voice note becomes entry text only after the speaker signs the En
   await expect(form).toHaveCount(0);
 
   const row = page.getByRole('row').filter({ hasText: 'during mixing' });
-  await expect(row).toContainText('Notes: The motor stopped suddenly during mixing.');
+  await expect(row).toContainText('The motor stopped suddenly during mixing.');
   await row.getByRole('button', { name: /Voice note \(Hindi, notes\)/ }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog).toContainText('मोटर अचानक बंद हो गई');

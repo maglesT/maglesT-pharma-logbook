@@ -85,3 +85,17 @@ dl.details dd { margin: 0; }
 .voice button, .voice select { min-height: 44px; }
 .voice button.recording { background: #b3261e; color: #fff; border-color: #b3261e; }
 .voice-draft { background: #fff8ec; border: 1px solid #f0c36d; border-radius: 6px; padding: 8px; margin: -4px 0 8px; }
+
+/* Entry details: one labelled field per line (S12). */
+.fields { margin: 0; }
+.fields div { display: flex; gap: 8px; }
+.fields dt { color: var(--muted); min-width: 9.5em; flex-shrink: 0; }
+.fields dd { margin: 0; }
+@media (max-width: 640px) { .fields div { display: block; } .fields dt { min-width: 0; } }
+/* Breakdown suggestions (S12): the model's text is marked as advice. */
+.dialog.wider { max-width: 1100px; max-height: 92vh; overflow: auto; }
+.advice { border-left: 4px solid #6b46c1; padding: 4px 12px; margin: 8px 0; background: var(--bg); }
+.advice-flag { font-weight: 600; color: #6b46c1; }
+/* Long records keep the dialog's buttons on screen (S12). */
+.dialog { max-height: 92vh; overflow: auto; }
+.summary-box { max-height: 40vh; overflow: auto; }

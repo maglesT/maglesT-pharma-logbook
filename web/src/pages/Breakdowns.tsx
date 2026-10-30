@@ -43,7 +43,7 @@ export function Breakdowns({ onOpen }: { onOpen: (equipmentId: number) => void }
           </select>
         </label>
         <label>
-          Category
+          Failure type
           <select value={f.category} onChange={(e) => set('category', e.target.value)}>
             <option value="">All</option>
             {FAILURE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -72,10 +72,10 @@ export function Breakdowns({ onOpen }: { onOpen: (equipmentId: number) => void }
         <>
           <table className="register">
             <thead>
-              <tr><th>Machine</th><th>Location</th><th>Occurred</th><th>Repair end</th><th>QA released</th><th>Downtime</th><th>Category</th><th>Failure</th><th>Work done</th><th>Parts used</th><th>Done by</th><th>WO</th><th>Status</th></tr>
+              <tr><th>Machine</th><th>Location</th><th>Occurred</th><th>Repair end</th><th>QA released</th><th>Downtime</th><th>Failure type</th><th>What happened</th><th>Root cause</th><th>Work done</th><th>Parts used</th><th>Done by</th><th>WO</th><th>Status</th></tr>
             </thead>
             <tbody>
-              {data.items.length === 0 && <tr><td colSpan={13} className="muted">No breakdowns in this period.</td></tr>}
+              {data.items.length === 0 && <tr><td colSpan={14} className="muted">No breakdowns in this period.</td></tr>}
               {data.items.map((b) => {
                 const [label, cls] = BREAKDOWN_STATUS_LABEL[b.status] ?? [b.status, 'chip-warn'];
                 return (
@@ -87,7 +87,8 @@ export function Breakdowns({ onOpen }: { onOpen: (equipmentId: number) => void }
                     <td>{plantTime(b.releasedAt)}</td>
                     <td>{downtimeText(b)}</td>
                     <td>{b.failureCategory ?? '—'}</td>
-                    <td>{b.description}{b.rootCause && <><br /><span className="muted">Root cause: {b.rootCause}</span></>}</td>
+                    <td>{b.description}</td>
+                    <td>{b.rootCause || '—'}</td>
                     <td>{b.workDone || '—'}</td>
                     <td>{b.partsText || '—'}</td>
                     <td>{b.doneBy || '—'}</td>

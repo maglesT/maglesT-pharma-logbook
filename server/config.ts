@@ -18,6 +18,12 @@ const schema = z.object({
   SARVAM_BASE_URL: z.string().url().default('https://api.sarvam.ai'),
   SARVAM_MODEL: z.string().default('saaras:v3'),
   SARVAM_TIMEOUT_MS: z.coerce.number().int().positive().default(30_000),
+  // Breakdown suggestions (D-27): Google Gemini. gemini-pro-latest is Google's newest Pro model; the
+  // exact model version that answered is kept in the audit trail with each suggestion.
+  GEMINI_API_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional()),
+  GEMINI_BASE_URL: z.string().url().default('https://generativelanguage.googleapis.com'),
+  GEMINI_MODEL: z.string().default('gemini-pro-latest'),
+  GEMINI_TIMEOUT_MS: z.coerce.number().int().positive().default(90_000),
 });
 
 export type Config = z.infer<typeof schema>;

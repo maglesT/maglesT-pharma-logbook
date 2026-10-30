@@ -81,6 +81,7 @@ export function HistoryCard({ me, equipment }: { me: Me; equipment: Equipment })
           Type
           <select value={type} onChange={(e) => setType(e.target.value)}>
             <option value="">All</option>
+            <option value="breakdown">Breakdowns only</option>
             {Object.entries(TYPE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
             <option value="review">QA reviews</option>
             <option value="masterdata">Master-data changes</option>
@@ -130,7 +131,7 @@ function EventRow({ ev, onVoice }: { ev: HistoryEvent; onVoice: (id: number) => 
         </td>
         <td>
           {ev.breakdown && <div><strong>Downtime {ev.breakdown.downtime}</strong> · parts: {ev.breakdown.parts || '—'} · {ev.breakdown.status}</div>}
-          {e.batch && <>Batch {e.batch} · </>}<Summary e={e} /> <VoiceLinks e={e} onOpen={onVoice} />
+          {e.batch && <div>Batch {e.batch}</div>}<Summary e={e} /> <VoiceLinks e={e} onOpen={onVoice} />
         </td>
         <td>{e.enteredBy}<br /><span className="muted">{plantTime(e.enteredAt)}</span></td>
         <td>{e.signatures.map((s) => <div key={s.meaning}>{MEANING_LABEL[s.meaning]}: {s.printedName}, {plantTime(s.signedAt)}{!s.valid && ' (INVALID)'}</div>)}</td>
