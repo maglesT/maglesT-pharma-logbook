@@ -41,7 +41,7 @@ export function App() {
   return (
     <>
       <header className="bar">
-        <strong>Pharma Logbook</strong>
+        <span className="brand"><img src="/medhanta-mark.png" alt="Medhanta" /><span><b>Pharma Logbook</b><small>by Medhanta</small></span></span>
         <nav>
           <button className={page === 'home' ? 'tab on' : 'tab'} onClick={() => setPage('home')}>Home</button>
           <button className={page === 'equipment' ? 'tab on' : 'tab'} onClick={() => { setOpenId(undefined); setPage('equipment'); }}>Logbooks</button>

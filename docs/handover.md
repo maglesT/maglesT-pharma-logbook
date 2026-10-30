@@ -113,6 +113,10 @@ Updated: 2026-10-30, after S11b (faster equipment list, readable history card).
 - **UI refresh:** new stylesheet (calmer palette, cards, readable tables, soft status chips, sticky top bar), Home overview counts, tiles with a status-coloured edge, a friendlier login page. Field labels and formatting live in `web/src/fields.tsx`.
 - **Voice-note translation (D-27):** with `GEMINI_API_KEY` set, Sarvam only transcribes (spoken language) and Gemini translates the transcript into English, given the machine, logbook and field and told to translate faithfully (numbers, units, IDs kept). If Gemini fails or takes longer than `GEMINI_TRANSLATE_TIMEOUT_MS` (25 s), Sarvam's translate mode is used. The voice note's model reads e.g. `saaras:v3 + gemini-3.1-pro-preview (translation)`. On the seven live notes of 2026-10-30 Gemini was more accurate on technical terms (e.g. "discharge temperature", "vial filling machine", "informed engineering"); it takes 5–20 s.
 
+## S13: Medhanta brand (0.4.1)
+- Pharma Logbook is a Medhanta product. White top bar with the Medhanta mark and an orange gradient underline, orange primary buttons and active tab, Medhanta grey text; login page shows the full Medhanta logo; favicon is the mark. Logos are in `web/public/` (`medhanta-logo.png`, `medhanta-mark.png`, `favicon.png`, cut from the logo the owner supplied, white made transparent).
+- Status colours stay semantic and distinct from the brand orange: green fit, blue in use, amber needs cleaning, red blocked.
+
 ## Possible next steps (not planned; owner to decide)
 - Validation package for a first site: IQ/OQ protocol templates that use `docs/traceability.md` and the CI report.
 - Training material: one-page guides per role.
