@@ -1,18 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api, MEANING_LABEL, plantTime, TYPE_LABEL, type Entry, type Equipment, type Me } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
+import { AuditTable, type AuditRow } from '../components/AuditTable.js';
+import { Fields } from '../fields.js';
 
-interface AuditRow {
-  id: number;
-  at: string;
-  actor: string | null;
-  action: string;
-  objectType: string;
-  objectId: string | null;
-  oldValue: unknown;
-  newValue: unknown;
-  reason: string | null;
-}
 type PeriodEntry = Entry & { latest: boolean; open: boolean; equipmentCode?: string };
 interface Period {
   entries: PeriodEntry[];
@@ -147,6 +138,11 @@ function BatchView() {
   );
 }
 
+const OBJECTS: Record<string, string> = {
+  entry: 'Logbook entries', voice_note: 'Voice notes', user: 'Users and logins', equipment: 'Equipment and areas', product: 'Products',
+  settings: 'Logbook settings', review: 'Period reviews', site: 'Site', alert: 'Security alerts', system: 'System checks',
+};
+
 function AuditTrail() {
   const [filter, setFilter] = useState({ objectType: '', objectId: '', user: '', from: day(-7), to: day(0) });
   const [rows, setRows] = useState<AuditRow[]>([]);
@@ -166,11 +162,11 @@ function AuditTrail() {
     <>
       <div className="card row">
         <select value={filter.objectType} onChange={(e) => setFilter({ ...filter, objectType: e.target.value })}>
-          <option value="">All objects</option>
-          {['entry', 'user', 'equipment', 'product', 'settings', 'review', 'site', 'alert'].map((o) => <option key={o} value={o}>{o}</option>)}
+          <option value="">Everything</option>
+          {Object.entries(OBJECTS).map(([o, l]) => <option key={o} value={o}>{l}</option>)}
         </select>
-        <input placeholder="Object id" value={filter.objectId} onChange={(e) => setFilter({ ...filter, objectId: e.target.value })} />
-        <input placeholder="User ID" value={filter.user} onChange={(e) => setFilter({ ...filter, user: e.target.value })} />
+        <input placeholder="Record no. (optional)" value={filter.objectId} onChange={(e) => setFilter({ ...filter, objectId: e.target.value })} />
+        <input placeholder="User ID, e.g. op.demo" value={filter.user} onChange={(e) => setFilter({ ...filter, user: e.target.value })} />
         <label>From<input type="date" value={filter.from} onChange={(e) => setFilter({ ...filter, from: e.target.value })} /></label>
         <label>To<input type="date" value={filter.to} onChange={(e) => setFilter({ ...filter, to: e.target.value })} /></label>
         <button className="primary" onClick={load}>Filter</button>
@@ -196,31 +192,8 @@ function EntryTable({ entries, showEquipment = false }: { entries: PeriodEntry[]
               {e.correctionReason && <><br />Reason: {e.correctionReason}</>}
               <br /><span className="muted">{e.enteredBy}, {plantTime(e.enteredAt)}</span>
             </td>
-            <td className="mono">{e.batch && `Batch ${e.batch} · `}{JSON.stringify(e.data)}</td>
+            <td>{e.batch && <div>Batch {e.batch}</div>}<Fields data={e.data} /></td>
             <td>{e.signatures.map((s) => <div key={s.meaning}>{MEANING_LABEL[s.meaning]}: {s.printedName}, {plantTime(s.signedAt)}{!s.valid && ' (INVALID)'}</div>)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function AuditTable({ rows }: { rows: AuditRow[] }) {
-  return (
-    <table>
-      <thead><tr><th>When</th><th>Who</th><th>Action</th><th>Object</th><th>Details</th></tr></thead>
-      <tbody>
-        {rows.map((a) => (
-          <tr key={a.id}>
-            <td>{plantTime(a.at)}</td>
-            <td>{a.actor ?? 'system'}</td>
-            <td>{a.action}</td>
-            <td>{a.objectType} {a.objectId}</td>
-            <td className="mono">
-              {a.reason && <div>Reason: {a.reason}</div>}
-              {a.oldValue != null && <div>Old: {JSON.stringify(a.oldValue)}</div>}
-              {a.newValue != null && <div>New: {JSON.stringify(a.newValue)}</div>}
-            </td>
           </tr>
         ))}
       </tbody>

@@ -19,6 +19,8 @@ services:
       DB_APP_ROLE: logbook_app
       # Voice notes (D-26): put SARVAM_API_KEY in ops/.env (git-ignored). Unset = voice notes off.
       SARVAM_API_KEY: ${SARVAM_API_KEY:-}
+      # Breakdown suggestions (D-27): GEMINI_API_KEY in ops/.env. Unset = only related breakdowns are listed.
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
     ports: ["3000:3000"]
     depends_on: { db: { condition: service_healthy } }
 volumes:

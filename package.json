@@ -1,6 +1,6 @@
 {
   "name": "pharma-logbook",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Electronic equipment, instrument and area logbook for pharmaceutical manufacturing",

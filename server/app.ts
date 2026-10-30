@@ -17,9 +17,11 @@ import { exportRoutes } from './routes/exports.js';
 import { integrityRoutes } from './routes/integrity.js';
 import { historyRoutes } from './routes/history.js';
 import { voiceRoutes } from './routes/voice.js';
+import { adviceRoutes } from './routes/advice.js';
 import type { SpeechProvider } from './voice.js';
+import type { AdviceProvider } from './advice.js';
 
-export const VERSION = '0.3.2';
+export const VERSION = '0.4.0';
 
 export interface AppOptions {
   // Connection running as the restricted application role.
@@ -30,9 +32,11 @@ export interface AppOptions {
   cookieSecure?: boolean;
   // Speech service for voice notes (D-26); null when no API key is configured.
   speech?: SpeechProvider | null;
+  // Language model for breakdown suggestions (D-27); null when no API key is configured.
+  advisor?: AdviceProvider | null;
 }
 
-export async function buildApp({ sql, logger = false, webRoot, cookieSecure = true, speech = null }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ sql, logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger, trustProxy: true });
   app.decorate('cookieSecure', cookieSecure);
   await app.register(fastifyCookie);
@@ -67,6 +71,7 @@ export async function buildApp({ sql, logger = false, webRoot, cookieSecure = tr
   integrityRoutes(app, sql);
   historyRoutes(app, sql);
   voiceRoutes(app, sql, speech);
+  adviceRoutes(app, sql, advisor);
 
   // In production the built web UI is served from the same process.
   const root = webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');

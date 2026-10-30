@@ -198,10 +198,10 @@ export interface EquipmentStatus {
 }
 
 export const STATE_LABEL: Record<string, [string, string]> = {
-  in_use: ['In use', 'chip-warn'],
-  dirty: ['Dirty', 'chip-bad'],
+  in_use: ['In use', 'chip-info'],
+  dirty: ['Dirty', 'chip-warn'],
   clean: ['Clean', 'chip-ok'],
-  clean_expired: ['Clean expired', 'chip-bad'],
+  clean_expired: ['Clean expired', 'chip-warn'],
   out_of_service: ['Out of service', 'chip-bad'],
   calibration_overdue: ['Calibration overdue', 'chip-bad'],
   calibration_failed: ['Calibration failed', 'chip-bad'],
@@ -236,6 +236,7 @@ export interface BreakdownItem {
   failureCategory: string | null;
   description: string;
   rootCause: string;
+  workDone: string;
   partsText: string;
   doneBy: string;
   workOrderRef: string;
@@ -318,3 +319,32 @@ export interface VoiceNote {
   statement: string;
   confirmation: { entryVersionId: number; finalText: string; edited: boolean; confirmedAt: string; signedBy: string | null; signedAt: string | null } | null;
 }
+
+// S12 breakdown suggestions (D-27).
+export interface SimilarBreakdown {
+  entryId: number;
+  equipmentId: number;
+  code: string;
+  name: string;
+  relation: 'same_machine' | 'same_model' | 'same_type' | 'same_failure_type';
+  relationLabel: string;
+  occurredAt: string;
+  failureCategory: string | null;
+  description: string;
+  rootCause: string;
+  workDone: string;
+  partsText: string;
+  doneBy: string;
+  downtime: string;
+  status: string;
+}
+export interface Advice {
+  summary: string;
+  likelyCauses: { cause: string; basis: number[] }[];
+  checks: { step: string; basis: number[] }[];
+  parts: { name: string; partNumber: string; basis: number[] }[];
+  preventive: string;
+  confidence: 'low' | 'medium' | 'high';
+  enoughHistory: boolean;
+}
+export interface AdviceResponse { entryId: number; similar: SimilarBreakdown[]; advice: Advice | null; adviceNote: string | null; model?: string; generatedAt?: string }

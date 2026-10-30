@@ -155,6 +155,9 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
             ))}
           </fieldset>
         )}
+        {type.key === 'breakdown_advice' && (
+          <p className="muted">D-27: when switched on, the text of related past breakdowns (machines, failures, repairs and parts, no people's names) is sent to Google Gemini, which suggests causes, checks and parts. Advice only: it is never part of an entry. Needs the supplier assessment.</p>
+        )}
         {type.key === 'pressure_reading' && (
           <label>Non-critical pressure points (one per line: name; CCS reference; min Pa; max Pa)<textarea value={points} onChange={(e) => setPoints(e.target.value)} /></label>
         )}

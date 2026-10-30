@@ -11,19 +11,19 @@ test('LB-17: a correction keeps the original readable, with the reason and a sig
   await form.getByLabel('Notes').fill('Gauge reads 2.4 bar');
   await form.getByRole('button', { name: 'Save' }).click();
   const row = page.getByRole('row').filter({ hasText: 'General equipment log' });
-  await expect(row).toContainText('Notes: Gauge reads 2.4 bar');
+  await expect(row).toContainText('Gauge reads 2.4 bar');
 
   await row.getByRole('button', { name: 'Correct' }).click();
   await form.getByLabel('Notes').fill('Gauge reads 4.2 bar');
   await form.getByLabel('Reason for correction').fill('Digits swapped');
   await sign(form, 'op1', 'Sign and save');
-  await expect(row).toContainText('Notes: Gauge reads 4.2 bar');
+  await expect(row).toContainText('Gauge reads 4.2 bar');
   await expect(row).toContainText('Corrected (version 2): Digits swapped');
   await expect(row).toContainText('Corrected: OP1');
 
   await row.getByRole('button', { name: 'History' }).click();
   const history = page.getByRole('dialog');
-  await expect(history.locator('.version').filter({ hasText: 'Version 1' })).toContainText('Notes: Gauge reads 2.4 bar');
+  await expect(history.locator('.version').filter({ hasText: 'Version 1' })).toContainText('Gauge reads 2.4 bar');
   await expect(history.locator('.version').filter({ hasText: 'Version 2' })).toContainText('reason: Digits swapped');
 });
 
