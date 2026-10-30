@@ -116,6 +116,7 @@ Updated: 2026-10-30, after S11b (faster equipment list, readable history card).
 ## S13: Medhanta brand (0.4.1)
 - Pharma Logbook is a Medhanta product. White top bar with the Medhanta mark and an orange gradient underline, orange primary buttons and active tab, Medhanta grey text; login page shows the full Medhanta logo; favicon is the mark. Logos are in `web/public/` (`medhanta-logo.png`, `medhanta-mark.png`, `favicon.png`, cut from the logo the owner supplied, white made transparent).
 - Status colours stay semantic and distinct from the brand orange: green fit, blue in use, amber needs cleaning, red blocked.
+- **Audit trail screen (0.4.2):** shows only plain-language lines (owner's decision: no raw values or code on screen). AI suggestions are shown in full (causes, checks, parts, preventive, with the entries they came from); signature rows say which signature was recorded. The complete stored values stay in the database and in the CSV copies; the PDF copies print them as labelled lines (`recordLines` in `server/changes.ts`), identifiers exactly as stored.
 
 ## Possible next steps (not planned; owner to decide)
 - Validation package for a first site: IQ/OQ protocol templates that use `docs/traceability.md` and the CI report.

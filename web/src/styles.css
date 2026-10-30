@@ -193,9 +193,6 @@ table.audit td { font-size: 0.92rem; }
 .act-bad, .act-signature, .act-integrity.act-bad { background: var(--bad-soft); color: var(--bad); }
 .audit-lines { margin: 0; padding-left: 18px; }
 .audit-lines li { margin: 1px 0; }
-details.tech summary { cursor: pointer; color: var(--muted); font-size: 0.82rem; margin-top: 4px; }
-details.tech pre { white-space: pre-wrap; word-break: break-all; font-size: 0.75rem; background: #f7f9fc; padding: 8px; border-radius: 8px; max-width: 520px; }
-
 /* Login */
 .login { padding-top: 10vh; }
 .login h1 { margin-bottom: 4px; }

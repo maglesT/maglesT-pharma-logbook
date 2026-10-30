@@ -356,3 +356,11 @@ describe('master-data changes in words (S11)', () => {
       .toEqual(['Model: VC-200', 'PQ: 2019-07-15, PQ-1']);
   });
 });
+
+describe('printed records (S13)', () => {
+  it('LB-22: stored values print as labelled lines, identifiers exactly as stored, no JSON', async () => {
+    const { recordLines } = await import('../server/changes.js');
+    const lines = recordLines({ contentHash: 'ab_cd', requestIds: { transcribe: '20261030_1b0c' }, data: { workDone: 'Seal replaced', partsNone: true }, cleaningType: 'product_change' });
+    expect(lines).toEqual(['Content fingerprint (SHA-256): ab_cd', 'Service request IDs:', '  Transcription: 20261030_1b0c', 'Entry data:', '  Work done: Seal replaced', '  No parts used: yes', 'Cleaning: product change']);
+  });
+});
