@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
 import { parseId, requireRole } from '../auth.js';
+import { mayRecord } from '../entries.js';
 import { LOGBOOK_TYPES, settingsSchema, typeByKey } from '../logbook-types.js';
 import { SignError, authenticateSigner, contentHash, sign, signBody } from '../signatures.js';
 
@@ -46,7 +47,7 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
   const anyUser = { preHandler: requireRole() };
 
   // All versions per type, with their approval signature (printed name, time, meaning: LB-19).
-  app.get('/api/logbook-types', anyUser, async () => {
+  app.get('/api/logbook-types', anyUser, async (req) => {
     const rows = await sql`
       select s.id::int, s.logbook_type, s.version, s.settings, s.effective_from, s.created_by::int, s.created_at,
         u.full_name as created_by_name, g.printed_name as approved_by, g.signed_at as approved_at,
@@ -58,6 +59,8 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
       order by s.logbook_type, s.version desc`;
     return LOGBOOK_TYPES.map((t) => ({
       ...t,
+      // Whether this user may record this type, so screens offer only what the server accepts (S11).
+      mayRecord: mayRecord(t.key, req.user!.roles),
       versions: rows
         .filter((r) => r.logbook_type === t.key)
         .map((r) => ({

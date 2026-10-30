@@ -1,6 +1,6 @@
 # Handover
 
-Updated: 2026-10-30, after slice S10 (voice notes).
+Updated: 2026-10-30, after slice S11 (screens follow the server rules).
 
 ## State
 - Planning deliverables (a)–(d) are approved: decisions D-01 to D-05 in `decisions.md`.
@@ -90,6 +90,12 @@ Updated: 2026-10-30, after slice S10 (voice notes).
 - **UI:** `components/VoiceNote.tsx` (MediaRecorder button with language choice and a 30-s stop; viewer with audio and texts). The entry form shows the draft notice, a Discard button and the separate confirmation sign box. Voice-note links appear on entries, history and the history card. The settings screen has a language editor.
 - **Tests:** `test/voice.test.ts` (16; mocked service, plus a local fake Sarvam server for the client) and `e2e/voice.spec.ts` (2; fake microphone and mock service).
 - **Before a site switches it on:** supplier assessment and agreement with Sarvam AI (CP-06) and staff consent (CP-10).
+
+## Done: S11, screens offer only what the server accepts (D-17, LB-21)
+- **Found on the trial installation:** QA saw "+ <type>" buttons and "Correct" on every entry. All of them were refused by the server (403 or a bare `invalid_request`).
+- **Server:** `mayCorrect()` in `server/entries.ts` is the one D-17 rule, used by the correct route. `GET /api/equipment/:id/entries` adds `mayCorrect` per entry for the logged-in user, and `GET /api/logbook-types` adds `mayRecord` per type. A refused entry, complete, correct, verify or release body now lists its problems (e.g. "Give the reason for the correction.").
+- **UI:** "+ <type>", "Complete repair" and "Correct" follow those flags, so QA and Admin see none. The correction reason is required and blocks "Sign and save" while empty. Forms and sign dialogs show the server's problems instead of the bare code.
+- **Tests:** two in `test/entries.test.ts` and one in `e2e/entries.spec.ts` (QA, engineering, supervisor and author views). Version 0.3.1.
 
 ## Possible next steps (not planned; owner to decide)
 - Validation package for a first site: IQ/OQ protocol templates that use `docs/traceability.md` and the CI report.

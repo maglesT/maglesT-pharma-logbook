@@ -4,7 +4,7 @@ import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
 import { parseId, requireRole, type SessionUser } from '../auth.js';
 import { LOGBOOK_TYPES, typeByKey, type LogbookSettings } from '../logbook-types.js';
-import { DATA_SCHEMAS, REPORTED_FIELDS, VERIFIERS, checkData, mayRecord, performerSigns, verificationNeeded, type EntryContext, type EquipmentInfo } from '../entries.js';
+import { DATA_SCHEMAS, REPORTED_FIELDS, VERIFIERS, checkData, mayCorrect, mayRecord, performerSigns, verificationNeeded, type EntryContext, type EquipmentInfo } from '../entries.js';
 import { SignError, authenticateSigner, contentHash, sign, signBody, type SignInput } from '../signatures.js';
 import { settingsInForce } from './settings.js';
 import { allStatuses, statusOf } from '../status.js';
@@ -107,6 +107,30 @@ class EntryError extends Error {
   ) {
     super(code);
   }
+}
+
+// A refused request body names what is missing, so the screen can show it (S11).
+const FIELD_PROBLEM: Record<string, string> = {
+  reason: 'Give the reason for the correction.',
+  'signature.username': 'Enter your user ID to sign.',
+  'signature.password': 'Enter your password to sign.',
+  username: 'Enter your user ID to sign.',
+  password: 'Enter your password to sign.',
+};
+function invalid(reply: FastifyReply, issues: z.ZodIssue[] = []) {
+  const problems = [...new Set(issues.map((i) => FIELD_PROBLEM[i.path.join('.')] ?? `${i.path.join('.') || 'request'}: ${i.message}`))];
+  return reply.code(400).send({ error: 'invalid_request', problems });
+}
+
+// What the logbook screen may offer this user: the server's own rule (D-17), never a copy of it (S11).
+async function withMayCorrect<T extends { id: number; logbookType: string }>(sql: Sql, user: SessionUser, entries: T[]) {
+  if (!entries.length) return entries;
+  const authors = await sql<{ id: number; latest: number; first: number }[]>`
+    select e.id::int, e.entered_by::int as latest, f.entered_by::int as first
+    from entries e join entries f on f.entry_id = e.entry_id and f.version = 1
+    where e.id = any(${entries.map((x) => x.id)}::bigint[])`;
+  const own = new Map(authors.map((a) => [a.id, a.latest === user.id || a.first === user.id]));
+  return entries.map((x) => ({ ...x, mayCorrect: mayCorrect(x.logbookType, user.roles, own.get(x.id) ?? false) }));
 }
 
 function send(reply: FastifyReply, e: unknown) {
@@ -239,7 +263,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
   app.post<{ Params: { id: string } }>('/api/equipment/:id/entries', anyUser, async (req, reply) => {
     const equipmentId = parseId(req.params.id);
     const body = createBody.safeParse(req.body);
-    if (equipmentId === null || !body.success) return reply.code(400).send({ error: 'invalid_request' });
+    if (equipmentId === null || !body.success) return invalid(reply, body.error?.issues);
     const b = body.data;
     const user = req.user!;
     const type = typeByKey(b.logbookType);
@@ -306,7 +330,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
   app.post<{ Params: { id: string } }>('/api/entries/:id/complete', anyUser, async (req, reply) => {
     const id = parseId(req.params.id);
     const body = completeBody.safeParse(req.body);
-    if (id === null || !body.success) return reply.code(400).send({ error: 'invalid_request' });
+    if (id === null || !body.success) return invalid(reply, body.error?.issues);
     const b = body.data;
     const user = req.user!;
     try {
@@ -359,7 +383,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
   app.post<{ Params: { id: string } }>('/api/entries/:id/correct', anyUser, async (req, reply) => {
     const id = parseId(req.params.id);
     const body = correctBody.safeParse(req.body);
-    if (id === null || !body.success) return reply.code(400).send({ error: 'invalid_request' });
+    if (id === null || !body.success) return invalid(reply, body.error?.issues);
     const b = body.data;
     const user = req.user!;
     try {
@@ -370,8 +394,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         const [first] = await tx<{ entered_by: number; entered_at: Date }[]>`
           select entered_by::int, entered_at from entries where entry_id = ${prev.entry_id} and version = 1`;
         const own = first!.entered_by === user.id || prev.entered_by === user.id;
-        // D-17: the right to record this type, and being the author or a supervisor.
-        if (!mayRecord(prev.logbook_type, user.roles) || (!own && !user.roles.includes('supervisor'))) {
+        if (!mayCorrect(prev.logbook_type, user.roles, own)) {
           throw new EntryError(403, 'forbidden');
         }
         const eq = await loadEquipment(tx, prev.equipment_id);
@@ -428,7 +451,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
   app.post<{ Params: { id: string } }>('/api/entries/:id/verify', { preHandler: requireRole(...VERIFIERS) }, async (req, reply) => {
     const id = parseId(req.params.id);
     const body = signBody.safeParse(req.body);
-    if (id === null || !body.success) return reply.code(400).send({ error: 'invalid_request' });
+    if (id === null || !body.success) return invalid(reply, body.error?.issues);
     const user = req.user!;
     try {
       const signer = await authenticateSigner(sql, user, body.data, { objectType: 'entry', objectId: id, meaning: 'verified' });
@@ -458,7 +481,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
   app.post<{ Params: { id: string } }>('/api/entries/:id/release', { preHandler: requireRole('qa') }, async (req, reply) => {
     const id = parseId(req.params.id);
     const body = signBody.safeParse(req.body);
-    if (id === null || !body.success) return reply.code(400).send({ error: 'invalid_request' });
+    if (id === null || !body.success) return invalid(reply, body.error?.issues);
     try {
       const signer = await authenticateSigner(sql, req.user!, body.data, { objectType: 'entry', objectId: id, meaning: 'released' });
       await sql.begin(async (tx) => {
@@ -486,7 +509,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
   app.get<{ Params: { id: string } }>('/api/equipment/:id/entries', anyUser, async (req, reply) => {
     const id = parseId(req.params.id);
     if (id === null) return reply.code(400).send({ error: 'invalid_request' });
-    return listEntries(sql, sql`e.equipment_id = ${id}`);
+    return withMayCorrect(sql, req.user!, await listEntries(sql, sql`e.equipment_id = ${id}`));
   });
 
   // All versions of one entry, oldest first, with their signatures (LB-17: originals stay readable).

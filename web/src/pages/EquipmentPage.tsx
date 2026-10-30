@@ -90,7 +90,10 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
     }
     return m;
   }, [types]);
-  const available = CORE_TYPES.filter((k) => APPLIES[k]!.includes(equipment.kind) && inForce.has(k) && (!STERILE_TYPES.has(k) || equipment.sterile));
+  const switchedOn = CORE_TYPES.filter((k) => APPLIES[k]!.includes(equipment.kind) && inForce.has(k) && (!STERILE_TYPES.has(k) || equipment.sterile));
+  // Only what the server accepts from this user: QA and Admin record nothing (S11).
+  const mayRecord = (k: string) => types.find((t) => t.key === k)?.mayRecord ?? false;
+  const available = switchedOn.filter(mayRecord);
   const productName = (id: number | null) => products.find((p) => p.id === id)?.code ?? '';
   const isVerifier = me.roles.includes('supervisor') || me.roles.includes('qa');
 
@@ -134,7 +137,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
       {tab === 'log' && <>
       <div className="row">
         {available.map((k) => <button key={k} className="primary" onClick={() => setForm({ type: k })}>+ {TYPE_LABEL[k]}</button>)}
-        {available.length === 0 && <p className="muted">No logbook types are switched on for this item yet.</p>}
+        {switchedOn.length === 0 && <p className="muted">No logbook types are switched on for this item yet.</p>}
       </div>
       {error && <p className="error">{error}</p>}
 
@@ -167,7 +170,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
               </td>
               <td className="actions-cell">
                 {e.inProgress && e.logbookType === 'equipment_use' && <button onClick={() => endUse(e)}>End use</button>}
-                {e.inProgress && e.logbookType === 'maintenance' && me.roles.some((r) => r === 'operator' || r === 'supervisor' || r === 'engineering') && (
+                {e.inProgress && e.logbookType === 'maintenance' && mayRecord('maintenance') && (
                   <button onClick={() => setForm({ type: 'maintenance', completing: e })}>Complete repair</button>
                 )}
                 {e.awaitingVerification && isVerifier && !e.inProgress && <button onClick={() => setVerifying(e)}>Verify</button>}
@@ -175,7 +178,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
                   e.signatures.some((g) => g.meaning === 'verified') && !e.signatures.some((g) => g.meaning === 'released') && (
                     <button onClick={() => setReleasing(e)}>Release to service</button>
                   )}
-                {!me.roles.includes('admin') && !e.inProgress && <button onClick={() => setForm({ type: e.logbookType, correcting: e })}>Correct</button>}
+                {e.mayCorrect && !e.inProgress && <button onClick={() => setForm({ type: e.logbookType, correcting: e })}>Correct</button>}
                 {e.version > 1 && <button onClick={async () => setHistory(await api<Entry[]>('GET', `/api/entries/${e.id}/versions`))}>History</button>}
               </td>
             </tr>

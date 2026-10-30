@@ -116,6 +116,8 @@ export interface LogbookTypeInfo {
   label: string;
   sterile: boolean;
   alwaysVerified: boolean;
+  // Whether the logged-in user may record this type (S11).
+  mayRecord: boolean;
   versions: SettingsVersion[];
 }
 
@@ -163,6 +165,8 @@ export interface Entry {
   signatures: EntrySignature[];
   awaitingVerification?: boolean;
   inProgress?: boolean;
+  // Whether the logged-in user may correct this entry (D-17), on an equipment logbook (S11).
+  mayCorrect?: boolean;
   // D-26: voice notes whose signed English text is in this version.
   voiceNotes?: { id: number; field: string; language: string | null; edited: boolean; carried: boolean }[];
 }

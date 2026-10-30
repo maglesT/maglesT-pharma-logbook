@@ -150,6 +150,7 @@ export function EntryForm({
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setProblems([]);
+    if (correcting && !reason.trim()) return setProblems(['Give the reason for the correction.']);
     const body: Record<string, unknown> = {
       activityStart: new Date(start).toISOString(),
       // The server decides whether a reading is out of limits.
@@ -191,7 +192,8 @@ export function EntryForm({
         type_not_configured: 'This logbook type has no approved settings yet.',
         not_fit_for_use: 'This equipment is not fit for use:',
         in_use: 'The equipment is in use.',
-        forbidden: 'Your role may not make this entry.',
+        forbidden: correcting ? 'Only the person who made this entry, or a supervisor, may correct it. QA reviews and verifies but does not correct.' : 'Your role may not make this entry.',
+        invalid_request: 'Some information is missing or not valid:',
         voice_signature_required: 'Sign to confirm the voice-note text.',
         voice_confirmation_required: 'Confirm the voice-note text with your signature first.',
         voice_check_failed: 'The voice note cannot be confirmed:',
@@ -283,7 +285,7 @@ export function EntryForm({
         {needLateReason && !correcting && (
           <label>Reason for late entry<input value={lateReason} onChange={(e) => setLateReason(e.target.value)} placeholder="e.g. transcribed from paper form no. …" /></label>
         )}
-        {correcting && <label>Reason for correction<input value={reason} onChange={(e) => setReason(e.target.value)} /></label>}
+        {correcting && <label>Reason for correction (required)<input value={reason} onChange={(e) => setReason(e.target.value)} required /></label>}
 
         {signs && (
           <div className="signbox">
@@ -306,7 +308,7 @@ export function EntryForm({
         {problems.length > 0 && <ul className="error">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
         <div className="actions">
           <button type="button" onClick={onCancel}>Cancel</button>
-          <button className="primary" type="submit">{signs ? 'Sign and save' : 'Save'}</button>
+          <button className="primary" type="submit" disabled={Boolean(correcting) && !reason.trim()}>{signs ? 'Sign and save' : 'Save'}</button>
         </div>
       </form>
     </div>
