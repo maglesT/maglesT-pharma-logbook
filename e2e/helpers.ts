@@ -85,3 +85,10 @@ export async function approveSettings(logbookType: string, settings: object = {}
   await post(qa, `/api/settings/${id}/approve`, { username: 'qa1', password: PASSWORD, contentHash: versions.find((v: { id: number }) => v.id === id).contentHash });
   await qa.dispose();
 }
+
+// A datetime-local value some minutes ago, in the browser's own time zone.
+export const localTime = (page: Page, minutesAgo: number) =>
+  page.evaluate((m) => {
+    const d = new Date(Date.now() - m * 60_000);
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  }, minutesAgo);

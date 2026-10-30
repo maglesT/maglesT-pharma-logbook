@@ -51,6 +51,20 @@ async function check(sql: Sql): Promise<IntegrityResult> {
   );
   for (const e of entries) if (!audited.has(e.id)) problems.push(`Entry version ${e.id}: no audit row.`);
 
+  // S9: equipment details versions run 1..n per item, each with the audit row written with it (D-25).
+  const details = await sql<{ id: number; equipment_id: number; version: number }[]>`
+    select id::int, equipment_id::int, version from equipment_details order by equipment_id, version`;
+  const detailsAudited = new Set(
+    (await sql<{ id: string | null }[]>`
+      select new_value->>'id' as id from audit_log where object_type = 'equipment' and action = 'equipment.details_updated'`).map((a) => Number(a.id)),
+  );
+  details.forEach((d, i) => {
+    const prev = details[i - 1];
+    const expected = prev && prev.equipment_id === d.equipment_id ? prev.version + 1 : 1;
+    if (d.version !== expected) problems.push(`Equipment ${d.equipment_id}: details version ${d.version} out of sequence.`);
+    if (!detailsAudited.has(d.id)) problems.push(`Equipment ${d.equipment_id}: details version ${d.version} has no audit row.`);
+  });
+
   // Signatures against the content they signed.
   const settings = new Map(
     (await sql<SettingsRow[]>`select id::int, logbook_type, version, settings, effective_from, created_by::int, created_at from logbook_settings`).map((s) => [s.id, s]),

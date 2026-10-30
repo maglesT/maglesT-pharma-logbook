@@ -46,7 +46,7 @@ export function runs(text: string): { text: string; font?: string }[] {
 }
 const cellText = (text: string, extra: Record<string, unknown> = {}): Content => ({ text: runs(text), fontSize: 7, ...extra }) as Content;
 
-const plant = (d: Date | string | null) =>
+export const plant = (d: Date | string | null) =>
   d ? `${new Date(d).toLocaleString('en-GB', { timeZone: PLANT_TZ, dateStyle: 'medium', timeStyle: 'short' })} IST` : '';
 const json = (v: unknown) => (v === null || v === undefined ? '' : JSON.stringify(v));
 // For the PDF: spaces after separators so long values wrap inside the table column.
@@ -77,20 +77,76 @@ const reviewText = (r: Review) =>
 // Spreadsheet formula triggers, also after leading spaces (review S5-4).
 const FORMULA = /^[\s]*[=+\-@\t\r]/;
 
+const cell = (v: unknown) => {
+  const s = v instanceof Date ? v.toISOString() : v === null || v === undefined ? '' : String(v);
+  return `"${(FORMULA.test(s) ? `'${s}` : s).replaceAll('"', '""')}"`;
+};
+// CSV with formula-safe cells, CRLF line ends and UTC times (D-20).
+export const csvText = (head: string[], rows: unknown[][]) => [head, ...rows].map((row) => row.map(cell).join(',')).join('\r\n') + '\r\n';
+
 function csv(r: Report): string {
   const head = ['record', 'equipment', 'entry_id', 'version', 'change', 'note', 'logbook_type', 'activity_start_utc', 'activity_end_utc',
     'batch', 'data', 'late_reason', 'entered_by', 'entered_at_utc', 'signatures', 'audit_at_utc', 'audit_user', 'audit_action', 'audit_old', 'audit_new', 'audit_reason'];
-  const cell = (v: unknown) => {
-    const s = v instanceof Date ? v.toISOString() : v === null || v === undefined ? '' : String(v);
-    return `"${(FORMULA.test(s) ? `'${s}` : s).replaceAll('"', '""')}"`;
-  };
   const rows: unknown[][] = r.entries.map((e) => [
     'entry', r.codes.get(e.equipmentId), e.entryId, e.version, e.change, versionNote(e, r.versions), e.logbookType, e.activityStart, e.activityEnd,
     e.batch, json(e.data), e.lateReason, e.enteredBy, e.enteredAt, signatureText(e).replaceAll('\n', ' | '), '', '', '', '', '', '',
   ]);
   for (const v of r.reviews) rows.push(['review', '', v.id, '', '', reviewText(v), '', v.periodFrom, v.periodTo, '', '', '', v.reviewedBy, v.reviewedAt, '', '', '', '', '', '', '']);
   for (const a of r.audit) rows.push(['audit', '', '', '', '', '', '', '', '', '', '', '', '', '', '', a.at, a.actor ?? 'system', a.action, json(a.oldValue), json(a.newValue), a.reason]);
-  return [head, ...rows].map((row) => row.map(cell).join(',')).join('\r\n') + '\r\n';
+  return csvText(head, rows);
+}
+
+// The common page frame of every PDF copy: site header, title, generated-by footer with page x of y (D-20).
+function render(site: { name: string; code: string } | undefined, title: string, by: string, content: Content[]): Promise<Buffer> {
+  const def: TDocumentDefinitions = {
+    pageOrientation: 'landscape',
+    pageSize: 'A4',
+    pageMargins: [28, 50, 28, 36],
+    defaultStyle: { font: 'Noto', fontSize: 9 },
+    header: { text: runs(`${site?.name ?? ''} (${site?.code ?? ''}) · ${title}`), margin: [28, 20, 28, 0], fontSize: 9, bold: true },
+    footer: (page, pages) => ({
+      text: `Generated ${plant(new Date())} by ${by} · true copy of the electronic record · page ${page} of ${pages}`,
+      margin: [28, 10, 28, 0],
+      fontSize: 7,
+    }),
+    content,
+  };
+  const doc = printer.createPdfKitDocument(def);
+  const chunks: Buffer[] = [];
+  return new Promise((resolve, reject) => {
+    doc.on('data', (c: Buffer) => chunks.push(c));
+    doc.on('end', () => resolve(Buffer.concat(chunks)));
+    doc.on('error', reject);
+    doc.end();
+  });
+}
+
+export interface PdfTable {
+  heading: string;
+  columns: string[];
+  widths: (number | string)[];
+  rows: { cells: string[]; highlight?: boolean; grey?: boolean }[];
+}
+
+// A PDF copy made of titled tables, with the site header (S9 register and history card).
+export async function tablesPdf(sql: Sql, title: string, subtitle: string, tables: PdfTable[], by: string): Promise<Buffer> {
+  const [site] = await sql<{ name: string; code: string }[]>`select name, code from site where id = 1`;
+  const content: Content[] = [{ text: runs(title), fontSize: 14, bold: true }, { text: runs(subtitle), margin: [0, 2, 0, 10] }];
+  for (const t of tables) {
+    content.push({ text: runs(t.heading), bold: true, margin: [0, 8, 0, 4] });
+    content.push(t.rows.length
+      ? { table: { headerRows: 1, widths: t.widths, body: [t.columns.map((c) => ({ text: c, fontSize: 8, bold: true })),
+          ...t.rows.map((r) => r.cells.map((c) => cellText(c, r.grey ? { color: '#888888' } : r.highlight ? { fillColor: '#fdecea' } : {})))] }, layout: 'lightHorizontalLines' }
+      : { text: 'None.', italics: true });
+  }
+  return render(site, title, by, content);
+}
+
+export function sendCopy(reply: FastifyReply, format: 'csv' | 'pdf', name: string, body: string | Buffer) {
+  const safe = name.replace(/[^A-Za-z0-9._-]/g, '_');
+  return format === 'csv'
+    ? reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="${safe}.csv"`).send('\ufeff' + body)
+    : reply.header('content-type', 'application/pdf').header('content-disposition', `attachment; filename="${safe}.pdf"`).send(body);
 }
 
 async function pdf(r: Report, site: { name: string; code: string } | undefined, by: string): Promise<Buffer> {
@@ -113,41 +169,21 @@ async function pdf(r: Report, site: { name: string; code: string } | undefined, 
     cellText(`${a.reason ? `Reason: ${a.reason}\n` : ''}${a.oldValue ? `Old: ${wrapJson(a.oldValue)}\n` : ''}${a.newValue ? `New: ${wrapJson(a.newValue)}` : ''}`),
   ]);
   const heading = (text: string) => ({ text, fontSize: 8, bold: true });
-  const def: TDocumentDefinitions = {
-    pageOrientation: 'landscape',
-    pageSize: 'A4',
-    pageMargins: [28, 50, 28, 36],
-    defaultStyle: { font: 'Noto', fontSize: 9 },
-    header: { text: runs(`${site?.name ?? ''} (${site?.code ?? ''}) · ${r.title}`), margin: [28, 20, 28, 0], fontSize: 9, bold: true },
-    footer: (page, pages) => ({
-      text: `Generated ${plant(new Date())} by ${by} · true copy of the electronic record · page ${page} of ${pages}`,
-      margin: [28, 10, 28, 0],
-      fontSize: 7,
-    }),
-    content: [
-      { text: runs(r.title), fontSize: 14, bold: true },
-      { text: runs(r.subtitle), margin: [0, 2, 0, 10] },
-      ...(r.reviews.length
-        ? [{ text: 'QA reviews', bold: true, margin: [0, 0, 0, 4] } as Content, { ul: r.reviews.map((v) => ({ text: runs(reviewText(v)), fontSize: 8 })), margin: [0, 0, 0, 10] } as Content]
-        : []),
-      { text: 'Entries (all versions; superseded versions shown in grey)', bold: true, margin: [0, 0, 0, 4] },
-      r.entries.length
-        ? { table: { headerRows: 1, widths: [55, 75, 90, '*', 70, 150], body: [['Item / entry', 'Type', 'Activity', 'Details', 'Entered', 'Signatures'].map(heading), ...entryRows] }, layout: 'lightHorizontalLines' }
-        : { text: 'No entries.', italics: true },
-      { text: 'Audit trail', bold: true, margin: [0, 14, 0, 4] },
-      r.audit.length
-        ? { table: { headerRows: 1, widths: [80, 80, 120, '*'], body: [['When', 'Who', 'Action', 'Details'].map(heading), ...auditRows] }, layout: 'lightHorizontalLines' }
-        : { text: 'No audit rows.', italics: true },
-    ],
-  };
-  const doc = printer.createPdfKitDocument(def);
-  const chunks: Buffer[] = [];
-  return new Promise((resolve, reject) => {
-    doc.on('data', (c: Buffer) => chunks.push(c));
-    doc.on('end', () => resolve(Buffer.concat(chunks)));
-    doc.on('error', reject);
-    doc.end();
-  });
+  return render(site, r.title, by, [
+    { text: runs(r.title), fontSize: 14, bold: true },
+    { text: runs(r.subtitle), margin: [0, 2, 0, 10] },
+    ...(r.reviews.length
+      ? [{ text: 'QA reviews', bold: true, margin: [0, 0, 0, 4] } as Content, { ul: r.reviews.map((v) => ({ text: runs(reviewText(v)), fontSize: 8 })), margin: [0, 0, 0, 10] } as Content]
+      : []),
+    { text: 'Entries (all versions; superseded versions shown in grey)', bold: true, margin: [0, 0, 0, 4] },
+    r.entries.length
+      ? { table: { headerRows: 1, widths: [55, 75, 90, '*', 70, 150], body: [['Item / entry', 'Type', 'Activity', 'Details', 'Entered', 'Signatures'].map(heading), ...entryRows] }, layout: 'lightHorizontalLines' }
+      : { text: 'No entries.', italics: true },
+    { text: 'Audit trail', bold: true, margin: [0, 14, 0, 4] },
+    r.audit.length
+      ? { table: { headerRows: 1, widths: [80, 80, 120, '*'], body: [['When', 'Who', 'Action', 'Details'].map(heading), ...auditRows] }, layout: 'lightHorizontalLines' }
+      : { text: 'No audit rows.', italics: true },
+  ]);
 }
 
 async function build(sql: Sql, title: string, subtitle: string, versions: EntryRow[], reviews: Review[] = []): Promise<Report> {
@@ -169,13 +205,10 @@ async function build(sql: Sql, title: string, subtitle: string, versions: EntryR
 // Size guard (review S5-6): exports are built in memory.
 const MAX_VERSIONS = 20_000;
 
-async function send(sql: Sql, reply: FastifyReply, format: string, name: string, report: Report, by: string) {
-  const safe = name.replace(/[^A-Za-z0-9._-]/g, '_');
-  if (format === 'csv') {
-    return reply.header('content-type', 'text/csv; charset=utf-8').header('content-disposition', `attachment; filename="${safe}.csv"`).send('﻿' + csv(report));
-  }
+async function send(sql: Sql, reply: FastifyReply, format: 'csv' | 'pdf', name: string, report: Report, by: string) {
+  if (format === 'csv') return sendCopy(reply, format, name, csv(report));
   const [site] = await sql<{ name: string; code: string }[]>`select name, code from site where id = 1`;
-  return reply.header('content-type', 'application/pdf').header('content-disposition', `attachment; filename="${safe}.pdf"`).send(await pdf(report, site, by));
+  return sendCopy(reply, format, name, await pdf(report, site, by));
 }
 
 export function exportRoutes(app: FastifyInstance, sql: Sql) {

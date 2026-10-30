@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
+import { api, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, type Entry, type Part, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
+import { HistoryCard } from './HistoryCard.js';
 
 const CORE_TYPES = ['equipment_use', 'equipment_cleaning', 'maintenance', 'calibration', 'area_cleaning', 'general_log',
   'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading'];
@@ -57,7 +58,8 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
   const [entries, setEntries] = useState<Entry[]>([]);
   const [types, setTypes] = useState<LogbookTypeInfo[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [form, setForm] = useState<{ type: string; correcting?: Entry } | null>(null);
+  const [form, setForm] = useState<{ type: string; correcting?: Entry; completing?: Entry } | null>(null);
+  const [tab, setTab] = useState<'log' | 'history'>('log');
   const [verifying, setVerifying] = useState<Entry | null>(null);
   const [releasing, setReleasing] = useState<Entry | null>(null);
   const [status, setStatus] = useState<EquipmentStatus | null>(null);
@@ -118,6 +120,12 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
           {[...status.blockers, ...status.warnings].map((b) => <span key={b} className="reason">{b}</span>)}
         </div>
       )}
+      <div className="subtabs">
+        <button className={tab === 'log' ? 'on' : ''} onClick={() => setTab('log')}>Logbook</button>
+        <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>History card</button>
+      </div>
+      {tab === 'history' && <HistoryCard me={me} equipment={equipment} />}
+      {tab === 'log' && <>
       <div className="row">
         {available.map((k) => <button key={k} className="primary" onClick={() => setForm({ type: k })}>+ {TYPE_LABEL[k]}</button>)}
         {available.length === 0 && <p className="muted">No logbook types are switched on for this item yet.</p>}
@@ -151,7 +159,10 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
                 {e.awaitingVerification && <span className="chip chip-warn">Awaiting verification</span>}
               </td>
               <td className="actions-cell">
-                {e.inProgress && <button onClick={() => endUse(e)}>End use</button>}
+                {e.inProgress && e.logbookType === 'equipment_use' && <button onClick={() => endUse(e)}>End use</button>}
+                {e.inProgress && e.logbookType === 'maintenance' && me.roles.some((r) => r === 'operator' || r === 'supervisor' || r === 'engineering') && (
+                  <button onClick={() => setForm({ type: 'maintenance', completing: e })}>Complete repair</button>
+                )}
                 {e.awaitingVerification && isVerifier && !e.inProgress && <button onClick={() => setVerifying(e)}>Verify</button>}
                 {e.logbookType === 'maintenance' && e.data.kind === 'breakdown' && me.roles.includes('qa') &&
                   e.signatures.some((g) => g.meaning === 'verified') && !e.signatures.some((g) => g.meaning === 'released') && (
@@ -165,6 +176,8 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
         </tbody>
       </table>
 
+      </>}
+
       {form && inForce.get(form.type) && (
         <EntryForm
           type={form.type}
@@ -172,6 +185,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
           settings={inForce.get(form.type)!}
           products={products}
           correcting={form.correcting}
+          completing={form.completing}
           onCancel={() => setForm(null)}
           onDone={async () => {
             setForm(null);
@@ -233,12 +247,24 @@ const LABELS: Record<string, string> = {
   deviationRef: 'Deviation', agent: 'Agent', sporicidal: 'Sporicidal', disinfectantLot: 'Disinfectant lot', notes: 'Notes',
   cycleType: 'Cycle', cycleId: 'Cycle no.', programme: 'Programme', load: 'Load', controllerRecordRef: 'Controller record',
   indicators: 'Indicators', test: 'Test', port: 'Port', method: 'Method', point: 'Point', value: 'Reading', outOfLimit: 'OUT OF LIMITS',
+  occurredAt: 'Occurred', reportedBy: 'Reported by', failureCategory: 'Category', rootCause: 'Root cause', parts: 'Parts', partsNone: 'Parts',
+  toolsUsed: 'Tools / consumables', doneBy: 'Done by', vendorName: 'Vendor', serviceReportRef: 'Service report', workOrderRef: 'WO',
+  postRepairChecks: 'Post-repair checks', recalibrationNeeded: 'Re-calibration needed',
 };
 
-function Summary({ e, full = false }: { e: Entry; full?: boolean }) {
+const partsLine = (parts: Part[]) => parts.map((p) => `${p.quantity} × ${p.name}${p.partNumber ? ` (P/N ${p.partNumber})` : ''}${p.lotSerial ? `, lot/SN ${p.lotSerial}` : ''}`).join('; ');
+const value = (k: string, v: unknown) =>
+  k === 'nextDue' ? String(v).slice(0, 10)
+  : k === 'occurredAt' ? plantTime(String(v))
+  : k === 'parts' ? partsLine(v as Part[])
+  : k === 'partsNone' ? 'none'
+  : k === 'doneBy' ? (v === 'vendor' ? 'external vendor' : 'in-house')
+  : v === true ? 'yes' : String(v).replaceAll('_', ' ');
+
+export function Summary({ e, full = false }: { e: Entry; full?: boolean }) {
   const parts = Object.entries(e.data)
-    .filter(([k, v]) => k !== 'checklist' && v !== '' && v !== false && v !== null)
-    .map(([k, v]) => `${LABELS[k] ?? k}: ${k === 'nextDue' ? String(v).slice(0, 10) : v === true ? 'yes' : String(v).replaceAll('_', ' ')}`);
+    .filter(([k, v]) => k !== 'checklist' && v !== '' && v !== false && v !== null && !(Array.isArray(v) && v.length === 0))
+    .map(([k, v]) => `${LABELS[k] ?? k}: ${value(k, v)}`);
   const checklist = Object.entries((e.data.checklist ?? {}) as Record<string, boolean>).filter(([, v]) => v).map(([k]) => k);
   if (full && checklist.length) parts.push(`Checklist confirmed: ${checklist.join('; ')}`);
   return <span>{parts.join(' · ') || '—'}</span>;

@@ -8,6 +8,8 @@ let n = 0;
 
 const sig = (username: string) => ({ username, password: PASSWORD });
 const now = () => new Date().toISOString();
+// A complete S9 breakdown record, repair ended (D-25).
+const breakdown = (description: string) => ({ kind: 'breakdown', description, occurredAt: new Date(Date.now() - 5 * 60_000).toISOString(), failureCategory: 'mechanical', partsNone: true, doneBy: 'in_house' });
 
 async function approve(type: string, settings: object = {}) {
   const base = { enabled: true, sopRef: '', checklist: [], verificationRequired: false, ...settings };
@@ -107,7 +109,7 @@ describe('breakdown and release (LB-06)', () => {
   it('LB-06: a breakdown takes equipment out of service until QA releases the verified entry', async () => {
     const id = await newItem();
     await cleanAndVerify(id);
-    const bd = (await entry('eng1', id, { logbookType: 'maintenance', activityStart: now(), data: { kind: 'breakdown', description: 'Motor trips' }, signature: sig('eng1') })).json().id;
+    const bd = (await entry('eng1', id, { logbookType: 'maintenance', activityStart: now(), activityEnd: now(), data: breakdown('Motor trips'), signature: sig('eng1') })).json().id;
     expect((await status(id)).state).toBe('out_of_service');
     expect((await startUse(id)).json().problems[0]).toMatch(/Out of service/);
 
@@ -271,7 +273,7 @@ describe('review fixes (S4)', () => {
   it('LB-06: correcting a released breakdown withdraws the release until re-verified and released (D-19)', async () => {
     const id = await newItem();
     await cleanAndVerify(id);
-    const bd = (await entry('eng1', id, { logbookType: 'maintenance', activityStart: now(), data: { kind: 'breakdown', description: 'Belt' }, signature: sig('eng1') })).json().id;
+    const bd = (await entry('eng1', id, { logbookType: 'maintenance', activityStart: now(), activityEnd: now(), data: breakdown('Belt'), signature: sig('eng1') })).json().id;
     await signEntry('sup1', 'verify', bd);
     await signEntry('qa', 'release', bd);
     expect((await status(id)).state).toBe('clean');

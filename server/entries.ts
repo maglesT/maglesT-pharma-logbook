@@ -4,6 +4,16 @@ import { typeByKey, type LogbookSettings } from './logbook-types.js';
 
 // Entry data per built-in logbook type (D-07). Sterile types arrive in S6.
 const checklistAnswers = z.record(z.string().max(200), z.boolean()).default({});
+const isoTime = z.string().datetime({ offset: true }).transform((t) => new Date(t).toISOString());
+export const FAILURE_CATEGORIES = ['mechanical', 'electrical', 'utility', 'instrumentation', 'software', 'operator', 'other'] as const;
+const part = z.object({
+  name: z.string().trim().min(1).max(120),
+  partNumber: z.string().trim().max(60).default(''),
+  quantity: z.number().positive().max(100_000),
+  lotSerial: z.string().trim().max(60).default(''),
+});
+// What a breakdown report states; completing the repair adds to it but cannot change it (LB-17).
+export const REPORTED_FIELDS = ['kind', 'occurredAt', 'reportedBy', 'description', 'failureCategory'] as const;
 const outOfLimit = { comment: z.string().trim().max(1000).default(''), deviationRef: z.string().trim().max(60).default('') };
 
 export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
@@ -15,10 +25,29 @@ export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
   }),
   maintenance: z.object({
     kind: z.enum(['preventive', 'breakdown', 'repair']),
+    // For a breakdown: the failure or symptom.
     description: z.string().trim().min(1).max(2000),
     workDone: z.string().trim().max(2000).default(''),
     // A1 5.7: unplanned maintenance of sterility-critical equipment needs a recorded impact assessment.
     impactAssessment: z.string().trim().max(2000).default(''),
+    // S9 breakdown history (D-25). Optional here so entries made before S9 stay valid; checkData
+    // requires them for new breakdowns. The repair start and end are the entry's activity times.
+    occurredAt: isoTime.optional(),
+    reportedBy: z.string().trim().max(120).default(''),
+    failureCategory: z.enum(FAILURE_CATEGORIES).optional(),
+    rootCause: z.string().trim().max(2000).default(''),
+    parts: z.array(part).max(50).default([]),
+    // "No parts used" is stated explicitly, never assumed from an empty list.
+    partsNone: z.boolean().default(false),
+    toolsUsed: z.string().trim().max(1000).default(''),
+    doneBy: z.enum(['in_house', 'vendor']).optional(),
+    vendorName: z.string().trim().max(120).default(''),
+    serviceReportRef: z.string().trim().max(60).default(''),
+    // A CMMS work-order number, kept as a reference only.
+    workOrderRef: z.string().trim().max(60).default(''),
+    deviationRef: z.string().trim().max(60).default(''),
+    postRepairChecks: z.string().trim().max(1000).default(''),
+    recalibrationNeeded: z.boolean().default(false),
   }),
   calibration: z.object({
     result: z.enum(['pass', 'fail']),
@@ -105,6 +134,37 @@ export interface EquipmentInfo {
 
 const HAS_CHECKLIST = new Set(['equipment_cleaning', 'area_cleaning', 'general_log']);
 
+// Where the entry stands: the activity end (null while a use or repair is open) and whether it
+// continues an entry made before S9, which need not carry the S9 breakdown fields (D-25).
+export interface EntryContext {
+  end: Date | null;
+  legacy: boolean;
+}
+
+// LB-02 / LB-06 (D-25): a breakdown states when it occurred and what failed; once the repair has
+// ended it also states the parts used (or none) and who did the work.
+function checkBreakdown(data: Record<string, unknown>, equipment: EquipmentInfo, activityStart: Date, ctx: EntryContext): string[] {
+  const problems: string[] = [];
+  const parts = (data.parts ?? []) as unknown[];
+  if (data.partsNone && parts.length) problems.push('Either list the parts used or tick "No parts used", not both.');
+  if (data.doneBy !== 'vendor' && (String(data.vendorName ?? '') || String(data.serviceReportRef ?? ''))) {
+    problems.push('Vendor name and service report are for work done by an external vendor.');
+  }
+  if (data.doneBy === 'vendor' && !String(data.vendorName ?? '').trim()) problems.push('Give the vendor name.');
+  if (data.occurredAt && Date.parse(String(data.occurredAt)) > activityStart.getTime()) {
+    problems.push('The breakdown cannot have occurred after the repair started.');
+  }
+  if (data.recalibrationNeeded && equipment.kind === 'area') problems.push('Areas are not calibrated: untick "Re-calibration needed".');
+  if (data.kind !== 'breakdown' || ctx.legacy) return problems;
+  if (!data.occurredAt) problems.push('Give the date and time the breakdown occurred.');
+  if (!data.failureCategory) problems.push('Choose the failure category.');
+  if (ctx.end) {
+    if (!parts.length && !data.partsNone) problems.push('List the parts used, or tick "No parts used".');
+    if (!data.doneBy) problems.push('State who did the repair (in-house or external vendor).');
+  }
+  return problems;
+}
+
 // LB-11 system checks: consistency, completeness and limits. Returns problems shown to the user.
 export function checkData(
   type: string,
@@ -112,8 +172,10 @@ export function checkData(
   settings: LogbookSettings,
   equipment: EquipmentInfo,
   activityStart: Date,
+  ctx: EntryContext = { end: activityStart, legacy: false },
 ): string[] {
   const problems: string[] = [];
+  if (type === 'maintenance') problems.push(...checkBreakdown(data, equipment, activityStart, ctx));
   if (HAS_CHECKLIST.has(type)) {
     const checklist = (data.checklist ?? {}) as Record<string, boolean>;
     for (const item of settings.checklist) {
