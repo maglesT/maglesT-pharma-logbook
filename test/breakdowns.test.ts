@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PASSWORD, call, freshApp, login, seedUser, type TestApp } from './helpers.js';
 import { breakdownStats, type Breakdown } from '../server/breakdowns.js';
+import { changeLines } from '../server/changes.js';
 import { runIntegrityCheck } from '../server/integrity.js';
 
 // S9 (D-25): richer breakdown entries, equipment details, breakdown register and history card.
@@ -338,5 +339,19 @@ describe('history card (LB-01, LB-22)', () => {
     expect(csv.body).toContain('Downtime 0 h');
     const pdf = await call(t.app, c.op1!, 'GET', `/api/export/history.pdf?equipmentId=${id}&${period()}`);
     expect(pdf.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
+  });
+});
+
+describe('master-data changes in words (S11)', () => {
+  it('LB-18: the history card lists what changed, not the stored JSON', () => {
+    expect(changeLines(null, { id: 5, code: 'CAP-A-CFM', name: 'Capsule filler', kind: 'equipment', location: 'Line A', sterile: false, cleanHoldHours: 72 }))
+      .toEqual(['ID: CAP-A-CFM', 'Name: Capsule filler', 'Type: equipment', 'Location: Line A', 'Sterile: no', 'Clean-hold (hours): 72']);
+    expect(changeLines({ code: 'X', location: 'Line A', sterile: false }, { code: 'X', location: 'Line B', sterile: true }))
+      .toEqual(['Location: Line A → Line B', 'Sterile: no → yes']);
+    expect(changeLines({ version: 1, details: { model: 'VC-200', iq: { date: '2019-06-12', ref: 'IQ-1' }, qualificationStatus: 'qualified' } },
+      { id: 9, version: 2, details: { model: 'VC-250', iq: { date: '2019-06-12', ref: 'IQ-1' }, qualificationStatus: 'requalification_due' } }))
+      .toEqual(['Model: VC-200 → VC-250', 'Qualification: qualified → requalification due']);
+    expect(changeLines(null, { id: 9, version: 1, details: { model: 'VC-200', serialNumber: '', pq: { date: '2019-07-15', ref: 'PQ-1' } } }))
+      .toEqual(['Model: VC-200', 'PQ: 2019-07-15, PQ-1']);
   });
 });

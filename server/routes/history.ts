@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
 import { parseId, requireRole } from '../auth.js';
+import { changeLines } from '../changes.js';
 import { canonical } from '../signatures.js';
 import { PLANT_TZ, statusOf } from '../status.js';
 import {
@@ -50,7 +51,7 @@ async function register(sql: Sql, q: z.infer<typeof registerQuery>) {
 type Event =
   | { kind: 'entry'; at: Date; entry: Awaited<ReturnType<typeof present>>[number] & { latest: boolean }; breakdown?: { downtime: string; parts: string; status: string } }
   | { kind: 'review'; at: Date; review: Awaited<ReturnType<typeof reviewsFor>>[number] }
-  | { kind: 'masterdata'; at: Date; actor: string | null; action: string; old: unknown; new: unknown; reason: string | null };
+  | { kind: 'masterdata'; at: Date; actor: string | null; action: string; old: unknown; new: unknown; reason: string | null; lines: string[] };
 
 // The life history of one item: every entry version, QA reviews and master-data changes, oldest first.
 async function history(sql: Sql, id: number, fromDay: string, toDay: string, types: Set<string> | null) {
@@ -77,7 +78,9 @@ async function history(sql: Sql, id: number, fromDay: string, toDay: string, typ
       from audit_log a left join users u on u.id = a.actor_id
       where a.object_type = 'equipment' and a.object_id = ${String(id)} and a.at >= ${from} and a.at < ${to}
       order by a.at, a.id`;
-    for (const r of rows) events.push({ kind: 'masterdata', at: r.at, actor: r.actor, action: r.action, old: r.old_value, new: r.new_value, reason: r.reason });
+    for (const r of rows) {
+      events.push({ kind: 'masterdata', at: r.at, actor: r.actor, action: r.action, old: r.old_value, new: r.new_value, reason: r.reason, lines: changeLines(r.old_value, r.new_value) });
+    }
   }
   events.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
   return { from, to, events };
@@ -116,7 +119,7 @@ function eventRow(ev: Event): { at: Date; kind: string; what: string; detail: st
     const r = ev.review;
     return { at: ev.at, kind: 'review', what: `QA review ${plant(r.periodFrom)} to ${plant(r.periodTo)}${r.superseded ? ' (superseded)' : ''}`, detail: '', who: r.reviewedBy ?? '', signatures: `reviewed: ${r.reviewedBy ?? ''}, ${plant(r.reviewedAt)}${r.valid ? '' : ' [INVALID]'}`, breakdown: '', highlight: false, grey: false };
   }
-  return { at: ev.at, kind: 'master data', what: ev.action, detail: `${ev.reason ? `Reason: ${ev.reason} · ` : ''}${ev.old ? `Old: ${flat(ev.old)} · ` : ''}New: ${flat(ev.new)}`, who: ev.actor ?? 'system', signatures: '', breakdown: '', highlight: false, grey: false };
+  return { at: ev.at, kind: 'master data', what: ev.action, detail: [ev.reason ? `Reason: ${ev.reason}` : '', ...ev.lines].filter(Boolean).join(' · '), who: ev.actor ?? 'system', signatures: '', breakdown: '', highlight: false, grey: false };
 }
 
 export function historyRoutes(app: FastifyInstance, sql: Sql) {

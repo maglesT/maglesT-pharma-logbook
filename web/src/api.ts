@@ -291,7 +291,7 @@ export interface EquipmentCard {
 export type HistoryEvent =
   | { kind: 'entry'; at: string; entry: Entry & { latest: boolean }; breakdown?: { downtime: string; parts: string; status: string } }
   | { kind: 'review'; at: string; review: { id: number; periodFrom: string; periodTo: string; reviewedBy: string | null; reviewedAt: string | null; superseded: boolean; valid: boolean } }
-  | { kind: 'masterdata'; at: string; actor: string | null; action: string; old: unknown; new: unknown; reason: string | null };
+  | { kind: 'masterdata'; at: string; actor: string | null; action: string; old: unknown; new: unknown; reason: string | null; lines: string[] };
 
 // S10 voice notes (D-26).
 export const VOICE_LANGUAGE_LABEL: Record<string, string> = {
