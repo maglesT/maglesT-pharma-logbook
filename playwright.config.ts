@@ -14,6 +14,9 @@ export default defineConfig({
     // Forms take times in the browser's zone; the plant is in India (LB-19).
     timezoneId: 'Asia/Kolkata',
     trace: 'retain-on-failure',
+    // Voice notes (D-26): a fake microphone, allowed without a prompt.
+    permissions: ['microphone'],
+    launchOptions: { args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'] },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {

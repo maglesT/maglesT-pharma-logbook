@@ -62,10 +62,16 @@ interface Report {
   codes: Map<number, string>;
 }
 
+// D-26: the signed English text is the record; the copy says that original voice data exists.
+export const voiceNoteText = (e: { voiceNotes: { field: string; language: string | null; edited: boolean }[] }) =>
+  e.voiceNotes.map((v) => `Voice note for ${v.field}: signed English text; original ${v.language ?? 'language'} audio and transcript kept${v.edited ? ' (translation edited by the speaker)' : ''}`).join('\n');
+
 function versionNote(e: Presented, all: EntryRow[]) {
   const next = all.find((v) => v.supersedes === e.id);
-  if (next) return `Superseded by version ${next.version} (${next.change})`;
-  return e.change === 'corrected' ? `Corrected: ${e.correctionReason}` : e.change === 'completed' ? 'Use ended' : '';
+  const voice = voiceNoteText(e);
+  const note = next ? `Superseded by version ${next.version} (${next.change})`
+    : e.change === 'corrected' ? `Corrected: ${e.correctionReason}` : e.change === 'completed' ? 'Completed' : '';
+  return [note, voice].filter(Boolean).join('\n');
 }
 
 const signatureText = (e: Presented) =>

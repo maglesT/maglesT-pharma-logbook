@@ -3,6 +3,7 @@ import { audit } from './audit.js';
 import { contentHash } from './signatures.js';
 import { ENTRY_COLS, entryContent, type EntryRow } from './routes/entries.js';
 import { signedContent, type SettingsRow } from './routes/settings.js';
+import { VOICE_COLS, voiceContent, type ConfirmationRow, type VoiceNoteRow } from './voice.js';
 
 // LB-23 (A11 7.1, P11 11.10(c)): re-read every record, check each signature still matches the
 // content it signed, that every entry's version chain is complete, and that every entry version
@@ -65,6 +66,23 @@ async function check(sql: Sql): Promise<IntegrityResult> {
     if (!detailsAudited.has(d.id)) problems.push(`Equipment ${d.equipment_id}: details version ${d.version} has no audit row.`);
   });
 
+  // S10: each voice note's audio still matches its hash, and each has its audit rows (D-26). The hash
+  // is computed in the database so the audio is not loaded into memory.
+  const voices = await sql.unsafe<(VoiceNoteRow & { actual: string })[]>(`select ${VOICE_COLS}, encode(sha256(audio), 'hex') as actual from voice_notes order by id`);
+  const confirmations = new Map((await sql<ConfirmationRow[]>`
+    select id::int, voice_note_id::int, entry_version_id::int, final_text, edited, confirmed_at from voice_note_confirmations`).map((c) => [c.voice_note_id, c]));
+  const voiceAudit = await sql<{ object_id: string; action: string }[]>`
+    select object_id, action from audit_log where object_type = 'voice_note' and action in ('voice_note.created', 'voice_note.confirmed')`;
+  const voiceAudited = new Set(voiceAudit.map((a) => `${a.action}:${a.object_id}`));
+  for (const v of voices) {
+    if (v.actual !== v.audio_sha256) problems.push(`Voice note ${v.id}: the audio no longer matches its hash.`);
+    if (!voiceAudited.has(`voice_note.created:${v.id}`)) problems.push(`Voice note ${v.id}: no audit row.`);
+    const c = confirmations.get(v.id);
+    if (c && !byId.has(c.entry_version_id)) problems.push(`Voice note ${v.id}: confirmed into a missing entry version.`);
+    if (c && !voiceAudited.has(`voice_note.confirmed:${v.id}`)) problems.push(`Voice note ${v.id}: confirmation has no audit row.`);
+  }
+  const voiceById = new Map(voices.map((v) => [v.id, v]));
+
   // Signatures against the content they signed.
   const settings = new Map(
     (await sql<SettingsRow[]>`select id::int, logbook_type, version, settings, effective_from, created_by::int, created_at from logbook_settings`).map((s) => [s.id, s]),
@@ -76,6 +94,7 @@ async function check(sql: Sql): Promise<IntegrityResult> {
     const content =
       g.object_type === 'entry' ? (byId.has(g.object_id) ? entryContent(byId.get(g.object_id)!) : undefined)
       : g.object_type === 'settings' ? (settings.has(g.object_id) ? signedContent(settings.get(g.object_id)!) : undefined)
+      : g.object_type === 'voice_note' ? (voiceById.has(g.object_id) && confirmations.has(g.object_id) ? voiceContent(voiceById.get(g.object_id)!, confirmations.get(g.object_id)!) : undefined)
       : reviews.get(g.object_id);
     if (content === undefined) problems.push(`Signature ${g.id} (${g.meaning}): the signed ${g.object_type} ${g.object_id} is missing.`);
     else if (contentHash(g.object_type, g.object_id, content) !== g.content_hash) {

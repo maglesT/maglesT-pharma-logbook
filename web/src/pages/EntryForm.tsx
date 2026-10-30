@@ -1,5 +1,6 @@
-import { useState, type FormEvent } from 'react';
-import { api, ApiError, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, type Entry, type Equipment, type Part, type Product, type Settings } from '../api.js';
+import { Fragment, useState, type FormEvent, type ReactNode } from 'react';
+import { api, ApiError, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
+import { VoiceButton } from '../components/VoiceNote.js';
 
 type Data = Record<string, unknown>;
 
@@ -74,6 +75,7 @@ export function EntryForm({
   products,
   correcting,
   completing,
+  voice,
   onDone,
   onCancel,
 }: {
@@ -83,6 +85,8 @@ export function EntryForm({
   products: Product[];
   correcting?: Entry;
   completing?: Entry;
+  // D-26: voice notes, when the site has them switched on.
+  voice?: VoiceConfig;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -103,9 +107,40 @@ export function EntryForm({
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [problems, setProblems] = useState<string[]>([]);
+  // Voice-note drafts per field, with the text the field had before; signed on save (D-26).
+  const [drafts, setDrafts] = useState<Record<string, VoiceDraft & { previous: string }>>({});
+  const [voiceUser, setVoiceUser] = useState('');
+  const [voicePassword, setVoicePassword] = useState('');
   const [needLateReason, setNeedLateReason] = useState(false);
 
   const signs = Boolean(correcting) || PERFORMER_SIGNS.has(type);
+  const voiceDrafts = Object.entries(drafts);
+  // The voice-note button, or the draft notice once a voice note filled the field.
+  const voiceSlot = (k: string): ReactNode => {
+    const d = drafts[k];
+    if (d) {
+      return (
+        <div className="voice-draft" role="status">
+          <strong>Draft from a voice note ({VOICE_LANGUAGE_LABEL[d.detectedLanguage ?? ''] ?? d.detectedLanguage ?? 'detected language'}).</strong>{' '}
+          Read and correct the English text above; it becomes part of the entry only when you sign below.
+          <div className="muted" lang={d.detectedLanguage ?? undefined}>You said: {d.transcript}</div>
+          <button type="button" onClick={() => {
+            setData({ ...data, [k]: d.previous });
+            const { [k]: _gone, ...rest } = drafts;
+            setDrafts(rest);
+          }}>Discard voice note</button>
+        </div>
+      );
+    }
+    if (!voice?.enabled || !(voice.fields[type] ?? []).includes(k)) return null;
+    return (
+      <VoiceButton config={voice} equipmentId={equipment.id} logbookType={type} field={k}
+        onDraft={(v) => {
+          setData((current) => ({ ...current, [k]: v.translation }));
+          setDrafts((current) => ({ ...current, [k]: { ...v, previous: String(data[k] ?? '') } }));
+        }} />
+    );
+  };
   const openBreakdown = type === 'maintenance' && data.kind === 'breakdown' && !correcting && !completing && !repairEnded;
   // A correction keeps an open repair open (D-25).
   const showEnd = completing ? true : correcting ? Boolean(correcting.activityEnd) : HAS_END.has(type) && !openBreakdown;
@@ -132,9 +167,15 @@ export function EntryForm({
     if (showEnd) body.activityEnd = completing && end === initialEnd ? new Date().toISOString() : new Date(end).toISOString();
     if (type === 'equipment_use') Object.assign(body, { productId: productId || undefined, batch: batch || undefined });
     if (signs) body.signature = { username, password };
+    if (voiceDrafts.length) {
+      if (!voiceUser.trim() || !voicePassword) return setProblems(['Sign to confirm the voice-note text: enter your user ID and password.']);
+      body.voiceNotes = voiceDrafts.map(([field, d]) => ({ id: d.id, field, finalText: String(data[field] ?? '') }));
+      body.voiceSignature = { username: voiceUser, password: voicePassword };
+    }
     try {
       if (completing) {
-        await api('POST', `/api/entries/${completing.id}/complete`, { activityEnd: body.activityEnd, data: body.data, signature: body.signature, lateReason: lateReason || undefined });
+        await api('POST', `/api/entries/${completing.id}/complete`, { activityEnd: body.activityEnd, data: body.data, signature: body.signature,
+          voiceNotes: body.voiceNotes, voiceSignature: body.voiceSignature, lateReason: lateReason || undefined });
       } else if (correcting) {
         await api('POST', `/api/entries/${correcting.id}/correct`, { ...body, reason });
       } else {
@@ -151,6 +192,9 @@ export function EntryForm({
         not_fit_for_use: 'This equipment is not fit for use:',
         in_use: 'The equipment is in use.',
         forbidden: 'Your role may not make this entry.',
+        voice_signature_required: 'Sign to confirm the voice-note text.',
+        voice_confirmation_required: 'Confirm the voice-note text with your signature first.',
+        voice_check_failed: 'The voice note cannot be confirmed:',
       };
       const details = err instanceof ApiError ? err.problems : [];
       setProblems([msg[(err as ApiError).code] ?? (err as Error).message, ...details]);
@@ -179,7 +223,7 @@ export function EntryForm({
         {type === 'maintenance' ? (
           <MaintenanceFields data={data} set={set} setData={setData} equipment={equipment} occurredLocal={occurredLocal} setOccurredLocal={setOccurredLocal}
             reportedLocked={Boolean(completing)} start={start} setStart={setStart} end={end} setEnd={setEnd} showEnd={showEnd}
-            newEntry={!correcting && !completing} repairEnded={repairEnded} setRepairEnded={setRepairEnded} />
+            newEntry={!correcting && !completing} repairEnded={repairEnded} setRepairEnded={setRepairEnded} voiceSlot={voiceSlot} />
         ) : (
           <>
             <label>{type === 'equipment_use' ? 'Start of use' : HAS_END.has(type) ? 'Start' : 'Date and time'}<input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} /></label>
@@ -226,10 +270,13 @@ export function EntryForm({
         )}
         {(TEXT_FIELDS[type] ?? []).map(([k, label, long]) =>
           type === 'maintenance' && k === 'impactAssessment' && !equipment.sterile ? null : (
-            <label key={k}>
-              {label}
-              {long ? <textarea value={String(data[k] ?? '')} onChange={(e) => set(k, e.target.value)} /> : <input value={String(data[k] ?? '')} onChange={(e) => set(k, e.target.value)} />}
-            </label>
+            <Fragment key={k}>
+              <label>
+                {label}
+                {long ? <textarea value={String(data[k] ?? '')} onChange={(e) => set(k, e.target.value)} /> : <input value={String(data[k] ?? '')} onChange={(e) => set(k, e.target.value)} />}
+              </label>
+              {voiceSlot(k)}
+            </Fragment>
           ),
         )}
 
@@ -244,6 +291,15 @@ export function EntryForm({
             <p className="muted">Your electronic signature is the legally binding equivalent of your handwritten signature.</p>
             <label>User ID<input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" /></label>
             <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></label>
+          </div>
+        )}
+        {voiceDrafts.length > 0 && voice && (
+          <div className="signbox">
+            <strong>Sign: Voice note confirmed</strong>
+            <p>“{voice.statement}”</p>
+            <p className="muted">This covers the English text of: {voiceDrafts.map(([f]) => f).join(', ')}. The audio and the original-language transcript are kept with the entry.</p>
+            <label>Voice note user ID<input value={voiceUser} onChange={(e) => setVoiceUser(e.target.value)} autoComplete="off" /></label>
+            <label>Voice note password<input type="password" value={voicePassword} onChange={(e) => setVoicePassword(e.target.value)} autoComplete="current-password" /></label>
           </div>
         )}
 
@@ -264,7 +320,7 @@ const FAILURE_LABEL: Record<string, string> = {
 // Maintenance and breakdown fields (S9, D-25): the report (when it occurred, what failed), the repair
 // times, and what was done and used.
 function MaintenanceFields({
-  data, set, setData, equipment, occurredLocal, setOccurredLocal, reportedLocked, start, setStart, end, setEnd, showEnd, newEntry, repairEnded, setRepairEnded,
+  data, set, setData, equipment, occurredLocal, setOccurredLocal, reportedLocked, start, setStart, end, setEnd, showEnd, newEntry, repairEnded, setRepairEnded, voiceSlot,
 }: {
   data: Data;
   set: (k: string, v: unknown) => void;
@@ -281,17 +337,21 @@ function MaintenanceFields({
   newEntry: boolean;
   repairEnded: boolean;
   setRepairEnded: (v: boolean) => void;
+  voiceSlot: (k: string) => ReactNode;
 }) {
   const breakdown = data.kind === 'breakdown';
   const parts = (data.parts ?? []) as Part[];
   const setPart = (i: number, k: keyof Part, v: string) => set('parts', parts.map((p, j) => (j === i ? { ...p, [k]: v } : p)));
   const text = (k: string, label: string, long = false, locked = false) => (
-    <label key={k}>
-      {label}
-      {long
-        ? <textarea value={String(data[k] ?? '')} onChange={(e) => set(k, e.target.value)} disabled={locked} />
-        : <input value={String(data[k] ?? '')} onChange={(e) => set(k, e.target.value)} disabled={locked} />}
-    </label>
+    <Fragment key={k}>
+      <label>
+        {label}
+        {long
+          ? <textarea value={String(data[k] ?? '')} onChange={(e) => set(k, e.target.value)} disabled={locked} />
+          : <input value={String(data[k] ?? '')} onChange={(e) => set(k, e.target.value)} disabled={locked} />}
+      </label>
+      {!locked && voiceSlot(k)}
+    </Fragment>
   );
   // Completing a repair: the report stays as reported (D-25).
   const locked = reportedLocked;

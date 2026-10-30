@@ -1,6 +1,6 @@
 # Handover
 
-Updated: 2026-10-30, after slice S9 (breakdown history and equipment history card).
+Updated: 2026-10-30, after slice S10 (voice notes).
 
 ## State
 - Planning deliverables (a)–(d) are approved: decisions D-01 to D-05 in `decisions.md`.
@@ -80,6 +80,16 @@ Updated: 2026-10-30, after slice S9 (breakdown history and equipment history car
 - **UI:** maintenance form with a breakdown report section, parts rows and "Repair finished"; a "Complete repair" button; a **Breakdowns** tab (register); a **History card** tab on each equipment page, with details editing for Admin.
 - **Tests:** `test/breakdowns.test.ts` (20 tests), and `e2e/breakdowns.spec.ts` (4 browser tests, including the requested flow: breakdown with parts → verify → release → register downtime → history card).
 - **Version:** 0.2.0 (shown by `/api/health`).
+
+## Done: S10, voice notes (D-26; LB-17, LB-19, LB-20, LB-23, LB-24; CP-06, CP-10)
+- **Speech service (`server/voice.ts`):** `sarvamProvider()` calls Sarvam `/speech-to-text` (`saaras:v3`, transcribe and translate modes) with `SARVAM_API_KEY` from the environment. `buildApp({ speech })` takes any `SpeechProvider`, so tests use a mock.
+- **Database (migration 0012):** insert-only `voice_notes` (audio, hash, transcript, translation, languages, model, request time) and `voice_note_confirmations` (entry version, final text, edited). New signature object `voice_note` and meaning `voice_confirmed`.
+- **API (`routes/voice.ts`):** `GET /api/voice-notes/config`, `POST /api/voice-notes` (limits, per-user rate limit, clear errors for no key, outage, timeout), `GET /api/voice-notes/:id` and `/:id/audio`. Entry create, correct and complete take `voiceNotes` + `voiceSignature`. `guardVoice` refuses an unconfirmed translation, and `confirmVoiceNotes` links and signs.
+- **Site setting:** `voice_notes` in `LOGBOOK_TYPES` (no logbook, `appliesTo: []`) with `voiceLanguages`; drafted by Admin, approved by QA.
+- **Integrity and exports:** the audio hash is recomputed in SQL, and confirmation signatures are checked. Period, batch and history exports note the voice note.
+- **UI:** `components/VoiceNote.tsx` (MediaRecorder button with language choice and a 30-s stop; viewer with audio and texts). The entry form shows the draft notice, a Discard button and the separate confirmation sign box. Voice-note links appear on entries, history and the history card. The settings screen has a language editor.
+- **Tests:** `test/voice.test.ts` (13; mocked service, plus a local fake Sarvam server for the client) and `e2e/voice.spec.ts` (2; fake microphone and mock service).
+- **Before a site switches it on:** supplier assessment and agreement with Sarvam AI (CP-06) and staff consent (CP-10).
 
 ## Possible next steps (not planned; owner to decide)
 - Validation package for a first site: IQ/OQ protocol templates that use `docs/traceability.md` and the CI report.

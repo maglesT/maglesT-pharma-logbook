@@ -17,6 +17,8 @@ services:
       DATABASE_URL: postgres://logbook_owner:${DB_PASSWORD:-change-me}@db:5432/logbook
       # Single-box setup: the owner login switches to the restricted role for all app queries.
       DB_APP_ROLE: logbook_app
+      # Voice notes (D-26): put SARVAM_API_KEY in ops/.env (git-ignored). Unset = voice notes off.
+      SARVAM_API_KEY: ${SARVAM_API_KEY:-}
     ports: ["3000:3000"]
     depends_on: { db: { condition: service_healthy } }
 volumes:

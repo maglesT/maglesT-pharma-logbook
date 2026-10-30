@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, localInputValue, plantTime, type LogbookTypeInfo, type Me, type Settings, type SettingsVersion } from '../api.js';
+import { api, localInputValue, plantTime, type LogbookTypeInfo, type Me, type Settings, type SettingsVersion, VOICE_LANGUAGE_LABEL } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 
 const blank: Settings = { enabled: true, sopRef: '', checklist: [], verificationRequired: false, limits: {}, pressurePoints: [] };
@@ -143,6 +143,18 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
             Second-person verification required
           </label>
         )}
+        {type.key === 'voice_notes' && (
+          <fieldset className="checklist">
+            <legend>Languages allowed for voice notes (D-26: sends audio to the Sarvam AI service; needs the supplier assessment and staff consent)</legend>
+            {Object.entries(VOICE_LANGUAGE_LABEL).filter(([k]) => k !== 'unknown').map(([k, l]) => (
+              <label key={k} className="check">
+                <input type="checkbox" checked={(s.voiceLanguages ?? []).includes(k)}
+                  onChange={(e) => setS({ ...s, voiceLanguages: e.target.checked ? [...(s.voiceLanguages ?? []), k] : (s.voiceLanguages ?? []).filter((x) => x !== k) })} />
+                {l}
+              </label>
+            ))}
+          </fieldset>
+        )}
         {type.key === 'pressure_reading' && (
           <label>Non-critical pressure points (one per line: name; CCS reference; min Pa; max Pa)<textarea value={points} onChange={(e) => setPoints(e.target.value)} /></label>
         )}
@@ -166,6 +178,9 @@ function SettingsSummary({ v }: { v: SettingsVersion }) {
       <dt>Effective from</dt><dd>{plantTime(v.effectiveFrom)} (or the approval time, if later)</dd>
       <dt>Second-person verification</dt><dd>{s.verificationRequired ? 'Required' : 'As the rules require'}</dd>
       {s.checklist.length > 0 && (<><dt>Checklist</dt><dd><ul>{s.checklist.map((c) => <li key={c}>{c}</li>)}</ul></dd></>)}
+      {(s.voiceLanguages ?? []).length > 0 && (
+        <><dt>Voice-note languages</dt><dd>{s.voiceLanguages!.map((l) => VOICE_LANGUAGE_LABEL[l] ?? l).join(', ')}</dd></>
+      )}
       {s.pressurePoints.length > 0 && (
         <><dt>Pressure points</dt><dd><ul>{s.pressurePoints.map((p) => <li key={p.name}>{p.name}: {p.min}–{p.max} {p.unit} ({p.ccsRef})</li>)}</ul></dd></>
       )}

@@ -8,11 +8,17 @@ import { DATA_SCHEMAS, REPORTED_FIELDS, VERIFIERS, checkData, mayRecord, perform
 import { SignError, authenticateSigner, contentHash, sign, signBody, type SignInput } from '../signatures.js';
 import { settingsInForce } from './settings.js';
 import { allStatuses, statusOf } from '../status.js';
+import { VoiceError, confirmVoiceNotes, unsignedDrafts, voiceNotesFor, type VoiceUse } from '../voice.js';
 
 // Product default (LB-04): an activity time older than this makes the entry a late entry.
 export const LATE_MINUTES = 30;
 
 const credentials = z.object({ username: z.string().min(1).max(40), password: z.string().min(1).max(200) });
+// D-26: voice notes confirmed with this save, and the speaker's separate confirmation signature.
+const voiceFields = {
+  voiceNotes: z.array(z.object({ id: z.number().int().positive(), field: z.string().max(40), finalText: z.string().max(2000) })).max(10).default([]),
+  voiceSignature: credentials.optional(),
+};
 
 const createBody = z.object({
   logbookType: z.string(),
@@ -24,6 +30,7 @@ const createBody = z.object({
   lateReason: z.string().trim().max(500).optional(),
   // Required for types whose performer signs (D-16).
   signature: credentials.optional(),
+  ...voiceFields,
 });
 // Ends a use, or completes the repair of a breakdown (D-25): then with the repair data and the
 // performer's signature.
@@ -32,6 +39,7 @@ const completeBody = z.object({
   lateReason: z.string().trim().max(500).optional(),
   data: z.record(z.unknown()).optional(),
   signature: credentials.optional(),
+  ...voiceFields,
 });
 const correctBody = z.object({
   activityStart: z.coerce.date(),
@@ -42,6 +50,7 @@ const correctBody = z.object({
   reason: z.string().trim().min(1).max(500),
   lateReason: z.string().trim().max(500).optional(),
   signature: credentials,
+  ...voiceFields,
 });
 
 export interface EntryRow {
@@ -101,7 +110,7 @@ class EntryError extends Error {
 }
 
 function send(reply: FastifyReply, e: unknown) {
-  if (e instanceof EntryError) return reply.code(e.status).send({ error: e.code, problems: e.problems });
+  if (e instanceof EntryError || e instanceof VoiceError) return reply.code(e.status).send({ error: e.code, problems: e.problems });
   if (e instanceof SignError) {
     const status = e.code === 'wrong_credentials' ? 401 : e.code === 'not_allowed' ? 403 : 409;
     return reply.code(status).send({ error: e.code });
@@ -148,6 +157,20 @@ async function checkCycleId(tx: Tx, type: string, equipmentId: number, data: Rec
 async function dbNow(tx: Tx): Promise<Date> {
   const [r] = await tx<{ now: Date }[]>`select now() as now`;
   return r!.now;
+}
+
+// D-26: the speaker re-enters user ID and password to confirm voice-note text; checked before the
+// transaction so a wrong password always counts.
+async function voiceSigner(sql: Sql, user: SessionUser, b: { voiceNotes: VoiceUse[]; voiceSignature?: { username: string; password: string } }) {
+  if (!b.voiceNotes.length) return null;
+  if (!b.voiceSignature) throw new EntryError(400, 'voice_signature_required', ['Sign to confirm the voice-note text.']);
+  return authenticateSigner(sql, user, { ...b.voiceSignature, contentHash: '0'.repeat(64) }, { objectType: 'voice_note', objectId: 0, meaning: 'voice_confirmed' });
+}
+
+// Refuses a voice translation that is not being confirmed now; links and signs those that are.
+async function guardVoice(tx: Tx, user: SessionUser, equipmentId: number, data: Record<string, unknown>, uses: VoiceUse[]) {
+  const problems = await unsignedDrafts(tx, user.id, equipmentId, data, uses.map((u) => u.id));
+  if (problems.length) throw new EntryError(400, 'voice_confirmation_required', problems);
 }
 
 // An open breakdown repair or use is completed, not corrected (D-25).
@@ -228,6 +251,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
       // Authenticate first, in its own transaction, so a wrong password always counts (LB-20).
       const signer = signs ? await authenticateSigner(sql, user, { ...b.signature!, contentHash: '0'.repeat(64) } as SignInput,
         { objectType: 'entry', objectId: 0, meaning: 'performed' }) : null;
+      const voice = await voiceSigner(sql, user, b);
 
       const created = await sql.begin(async (tx) => {
         const eq = await loadEquipment(tx, equipmentId);
@@ -260,6 +284,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         const late = timing(await dbNow(tx), [b.activityStart, end], b.lateReason);
         const data = validate(b.logbookType, b.data, settings, eq, b.activityStart, { end, legacy: false });
         await checkCycleId(tx, b.logbookType, equipmentId, data, null);
+        await guardVoice(tx, user, equipmentId, data, b.voiceNotes);
         const row = await insertVersion(tx, {
           equipment_id: equipmentId, logbook_type: b.logbookType, settings_id: settingsId, version: 1, supersedes: null,
           change: 'created', activity_start: b.activityStart, activity_end: end, product_id: b.productId ?? null,
@@ -267,6 +292,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         });
         await audit(tx, { actorId: user.id, action: 'entry.created', objectType: 'entry', objectId: row.id, new: entryContent(row) });
         if (signer) await sign(tx, { signer, objectType: 'entry', objectId: row.id, meaning: 'performed', content: entryContent(row), shownHash: hashOf(row) });
+        if (voice) await confirmVoiceNotes(tx, voice, row.id, equipmentId, b.logbookType, data, b.voiceNotes);
         return row;
       });
       return reply.code(201).send({ id: created.id, entryId: created.entry_id, late: created.late });
@@ -292,8 +318,10 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
       if (!mayRecord(peek.logbook_type, user.roles)) throw new EntryError(403, 'forbidden');
       const repair = peek.logbook_type === 'maintenance';
       if (repair && (!b.signature || !b.data)) throw new EntryError(400, 'signature_required');
+      if (!repair && b.voiceNotes.length) throw new EntryError(400, 'check_failed', ['Ending a use takes no voice note.']);
       const signer = repair ? await authenticateSigner(sql, user, { ...b.signature!, contentHash: '0'.repeat(64) } as SignInput,
         { objectType: 'entry', objectId: id, meaning: 'performed' }) : null;
+      const voice = await voiceSigner(sql, user, b);
       const row = await sql.begin(async (tx) => {
         const prev = await latestVersion(tx, id);
         if (!isOpenable(prev.logbook_type, prev.data) || prev.activity_end || prev.logbook_type !== peek!.logbook_type) throw new EntryError(409, 'not_open');
@@ -308,6 +336,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           // What was reported stays as reported; changing it is a correction with a reason (LB-17).
           const changed = REPORTED_FIELDS.filter((k) => prev.data[k] !== undefined && JSON.stringify(prev.data[k]) !== JSON.stringify(data[k]));
           if (changed.length) throw new EntryError(400, 'check_failed', [`Completing the repair cannot change what was reported (${changed.join(', ')}): use Correct.`]);
+          await guardVoice(tx, user, prev.equipment_id, data, b.voiceNotes);
         }
         const next = await insertVersion(tx, {
           ...prev, entry_id: prev.entry_id, version: prev.version + 1, supersedes: prev.id, change: 'completed',
@@ -316,6 +345,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         });
         await audit(tx, { actorId: user.id, action: 'entry.completed', objectType: 'entry', objectId: next.id, old: entryContent(prev), new: entryContent(next) });
         if (signer) await sign(tx, { signer, objectType: 'entry', objectId: next.id, meaning: 'performed', content: entryContent(next), shownHash: hashOf(next) });
+        if (voice) await confirmVoiceNotes(tx, voice, next.id, prev.equipment_id, prev.logbook_type, data, b.voiceNotes);
         return next;
       });
       return { id: row.id };
@@ -334,6 +364,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
     const user = req.user!;
     try {
       const signer = await authenticateSigner(sql, user, { ...b.signature, contentHash: '0'.repeat(64) }, { objectType: 'entry', objectId: id, meaning: 'corrected' });
+      const voice = await voiceSigner(sql, user, b);
       const row = await sql.begin(async (tx) => {
         const prev = await latestVersion(tx, id);
         const [first] = await tx<{ entered_by: number; entered_at: Date }[]>`
@@ -373,6 +404,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           throw new EntryError(400, 'check_failed', ['An open breakdown stays a breakdown; complete the repair first.']);
         }
         await checkCycleId(tx, prev.logbook_type, prev.equipment_id, data, prev.entry_id);
+        await guardVoice(tx, user, prev.equipment_id, data, b.voiceNotes);
         const next = await insertVersion(tx, {
           ...prev, entry_id: prev.entry_id, version: prev.version + 1, supersedes: prev.id, change: 'corrected',
           activity_start: b.activityStart, activity_end: end, late, late_reason: lateReason,
@@ -382,6 +414,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         await audit(tx, { actorId: user.id, action: 'entry.corrected', objectType: 'entry', objectId: next.id,
           old: entryContent(prev), new: entryContent(next), reason: b.reason });
         await sign(tx, { signer, objectType: 'entry', objectId: next.id, meaning: 'corrected', content: entryContent(next), shownHash: hashOf(next) });
+        if (voice) await confirmVoiceNotes(tx, voice, next.id, prev.equipment_id, prev.logbook_type, data, b.voiceNotes);
         return next;
       });
       return { id: row.id };
@@ -489,6 +522,7 @@ export async function present(sql: Sql, rows: EntryRow[], needsVerification?: (r
   const sigs = await sql<SigRow[]>`
     select object_id::int, printed_name, meaning, signed_at, content_hash from signatures
     where object_type = 'entry' and object_id = any(${ids}::bigint[]) order by signed_at`;
+  const voices = await voiceNotesFor(sql, ids);
   const names = new Map(
     (await sql<{ id: number; full_name: string }[]>`
       select id::int, full_name from users where id = any(${[...new Set(rows.map((r) => r.entered_by))]}::bigint[])`).map((u) => [u.id, u.full_name]),
@@ -515,6 +549,8 @@ export async function present(sql: Sql, rows: EntryRow[], needsVerification?: (r
       enteredAt: r.entered_at,
       contentHash: hash,
       signatures: mine.map((g) => ({ printedName: g.printed_name, meaning: g.meaning, signedAt: g.signed_at, valid: g.content_hash === hash })),
+      // D-26: voice notes whose signed English text is in this version.
+      voiceNotes: voices.get(r.id) ?? [],
       ...(needsVerification
         ? {
             awaitingVerification: needsVerification(r) && !mine.some((g) => g.meaning === 'verified'),

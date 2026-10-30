@@ -23,8 +23,8 @@ export async function logOut(page: Page) {
 
 // Signs in an open dialog or form sign box (user ID + password, LB-20).
 export async function sign(scope: Locator, username: string, button = 'Sign') {
-  await scope.getByLabel('User ID').fill(username);
-  await scope.getByLabel('Password').fill(PASSWORD);
+  await scope.getByLabel('User ID', { exact: true }).fill(username);
+  await scope.getByLabel('Password', { exact: true }).fill(PASSWORD);
   await scope.getByRole('button', { name: button, exact: true }).click();
 }
 
