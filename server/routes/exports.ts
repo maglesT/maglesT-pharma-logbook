@@ -8,6 +8,7 @@ import type { Content, TDocumentDefinitions } from 'pdfmake/interfaces.js';
 import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { parseId, requireRole } from '../auth.js';
+import { recordLines } from '../changes.js';
 import { PLANT_TZ } from '../status.js';
 import { present, type EntryRow } from './entries.js';
 import { auditFor, batchVersions, periodQuery, periodVersions, plantRange, reviewsFor, type AuditRow } from './review.js';
@@ -50,7 +51,6 @@ export const plant = (d: Date | string | null) =>
   d ? `${new Date(d).toLocaleString('en-GB', { timeZone: PLANT_TZ, dateStyle: 'medium', timeStyle: 'short' })} IST` : '';
 const json = (v: unknown) => (v === null || v === undefined ? '' : JSON.stringify(v));
 // For the PDF: spaces after separators so long values wrap inside the table column.
-const wrapJson = (v: unknown) => json(v).replaceAll(',"', ', "').replaceAll('":', '": ');
 
 interface Report {
   title: string;
@@ -163,7 +163,7 @@ async function pdf(r: Report, site: { name: string; code: string } | undefined, 
       cellText(`${r.codes.get(e.equipmentId) ?? ''}\n#${e.entryId} v${e.version}`, grey),
       cellText(`${e.logbookType.replaceAll('_', ' ')}\n${versionNote(e, r.versions)}`, grey),
       cellText(`${plant(e.activityStart)}${e.activityEnd ? `\nto ${plant(e.activityEnd)}` : ''}${e.late ? `\nLATE: ${e.lateReason}` : ''}`, grey),
-      cellText(`${e.batch ? `Batch ${e.batch}\n` : ''}${wrapJson(e.data)}`, grey),
+      cellText(`${e.batch ? `Batch ${e.batch}\n` : ''}${recordLines(e.data).join('\n')}`, grey),
       cellText(`${e.enteredBy}\n${plant(e.enteredAt)}`, grey),
       cellText(signatureText(e), grey),
     ];
@@ -172,7 +172,7 @@ async function pdf(r: Report, site: { name: string; code: string } | undefined, 
     cellText(plant(a.at)),
     cellText(a.actor ?? 'system'),
     cellText(`${a.action} ${a.objectType} ${a.objectId ?? ''}`),
-    cellText(`${a.reason ? `Reason: ${a.reason}\n` : ''}${a.oldValue ? `Old: ${wrapJson(a.oldValue)}\n` : ''}${a.newValue ? `New: ${wrapJson(a.newValue)}` : ''}`),
+    cellText(`${a.reason ? `Reason: ${a.reason}\n` : ''}${a.oldValue ? `Before:\n${recordLines(a.oldValue, '  ').join('\n')}\n` : ''}${a.newValue ? `${a.oldValue ? 'After' : 'Recorded'}:\n${recordLines(a.newValue, '  ').join('\n')}` : ''}`),
   ]);
   const heading = (text: string) => ({ text, fontSize: 8, bold: true });
   return render(site, r.title, by, [

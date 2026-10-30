@@ -1,4 +1,4 @@
-import { plantTime, type Part } from './api.js';
+import { plantTime, VOICE_LANGUAGE_LABEL, type Part } from './api.js';
 
 // Field labels in the order they are shown; a breakdown reads top to bottom from failure to repair.
 export const LABELS: Record<string, string> = {
@@ -21,7 +21,7 @@ Object.assign(LABELS, {
   voiceLanguages: 'Voice languages', pressurePoints: 'Pressure points', limits: 'Limits', effectiveFrom: 'Effective from',
   batch: 'Batch', late: 'Late entry', lateReason: 'Late because', activityStart: 'Activity start', activityEnd: 'Activity end',
   field: 'Field', finalText: 'Confirmed text', edited: 'Edited before signing', transcript: 'Original transcript', translation: 'English translation',
-  requestedLanguage: 'Language chosen', detectedLanguage: 'Language detected', durationMs: 'Length (ms)', provider: 'Service',
+  requestedLanguage: 'Language chosen', detectedLanguage: 'Language detected', durationMs: 'Length', provider: 'Service',
   fromTemporaryPassword: 'From temporary password', entries: 'Entries checked', signatures: 'Signatures checked', problemCount: 'Problems found',
   from: 'From', to: 'To', modelVersion: 'Model',
 });
@@ -41,6 +41,8 @@ const text = (v: unknown): string =>
   : String(v).replaceAll('_', ' ');
 export const fieldValue = (k: string, v: unknown): string =>
   k === 'nextDue' ? String(v).slice(0, 10)
+  : (k === 'detectedLanguage' || k === 'requestedLanguage') && typeof v === 'string' ? VOICE_LANGUAGE_LABEL[v] ?? v
+  : k === 'durationMs' && typeof v === 'number' ? `${(v / 1000).toFixed(1)} s`
   : k === 'occurredAt' ? plantTime(String(v))
   : k === 'parts' ? partsLine(v as Part[])
   : k === 'partsNone' ? 'none'

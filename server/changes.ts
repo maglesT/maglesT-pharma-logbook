@@ -40,3 +40,29 @@ export function changeLines(old: unknown, next: unknown): string[] {
     .filter((k) => canonical(before[k] ?? null) !== canonical(after[k] ?? null))
     .map((k) => `${LABEL[k] ?? k}: ${text(before[k])} → ${text(after[k])}`);
 }
+
+// A stored value as labelled lines for printed copies (S13): every key and value, no JSON.
+const MORE: Record<string, string> = {
+  contentHash: 'Content fingerprint (SHA-256)', signatureId: 'Signature no.', requestIds: 'Service request IDs', audioSha256: 'Audio fingerprint (SHA-256)',
+  audioBytes: 'Audio size (bytes)', audioMime: 'Audio format', durationMs: 'Length (ms)', requestedAt: 'Requested at', equipmentId: 'Equipment no.',
+  logbookType: 'Logbook', entryVersionId: 'Entry version no.', basedOn: 'Past breakdowns used', modelVersion: 'Model', responseId: 'Model response ID',
+  entryId: 'Entry no.', enteredAt: 'Entered at', enteredBy: 'Entered by (user no.)', supersedes: 'Replaces version no.', productId: 'Product no.',
+  workDone: 'Work done', rootCause: 'Root cause', description: 'What happened', failureCategory: 'Failure category', occurredAt: 'Occurred',
+  postRepairChecks: 'Post-repair checks', partNumber: 'Part no.', lotSerial: 'Lot / serial no.', finalText: 'Confirmed text', lateReason: 'Late because',
+  transcribe: 'Transcription', translate: 'Translation', data: 'Entry data', partsNone: 'No parts used', cleaningType: 'Cleaning',
+};
+const keyName = (k: string) => MORE[k] ?? LABEL[k] ?? k.replace(/([a-z])([A-Z])/g, (_m, a: string, b: string) => `${a} ${b.toLowerCase()}`).replace(/^\w/, (c) => c.toUpperCase());
+// Identifiers and fingerprints are printed exactly as stored.
+const VERBATIM = new Set(['contentHash', 'signatureId', 'audioSha256', 'audioMime', 'responseId', 'modelVersion', 'model', 'transcribe', 'translate', 'hash',
+  'transcript', 'translation', 'finalText', 'shownHash']);
+const leafText = (k: string, v: unknown) => (typeof v === 'string' && VERBATIM.has(k) ? v || '—' : text(v));
+export function recordLines(v: unknown, indent = ''): string[] {
+  if (!isObj(v)) return [`${indent}${text(v)}`];
+  const out: string[] = [];
+  for (const [k, x] of Object.entries(v)) {
+    if (isObj(x) && !('date' in x || 'ref' in x)) out.push(`${indent}${keyName(k)}:`, ...recordLines(x, `${indent}  `));
+    else if (Array.isArray(x) && x.some(isObj)) x.forEach((item, i) => out.push(`${indent}${keyName(k)} ${i + 1}:`, ...recordLines(item, `${indent}  `)));
+    else out.push(`${indent}${keyName(k)}: ${Array.isArray(x) ? x.map((y) => leafText(k, y)).join(', ') || '—' : leafText(k, x)}`);
+  }
+  return out;
+}

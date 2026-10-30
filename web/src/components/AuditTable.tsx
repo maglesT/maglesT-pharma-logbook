@@ -14,7 +14,7 @@ export interface AuditRow {
   subject: { code?: string; name?: string; logbookType?: string; entryId?: number; username?: string; version?: number } | null;
 }
 
-// LB-18: the audit trail in words. The stored values stay complete under "Technical details".
+// LB-18: the audit trail in words. The complete stored values are in the CSV and PDF copies.
 const ACTION: Record<string, string> = {
   'entry.created': 'Entry made',
   'entry.completed': 'Activity ended',
@@ -51,10 +51,10 @@ const actionText = (a: string) =>
 const SITE_SETTING: Record<string, string> = { voice_notes: 'Voice notes', breakdown_advice: 'Breakdown suggestions' };
 const signed = (a: string) => a.startsWith('signed.');
 
-// Kept for auditors in the technical view, not in the readable lines.
+// Stored for the record (database, CSV and PDF copies), not shown on screen.
 const TECH = new Set(['contentHash', 'signatureId', 'id', 'entryId', 'version', 'requestIds', 'audioSha256', 'audioBytes', 'audioMime', 'enteredAt',
   'enteredBy', 'supersedes', 'settingsId', 'shownHash', 'responseId', 'basedOn', 'versions', 'hash', 'change', 'equipmentId', 'logbookType',
-  'entryVersionId', 'requestedAt', 'problems', 'productId', 'model', 'checklist']);
+  'entryVersionId', 'requestedAt', 'problems', 'productId', 'checklist']);
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -72,11 +72,29 @@ const show = (v: unknown) => v !== null && v !== undefined && v !== '' && !(Arra
 const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
 const label = (k: string) => LABELS[k] ?? k;
 
+type Advice = {
+  summary?: string; confidence?: string; enoughHistory?: boolean; preventive?: string;
+  likelyCauses?: { cause: string; basis: number[] }[]; checks?: { step: string; basis: number[] }[]; parts?: { name: string; partNumber: string; basis: number[] }[];
+};
+const refs = (ids: number[]) => (ids.length ? ` (from ${ids.map((i) => `#${i}`).join(', ')})` : '');
+
 function lines(a: AuditRow): string[] {
-  if (signed(a.action)) return [];
+  if (signed(a.action)) {
+    const n = (isObj(a.newValue) ? a.newValue : {}) as { signatureId?: number };
+    return [`${MEANING_LABEL[a.action.slice(7)] ?? 'Signature'} signature recorded with user ID and password${n.signatureId ? ` (signature no. ${n.signatureId})` : ''}`];
+  }
   if (a.action === 'breakdown_advice.generated' && isObj(a.newValue)) {
-    const n = a.newValue as { modelVersion?: string; basedOn?: number[]; advice?: { summary?: string } };
-    return [`Model: ${n.modelVersion ?? '—'}`, `Based on ${n.basedOn?.length ?? 0} past breakdowns`, n.advice?.summary ?? ''].filter(Boolean);
+    const n = a.newValue as { modelVersion?: string; basedOn?: number[]; advice?: Advice };
+    const v = n.advice ?? {};
+    return [
+      `Model: ${n.modelVersion ?? '—'} · based on ${n.basedOn?.length ?? 0} past breakdowns · confidence ${v.confidence ?? '—'}`,
+      ...(v.enoughHistory === false ? ['The history did not cover this failure well'] : []),
+      v.summary ?? '',
+      ...(v.likelyCauses ?? []).map((c) => `Likely cause: ${c.cause}${refs(c.basis)}`),
+      ...(v.checks ?? []).map((c) => `Check: ${c.step}${refs(c.basis)}`),
+      ...(v.parts ?? []).map((x) => `Part: ${x.name}${x.partNumber ? ` (P/N ${x.partNumber})` : ''}${refs(x.basis)}`),
+      ...(v.preventive ? [`Preventive: ${v.preventive}`] : []),
+    ].filter(Boolean);
   }
   if (a.action === 'review.created' && isObj(a.newValue)) {
     const n = a.newValue as { from?: string; to?: string; versions?: unknown[] };
@@ -120,13 +138,6 @@ export function AuditTable({ rows }: { rows: AuditRow[] }) {
                 <td>
                   {a.reason && <div><strong>Reason:</strong> {a.reason}</div>}
                   {l.length > 0 && <ul className="audit-lines">{l.map((x, i) => <li key={i}>{x}</li>)}</ul>}
-                  {(a.oldValue != null || a.newValue != null) && (
-                    <details className="tech">
-                      <summary>Technical details</summary>
-                      {a.oldValue != null && <pre>Old: {JSON.stringify(a.oldValue, null, 1)}</pre>}
-                      {a.newValue != null && <pre>New: {JSON.stringify(a.newValue, null, 1)}</pre>}
-                    </details>
-                  )}
                 </td>
               </tr>
             );
