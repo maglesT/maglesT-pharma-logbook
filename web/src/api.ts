@@ -164,7 +164,7 @@ export interface Entry {
   awaitingVerification?: boolean;
   inProgress?: boolean;
   // D-26: voice notes whose signed English text is in this version.
-  voiceNotes?: { id: number; field: string; language: string | null; edited: boolean }[];
+  voiceNotes?: { id: number; field: string; language: string | null; edited: boolean; carried: boolean }[];
 }
 
 export const TYPE_LABEL: Record<string, string> = {
@@ -295,7 +295,7 @@ export const VOICE_LANGUAGE_LABEL: Record<string, string> = {
   'bn-IN': 'Bengali', 'pa-IN': 'Punjabi', 'od-IN': 'Odia', 'en-IN': 'Indian English', unknown: 'Detect automatically',
 };
 export interface VoiceConfig { enabled: boolean; switchedOn: boolean; configured: boolean; languages: string[]; fields: Record<string, string[]>; maxClipMs: number; statement: string }
-export interface VoiceDraft { id: number; transcript: string; translation: string; detectedLanguage: string | null }
+export interface VoiceDraft { id: number; transcript: string; translation: string; detectedLanguage: string | null; shownHash: string }
 export interface VoiceNote {
   id: number;
   field: string;

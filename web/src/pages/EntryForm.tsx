@@ -169,7 +169,7 @@ export function EntryForm({
     if (signs) body.signature = { username, password };
     if (voiceDrafts.length) {
       if (!voiceUser.trim() || !voicePassword) return setProblems(['Sign to confirm the voice-note text: enter your user ID and password.']);
-      body.voiceNotes = voiceDrafts.map(([field, d]) => ({ id: d.id, field, finalText: String(data[field] ?? '') }));
+      body.voiceNotes = voiceDrafts.map(([field, d]) => ({ id: d.id, field, finalText: String(data[field] ?? ''), shownHash: d.shownHash }));
       body.voiceSignature = { username: voiceUser, password: voicePassword };
     }
     try {

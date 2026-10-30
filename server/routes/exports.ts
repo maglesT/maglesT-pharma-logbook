@@ -63,7 +63,7 @@ interface Report {
 }
 
 // D-26: the signed English text is the record; the copy says that original voice data exists.
-export const voiceNoteText = (e: { voiceNotes: { field: string; language: string | null; edited: boolean }[] }) =>
+export const voiceNoteText = (e: { voiceNotes: { field: string; language: string | null; edited: boolean; carried: boolean }[] }) =>
   e.voiceNotes.map((v) => `Voice note for ${v.field}: signed English text; original ${v.language ?? 'language'} audio and transcript kept${v.edited ? ' (translation edited by the speaker)' : ''}`).join('\n');
 
 function versionNote(e: Presented, all: EntryRow[]) {

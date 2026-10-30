@@ -3,7 +3,7 @@ import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PASSWORD, call, freshApp, login, seedUser, type TestApp } from './helpers.js';
 import { runIntegrityCheck } from '../server/integrity.js';
-import { SpeechError, sarvamProvider, type SpeechProvider } from '../server/voice.js';
+import { SpeechError, rateLimiter, sarvamProvider, type SpeechProvider } from '../server/voice.js';
 
 // S10 voice notes (D-26). The speech service is mocked: no real API calls in tests.
 
@@ -43,6 +43,7 @@ beforeAll(async () => {
   for (const [u, roles] of [['admin', ['admin']], ['qa1', ['qa']], ['op1', ['operator']], ['op2', ['operator']]] as const) await seedUser(t.owner, u, [...roles]);
   for (const [key, u] of [['admin', 'admin'], ['qa', 'qa1'], ['op1', 'op1'], ['op2', 'op2']] as const) c[key] = (await login(t.app, u)).cookie;
   await approve('general_log');
+
 });
 afterAll(() => t.close());
 
@@ -117,13 +118,30 @@ describe('confirmation (LB-19, LB-20)', () => {
     // The draft text without confirming the voice note.
     expect((await logEntry('op1', id, note.translation)).json().error).toBe('voice_confirmation_required');
     // Naming the voice note but without the confirmation signature.
-    expect((await logEntry('op1', id, note.translation, { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation }] })).json().error).toBe('voice_signature_required');
+    expect((await logEntry('op1', id, note.translation, { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation, shownHash: note.shownHash }] })).json().error).toBe('voice_signature_required');
     // With a wrong password.
-    expect((await logEntry('op1', id, note.translation, { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation }], voiceSignature: { username: 'op1', password: 'nope' } })).statusCode).toBe(401);
+    expect((await logEntry('op1', id, note.translation, { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation, shownHash: note.shownHash }], voiceSignature: { username: 'op1', password: 'nope' } })).statusCode).toBe(401);
     // The field text differs from the text being confirmed.
-    expect((await logEntry('op1', id, 'Something else', { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation }], voiceSignature: sig('op1') })).json().error).toBe('voice_check_failed');
+    expect((await logEntry('op1', id, 'Something else', { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation, shownHash: note.shownHash }], voiceSignature: sig('op1') })).json().error).toBe('voice_check_failed');
     expect((await t.owner`select count(*)::int as n from entries`)[0]!.n).toBe(before);
     expect((await t.owner`select count(*)::int as n from voice_note_confirmations where voice_note_id = ${note.id}`)[0]!.n).toBe(0);
+  });
+
+  it('LB-19: the confirmation must name the draft that was shown', async () => {
+    const id = await newItem();
+    const note = (await record('op1', id)).json();
+    const res = await logEntry('op1', id, note.translation, { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation, shownHash: 'a'.repeat(64) }], voiceSignature: sig('op1') });
+    expect(res.json().problems).toEqual(['This is not the voice note that was shown: record it again.']);
+  });
+
+  it('LB-26: an abandoned draft for one field does not block typing the same words elsewhere', async () => {
+    const id = await newItem();
+    const note = (await record('op1', id)).json();
+    // The same words typed on another item: typed text, not the draft.
+    const other = await newItem();
+    expect((await logEntry('op1', other, note.translation)).statusCode).toBe(201);
+    // On the same item and field, the unchanged draft still needs the signature.
+    expect((await logEntry('op1', id, note.translation)).json().error).toBe('voice_confirmation_required');
   });
 
   it('LB-19: the speaker signs the English text; it is linked to the entry version with the original data', async () => {
@@ -131,12 +149,12 @@ describe('confirmation (LB-19, LB-20)', () => {
     const note = (await record('op1', id, { language: 'mr-IN' })).json();
     const finalText = 'The motor stopped suddenly during mixing.';
     // Someone else cannot confirm another person's voice note.
-    expect((await logEntry('op2', id, finalText, { voiceNotes: [{ id: note.id, field: 'notes', finalText }], voiceSignature: sig('op2') })).statusCode).toBe(403);
-    const res = await logEntry('op1', id, finalText, { voiceNotes: [{ id: note.id, field: 'notes', finalText }], voiceSignature: sig('op1') });
+    expect((await logEntry('op2', id, finalText, { voiceNotes: [{ id: note.id, field: 'notes', finalText, shownHash: note.shownHash }], voiceSignature: sig('op2') })).statusCode).toBe(403);
+    const res = await logEntry('op1', id, finalText, { voiceNotes: [{ id: note.id, field: 'notes', finalText, shownHash: note.shownHash }], voiceSignature: sig('op1') });
     expect(res.statusCode).toBe(201);
     const [entry] = (await call(t.app, c.qa!, 'GET', `/api/equipment/${id}/entries`)).json();
     expect(entry.data.notes).toBe(finalText);
-    expect(entry.voiceNotes).toEqual([{ id: note.id, field: 'notes', language: 'mr-IN', edited: true }]);
+    expect(entry.voiceNotes).toEqual([{ id: note.id, field: 'notes', language: 'mr-IN', edited: true, carried: false }]);
     const v = (await call(t.app, c.qa!, 'GET', `/api/voice-notes/${note.id}`)).json();
     expect(v).toMatchObject({ transcript: 'मोटर अचानक बंद हो गई', translation: 'The motor stopped suddenly.', model: 'saaras:v3', provider: 'sarvam', requestedLanguage: 'mr-IN',
       audioSha256: createHash('sha256').update('fake-webm-audio-bytes').digest('hex'), confirmation: { entryVersionId: entry.id, finalText, edited: true, signedBy: 'OP1' } });
@@ -146,19 +164,22 @@ describe('confirmation (LB-19, LB-20)', () => {
     const actions = (await t.owner`select action from audit_log where object_type = 'voice_note' and object_id = ${String(note.id)} order by id`).map((a) => a.action);
     expect(actions).toEqual(['voice_note.created', 'voice_note.confirmed', 'signed.voice_confirmed']);
     // Used once only.
-    expect((await logEntry('op1', id, finalText, { voiceNotes: [{ id: note.id, field: 'notes', finalText }], voiceSignature: sig('op1') })).json().error).toBe('voice_check_failed');
+    expect((await logEntry('op1', id, finalText, { voiceNotes: [{ id: note.id, field: 'notes', finalText, shownHash: note.shownHash }], voiceSignature: sig('op1') })).json().error).toBe('voice_check_failed');
   });
 
   it('LB-17: a correction keeps the earlier voice note on the earlier version and never deletes it', async () => {
     const id = await newItem();
     const note = (await record('op1', id)).json();
-    const created = (await logEntry('op1', id, note.translation, { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation }], voiceSignature: sig('op1') })).json().id;
+    const created = (await logEntry('op1', id, note.translation, { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation, shownHash: note.shownHash }], voiceSignature: sig('op1') })).json().id;
     const v1 = (await call(t.app, c.qa!, 'GET', `/api/entries/${created}/versions`)).json()[0];
     expect(v1.voiceNotes[0]).toMatchObject({ id: note.id, edited: false });
-    const res = await call(t.app, c.op1!, 'POST', `/api/entries/${created}/correct`, { activityStart: v1.activityStart, data: { notes: 'The pump stopped suddenly.' }, reason: 'wrong unit named', signature: sig('op1') });
+    // A correction that keeps the signed text still shows where it came from.
+    expect((await call(t.app, c.op1!, 'POST', `/api/entries/${created}/correct`, { activityStart: v1.activityStart, data: v1.data, reason: 'time re-checked', signature: sig('op1') })).statusCode).toBe(200);
+    const v2 = (await call(t.app, c.qa!, 'GET', `/api/entries/${created}/versions`)).json()[1];
+    const res = await call(t.app, c.op1!, 'POST', `/api/entries/${v2.id}/correct`, { activityStart: v1.activityStart, data: { notes: 'The pump stopped suddenly.' }, reason: 'wrong unit named', signature: sig('op1') });
     expect(res.statusCode).toBe(200);
     const versions = (await call(t.app, c.qa!, 'GET', `/api/entries/${created}/versions`)).json();
-    expect(versions.map((x: { voiceNotes: unknown[] }) => x.voiceNotes.length)).toEqual([1, 0]);
+    expect(versions.map((x: { voiceNotes: { carried: boolean }[] }) => x.voiceNotes.map((v) => v.carried))).toEqual([[false], [true], []]);
     await expect(t.sql`delete from voice_notes`).rejects.toThrow(/permission denied/);
     await expect(t.sql`update voice_note_confirmations set final_text = 'x'`).rejects.toThrow(/permission denied/);
   });
@@ -180,6 +201,18 @@ describe('confirmation (LB-19, LB-20)', () => {
     await t.owner`update voice_notes set audio = ${Buffer.from('fake-webm-audio-bytes')} where id = ${v!.id}`;
     await t.owner`update voice_note_confirmations set final_text = 'changed' where voice_note_id = ${v!.id}`;
     expect((await runIntegrityCheck(t.sql)).problems[0]).toMatch(/content changed after signing/);
+    await t.owner`delete from signatures where object_type = 'voice_note' and object_id = ${v!.id}`;
+    expect((await runIntegrityCheck(t.sql)).problems).toContain(`Voice note ${v!.id}: confirmed without the speaker's signature.`);
+  });
+});
+
+describe('rate limit (D-26)', () => {
+  it('LB-21: a call the service never answered does not count against the limit', () => {
+    const l = rateLimiter(2, 60_000);
+    expect([l.take(1), l.take(1), l.take(1)]).toEqual([true, true, false]);
+    l.refund(1);
+    expect(l.take(1)).toBe(true);
+    expect(l.take(2)).toBe(true);
   });
 });
 

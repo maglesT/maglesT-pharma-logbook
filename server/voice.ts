@@ -1,6 +1,7 @@
 import type { Sql, Tx } from './db.js';
 import { audit } from './audit.js';
-import { contentHash, sign, type AuthenticatedSigner } from './signatures.js';
+import { createHash } from 'node:crypto';
+import { canonical, contentHash, sign, type AuthenticatedSigner } from './signatures.js';
 
 // S10 voice notes (D-26). The browser sends audio to our server only; the server asks the speech
 // service for the transcript in the spoken language and an English translation. Nothing from a
@@ -82,7 +83,8 @@ export function sarvamProvider(opts: { apiKey: string; baseUrl: string; model: s
       return {
         transcript: original.transcript,
         translation: english.transcript,
-        detectedLanguage: original.language ?? english.language,
+        // The spoken language comes from the transcription; the translate call describes English output.
+        detectedLanguage: original.language ?? (language !== 'unknown' ? language : null),
         model: opts.model,
         requestIds: { transcribe: original.requestId, translate: english.requestId },
       };
@@ -90,17 +92,25 @@ export function sarvamProvider(opts: { apiKey: string; baseUrl: string; model: s
   };
 }
 
-// Per-user rate limit for calls to the speech service.
+// Per-user rate limit for calls to the speech service. A call the service never answered is
+// refunded, so an outage does not lock people out afterwards (review S10).
 export function rateLimiter(max: number, windowMs: number) {
   const hits = new Map<number, number[]>();
-  return (userId: number, now = Date.now()) => {
+  const take = (userId: number, now = Date.now()) => {
+    for (const [id, times] of hits) if (!times.some((t) => now - t < windowMs)) hits.delete(id);
     const recent = (hits.get(userId) ?? []).filter((t) => now - t < windowMs);
     if (recent.length >= max) return false;
     recent.push(now);
     hits.set(userId, recent);
     return true;
   };
+  const refund = (userId: number) => hits.get(userId)?.pop();
+  return { take, refund };
 }
+
+// What the speaker was shown as the draft: sent back with the confirmation (review S10).
+export const draftHash = (n: Pick<VoiceNoteRow, 'id' | 'audio_sha256' | 'transcript' | 'translation'>) =>
+  createHash('sha256').update(canonical({ id: n.id, audioSha256: n.audio_sha256, transcript: n.transcript, translation: n.translation })).digest('hex');
 
 export interface VoiceNoteRow {
   id: number;
@@ -143,7 +153,7 @@ export const voiceContent = (n: VoiceNoteRow, c: Pick<ConfirmationRow, 'entry_ve
   statement: VOICE_STATEMENT,
 });
 
-export interface VoiceUse { id: number; field: string; finalText: string }
+export interface VoiceUse { id: number; field: string; finalText: string; shownHash: string }
 
 export class VoiceError extends Error {
   constructor(public status: number, public code: string, public problems: string[] = []) {
@@ -151,17 +161,17 @@ export class VoiceError extends Error {
   }
 }
 
-// Strings in entry data equal to a voice translation this user has not confirmed: such a draft
-// must be signed before it can be saved (D-26).
-export async function unsignedDrafts(tx: Tx, userId: number, equipmentId: number, data: Record<string, unknown>, using: number[]): Promise<string[]> {
-  const texts = Object.values(data).filter((v): v is string => typeof v === 'string' && v.trim() !== '');
-  if (!texts.length) return [];
-  const rows = await tx<{ id: number }[]>`
-    select v.id::int from voice_notes v
-    where v.user_id = ${userId} and v.equipment_id = ${equipmentId} and trim(v.translation) = any(${texts.map((t) => t.trim())})
-      and not exists (select 1 from voice_note_confirmations c where c.voice_note_id = v.id)
-      and v.id <> all(${using}::bigint[])`;
-  return rows.length ? ['A voice-note translation must be confirmed with your signature before it is saved.'] : [];
+// A field holding, unchanged, a recent voice translation this user recorded for that field and has
+// not confirmed: such a draft must be signed before it is saved (D-26). Limited to the same item,
+// type and field and the last 12 hours, so an abandoned draft cannot block later typing (review S10).
+export async function unsignedDrafts(tx: Tx, userId: number, equipmentId: number, type: string, data: Record<string, unknown>, using: number[]): Promise<string[]> {
+  const rows = await tx<{ field: string; translation: string }[]>`
+    select v.field, v.translation from voice_notes v
+    where v.user_id = ${userId} and v.equipment_id = ${equipmentId} and v.logbook_type = ${type}
+      and v.received_at > now() - interval '12 hours' and v.id <> all(${using}::bigint[])
+      and not exists (select 1 from voice_note_confirmations c where c.voice_note_id = v.id)`;
+  const hit = rows.some((r) => typeof data[r.field] === 'string' && String(data[r.field]).trim() === r.translation.trim());
+  return hit ? ['A voice-note translation must be confirmed with your signature before it is saved.'] : [];
 }
 
 // Links the speaker's voice notes to the entry version just written and signs each (D-26).
@@ -171,6 +181,7 @@ export async function confirmVoiceNotes(tx: Tx, signer: AuthenticatedSigner, ver
     const problems: string[] = [];
     if (!n || n.user_id !== signer.user.id) throw new VoiceError(403, 'not_your_voice_note', ['Only the speaker can confirm a voice note.']);
     if (n.equipment_id !== equipmentId || n.logbook_type !== type || n.field !== u.field) problems.push('This voice note was recorded for another field.');
+    if (draftHash(n) !== u.shownHash) problems.push('This is not the voice note that was shown: record it again.');
     const finalText = u.finalText.trim();
     if (!finalText) problems.push('The confirmed text cannot be empty.');
     if (String(data[u.field] ?? '').trim() !== finalText) problems.push(`The text in ${u.field} must be exactly the text you confirm.`);
@@ -188,14 +199,22 @@ export async function confirmVoiceNotes(tx: Tx, signer: AuthenticatedSigner, ver
   }
 }
 
-// Voice notes confirmed into the given entry versions, for presenting entries.
-export async function voiceNotesFor(q: Sql | Tx, versionIds: number[]) {
-  if (!versionIds.length) return new Map<number, { id: number; field: string; language: string | null; edited: boolean }[]>();
-  const rows = await q<{ id: number; entry_version_id: number; field: string; language: string | null; edited: boolean }[]>`
-    select v.id::int, c.entry_version_id::int, v.field, coalesce(v.detected_language, v.requested_language) as language, c.edited
-    from voice_note_confirmations c join voice_notes v on v.id = c.voice_note_id
-    where c.entry_version_id = any(${versionIds}::bigint[]) order by v.id`;
-  const out = new Map<number, { id: number; field: string; language: string | null; edited: boolean }[]>();
-  for (const r of rows) out.set(r.entry_version_id, [...(out.get(r.entry_version_id) ?? []), { id: r.id, field: r.field, language: r.language, edited: r.edited }]);
+export interface VoiceLink { id: number; field: string; language: string | null; edited: boolean; carried: boolean }
+
+// Voice notes behind the text of each version: signed into that version, or into an earlier version
+// of the same entry while the field still holds the signed text (review S10).
+export async function voiceNotesFor(q: Sql | Tx, versions: { id: number; entry_id: number; version: number; data: Record<string, unknown> }[]) {
+  const out = new Map<number, VoiceLink[]>();
+  if (!versions.length) return out;
+  const rows = await q<{ id: number; entry_id: number; version: number; field: string; language: string | null; edited: boolean; final_text: string }[]>`
+    select v.id::int, e.entry_id::int, e.version, v.field, coalesce(v.detected_language, v.requested_language) as language, c.edited, c.final_text
+    from voice_note_confirmations c join voice_notes v on v.id = c.voice_note_id join entries e on e.id = c.entry_version_id
+    where e.entry_id = any(${[...new Set(versions.map((x) => x.entry_id))]}::bigint[]) order by v.id`;
+  for (const ver of versions) {
+    const links = rows
+      .filter((r) => r.entry_id === ver.entry_id && r.version <= ver.version && (r.version === ver.version || String(ver.data[r.field] ?? '').trim() === r.final_text))
+      .map((r) => ({ id: r.id, field: r.field, language: r.language, edited: r.edited, carried: r.version !== ver.version }));
+    if (links.length) out.set(ver.id, links);
+  }
   return out;
 }

@@ -27,7 +27,16 @@ export function VoiceButton({ config, equipmentId, logbookType, field, onDraft }
   const [seconds, setSeconds] = useState(0);
   const [error, setError] = useState('');
   const rec = useRef<{ recorder: MediaRecorder; started: number; timer: number; stream: MediaStream } | null>(null);
-  useEffect(() => () => rec.current?.stream.getTracks().forEach((t) => t.stop()), []);
+  // Closing the form while recording discards the clip: nothing is sent (review S10).
+  const cancelled = useRef(false);
+  useEffect(() => () => {
+    cancelled.current = true;
+    if (rec.current) {
+      window.clearInterval(rec.current.timer);
+      if (rec.current.recorder.state === 'recording') rec.current.recorder.stop();
+      rec.current.stream.getTracks().forEach((t) => t.stop());
+    }
+  }, []);
 
   const send = async (blob: Blob, durationMs: number) => {
     setState('sending');
@@ -59,7 +68,7 @@ export function VoiceButton({ config, equipmentId, logbookType, field, onDraft }
       stream.getTracks().forEach((t) => t.stop());
       window.clearInterval(rec.current?.timer);
       rec.current = null;
-      void send(new Blob(chunks, { type: recorder.mimeType }), Date.now() - started);
+      if (!cancelled.current) void send(new Blob(chunks, { type: recorder.mimeType }), Date.now() - started);
     };
     const timer = window.setInterval(() => {
       const s = Math.floor((Date.now() - started) / 1000);

@@ -16,7 +16,7 @@ export const LATE_MINUTES = 30;
 const credentials = z.object({ username: z.string().min(1).max(40), password: z.string().min(1).max(200) });
 // D-26: voice notes confirmed with this save, and the speaker's separate confirmation signature.
 const voiceFields = {
-  voiceNotes: z.array(z.object({ id: z.number().int().positive(), field: z.string().max(40), finalText: z.string().max(2000) })).max(10).default([]),
+  voiceNotes: z.array(z.object({ id: z.number().int().positive(), field: z.string().max(40), finalText: z.string().max(2000), shownHash: z.string().regex(/^[0-9a-f]{64}$/) })).max(10).default([]),
   voiceSignature: credentials.optional(),
 };
 
@@ -168,8 +168,8 @@ async function voiceSigner(sql: Sql, user: SessionUser, b: { voiceNotes: VoiceUs
 }
 
 // Refuses a voice translation that is not being confirmed now; links and signs those that are.
-async function guardVoice(tx: Tx, user: SessionUser, equipmentId: number, data: Record<string, unknown>, uses: VoiceUse[]) {
-  const problems = await unsignedDrafts(tx, user.id, equipmentId, data, uses.map((u) => u.id));
+async function guardVoice(tx: Tx, user: SessionUser, equipmentId: number, type: string, data: Record<string, unknown>, uses: VoiceUse[]) {
+  const problems = await unsignedDrafts(tx, user.id, equipmentId, type, data, uses.map((u) => u.id));
   if (problems.length) throw new EntryError(400, 'voice_confirmation_required', problems);
 }
 
@@ -284,7 +284,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         const late = timing(await dbNow(tx), [b.activityStart, end], b.lateReason);
         const data = validate(b.logbookType, b.data, settings, eq, b.activityStart, { end, legacy: false });
         await checkCycleId(tx, b.logbookType, equipmentId, data, null);
-        await guardVoice(tx, user, equipmentId, data, b.voiceNotes);
+        await guardVoice(tx, user, equipmentId, b.logbookType, data, b.voiceNotes);
         const row = await insertVersion(tx, {
           equipment_id: equipmentId, logbook_type: b.logbookType, settings_id: settingsId, version: 1, supersedes: null,
           change: 'created', activity_start: b.activityStart, activity_end: end, product_id: b.productId ?? null,
@@ -336,7 +336,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           // What was reported stays as reported; changing it is a correction with a reason (LB-17).
           const changed = REPORTED_FIELDS.filter((k) => prev.data[k] !== undefined && JSON.stringify(prev.data[k]) !== JSON.stringify(data[k]));
           if (changed.length) throw new EntryError(400, 'check_failed', [`Completing the repair cannot change what was reported (${changed.join(', ')}): use Correct.`]);
-          await guardVoice(tx, user, prev.equipment_id, data, b.voiceNotes);
+          await guardVoice(tx, user, prev.equipment_id, prev.logbook_type, data, b.voiceNotes);
         }
         const next = await insertVersion(tx, {
           ...prev, entry_id: prev.entry_id, version: prev.version + 1, supersedes: prev.id, change: 'completed',
@@ -398,13 +398,14 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (late && !lateReason) {
           throw new EntryError(400, 'late_reason_required', [`The corrected time is more than ${LATE_MINUTES} minutes before the entry was made: give a reason.`]);
         }
-        const data = validate(prev.logbook_type, b.data, s!.settings, eq, b.activityStart, { end, legacy: await isLegacyBreakdown(tx, prev.entry_id) });
+        const breakdownEntry = prev.logbook_type === 'maintenance' && prev.data.kind === 'breakdown';
+        const data = validate(prev.logbook_type, b.data, s!.settings, eq, b.activityStart, { end, legacy: breakdownEntry && await isLegacyBreakdown(tx, prev.entry_id) });
         // An open repair stays a breakdown until it is completed (D-25).
         if (prev.activity_end === null && prev.logbook_type === 'maintenance' && data.kind !== 'breakdown') {
           throw new EntryError(400, 'check_failed', ['An open breakdown stays a breakdown; complete the repair first.']);
         }
         await checkCycleId(tx, prev.logbook_type, prev.equipment_id, data, prev.entry_id);
-        await guardVoice(tx, user, prev.equipment_id, data, b.voiceNotes);
+        await guardVoice(tx, user, prev.equipment_id, prev.logbook_type, data, b.voiceNotes);
         const next = await insertVersion(tx, {
           ...prev, entry_id: prev.entry_id, version: prev.version + 1, supersedes: prev.id, change: 'corrected',
           activity_start: b.activityStart, activity_end: end, late, late_reason: lateReason,
@@ -522,7 +523,7 @@ export async function present(sql: Sql, rows: EntryRow[], needsVerification?: (r
   const sigs = await sql<SigRow[]>`
     select object_id::int, printed_name, meaning, signed_at, content_hash from signatures
     where object_type = 'entry' and object_id = any(${ids}::bigint[]) order by signed_at`;
-  const voices = await voiceNotesFor(sql, ids);
+  const voices = await voiceNotesFor(sql, rows);
   const names = new Map(
     (await sql<{ id: number; full_name: string }[]>`
       select id::int, full_name from users where id = any(${[...new Set(rows.map((r) => r.entered_by))]}::bigint[])`).map((u) => [u.id, u.full_name]),

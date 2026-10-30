@@ -88,7 +88,7 @@ Updated: 2026-10-30, after slice S10 (voice notes).
 - **Site setting:** `voice_notes` in `LOGBOOK_TYPES` (no logbook, `appliesTo: []`) with `voiceLanguages`; drafted by Admin, approved by QA.
 - **Integrity and exports:** the audio hash is recomputed in SQL, and confirmation signatures are checked. Period, batch and history exports note the voice note.
 - **UI:** `components/VoiceNote.tsx` (MediaRecorder button with language choice and a 30-s stop; viewer with audio and texts). The entry form shows the draft notice, a Discard button and the separate confirmation sign box. Voice-note links appear on entries, history and the history card. The settings screen has a language editor.
-- **Tests:** `test/voice.test.ts` (13; mocked service, plus a local fake Sarvam server for the client) and `e2e/voice.spec.ts` (2; fake microphone and mock service).
+- **Tests:** `test/voice.test.ts` (16; mocked service, plus a local fake Sarvam server for the client) and `e2e/voice.spec.ts` (2; fake microphone and mock service).
 - **Before a site switches it on:** supplier assessment and agreement with Sarvam AI (CP-06) and staff consent (CP-10).
 
 ## Possible next steps (not planned; owner to decide)

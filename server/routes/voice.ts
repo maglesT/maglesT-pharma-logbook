@@ -5,10 +5,10 @@ import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
 import { parseId, requireRole } from '../auth.js';
 import { mayRecord } from '../entries.js';
-import { VOICE_LANGUAGES, type LogbookSettings } from '../logbook-types.js';
+import { VOICE_LANGUAGES, typeByKey, type LogbookSettings } from '../logbook-types.js';
 import { settingsInForce } from './settings.js';
 import {
-  AUDIO_TYPES, MAX_AUDIO_BYTES, MAX_CLIP_MS, SpeechError, VOICE_COLS, VOICE_FIELDS, VOICE_STATEMENT, rateLimiter,
+  AUDIO_TYPES, MAX_AUDIO_BYTES, MAX_CLIP_MS, SpeechError, VOICE_COLS, VOICE_FIELDS, VOICE_STATEMENT, draftHash, rateLimiter,
   type ConfirmationRow, type SpeechProvider, type VoiceNoteRow,
 } from '../voice.js';
 
@@ -26,7 +26,7 @@ const noteBody = z.object({
 });
 
 // 20 clips an hour per person keeps the service cost and load bounded.
-const allow = rateLimiter(20, 3_600_000);
+const limit = rateLimiter(20, 3_600_000);
 
 export function voiceRoutes(app: FastifyInstance, sql: Sql, speech: SpeechProvider | null) {
   const anyUser = { preHandler: requireRole() };
@@ -64,9 +64,12 @@ export function voiceRoutes(app: FastifyInstance, sql: Sql, speech: SpeechProvid
     const audio = Buffer.from(b.audioBase64, 'base64');
     if (audio.length > MAX_AUDIO_BYTES) return refuse(413, 'audio_too_large', 'The recording is too large.');
     if (b.durationMs > MAX_CLIP_MS + 1_000) return refuse(400, 'clip_too_long', `A voice note can be at most ${MAX_CLIP_MS / 1000} seconds.`);
-    const [eq] = await sql`select 1 from equipment where id = ${b.equipmentId} and active`;
+    const [eq] = await sql<{ kind: 'equipment' | 'instrument' | 'area'; sterile: boolean }[]>`select kind, sterile from equipment where id = ${b.equipmentId} and active`;
     if (!eq) return reply.code(404).send({ error: 'not_found' });
-    if (!allow(user.id)) return refuse(429, 'rate_limited', 'Too many voice notes in the last hour. Type the text instead, or try later.');
+    // Only for an entry that could be saved on this item (review S10).
+    const lt = typeByKey(b.logbookType);
+    if (!lt || !lt.appliesTo.includes(eq.kind) || (lt.sterile && !eq.sterile)) return refuse(400, 'type_not_for_equipment', 'This logbook type does not apply to this item.');
+    if (!limit.take(user.id)) return refuse(429, 'rate_limited', 'Too many voice notes in the last hour. Type the text instead, or try later.');
 
     const [clock] = await sql<{ now: Date }[]>`select now() as now`;
     const requestedAt = clock!.now;
@@ -75,6 +78,7 @@ export function voiceRoutes(app: FastifyInstance, sql: Sql, speech: SpeechProvid
       result = await speech.transcribe(audio, mime, b.language);
     } catch (e) {
       if (e instanceof SpeechError) {
+        if (e.code !== 'rejected') limit.refund(user.id);
         const status = e.code === 'timeout' ? 504 : e.code === 'rejected' ? 422 : 503;
         return refuse(status, `speech_${e.code}`, `${e.message} Your entry is not affected: type the text instead.`);
       }
@@ -100,7 +104,8 @@ export function voiceRoutes(app: FastifyInstance, sql: Sql, speech: SpeechProvid
         translation: result.translation, provider: speech.name, model: result.model, requestIds: result.requestIds, requestedAt } });
       return r!;
     });
-    return reply.code(201).send({ id: row.id, transcript: row.transcript, translation: row.translation, detectedLanguage: row.detected_language, statement: VOICE_STATEMENT });
+    return reply.code(201).send({ id: row.id, transcript: row.transcript, translation: row.translation, detectedLanguage: row.detected_language,
+      statement: VOICE_STATEMENT, shownHash: draftHash(row) });
   });
 
   // Everything kept for a voice note: original texts, model, times, and where it was confirmed.

@@ -74,12 +74,15 @@ async function check(sql: Sql): Promise<IntegrityResult> {
   const voiceAudit = await sql<{ object_id: string; action: string }[]>`
     select object_id, action from audit_log where object_type = 'voice_note' and action in ('voice_note.created', 'voice_note.confirmed')`;
   const voiceAudited = new Set(voiceAudit.map((a) => `${a.action}:${a.object_id}`));
+  const voiceSigned = new Set((await sql<{ object_id: number }[]>`
+    select object_id::int from signatures where object_type = 'voice_note' and meaning = 'voice_confirmed'`).map((g) => g.object_id));
   for (const v of voices) {
     if (v.actual !== v.audio_sha256) problems.push(`Voice note ${v.id}: the audio no longer matches its hash.`);
     if (!voiceAudited.has(`voice_note.created:${v.id}`)) problems.push(`Voice note ${v.id}: no audit row.`);
     const c = confirmations.get(v.id);
     if (c && !byId.has(c.entry_version_id)) problems.push(`Voice note ${v.id}: confirmed into a missing entry version.`);
     if (c && !voiceAudited.has(`voice_note.confirmed:${v.id}`)) problems.push(`Voice note ${v.id}: confirmation has no audit row.`);
+    if (c && !voiceSigned.has(v.id)) problems.push(`Voice note ${v.id}: confirmed without the speaker's signature.`);
   }
   const voiceById = new Map(voices.map((v) => [v.id, v]));
 
