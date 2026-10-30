@@ -1,6 +1,6 @@
 # Handover
 
-Updated: 2026-10-29, after slice S8 (browser tests; all planned slices done).
+Updated: 2026-10-30, after slice S9 (breakdown history and equipment history card).
 
 ## State
 - Planning deliverables (a)–(d) are approved: decisions D-01 to D-05 in `decisions.md`.
@@ -70,6 +70,16 @@ Updated: 2026-10-29, after slice S8 (browser tests; all planned slices done).
 - **Traceability:** `scripts/traceability.ts` also reads `test(` names in `e2e/*.spec.ts`.
 - **CI:** job `browser` (`npx playwright install --with-deps chromium`, then `npm run test:e2e`); the HTML report is uploaded on failure.
 - **Defect found and fixed (D-24):** a cleaning entered in the same minute as the end of the use (the form enters whole minutes) was accepted and verified, but the equipment stayed Dirty. `status.ts` now counts such a cleaning when it was first entered after the use ended; server test in `status.test.ts`.
+
+## Done: S9, breakdown history and equipment history card (D-25; extends LB-02, LB-05, LB-06, LB-18, LB-22)
+- **Breakdown entry (`server/entries.ts`):** new optional maintenance fields (occurred at, reported by, failure category, root cause, parts rows or "none", tools, in-house/vendor, WO and deviation refs, post-repair checks, re-calibration needed). `checkBreakdown()` requires them for new breakdowns; entries made before S9 keep their old rules.
+- **Open repairs (`routes/entries.ts`):** a breakdown without a repair end is open. `POST /api/entries/:id/complete` now also completes a repair: new data plus a *Performed* signature, reported fields unchanged. Verify needs the repair ended.
+- **Status:** "re-calibration needed" blocks use until a verified passed calibration after the repair.
+- **Equipment details (migration 0011, `server/breakdowns.ts`):** `equipment_details` is insert-only and versioned. `PUT /api/equipment/:id/details` (Admin, reason, `expectedVersion`) writes the next version. The integrity check covers versions and audit rows. Location history is read from the audit trail.
+- **Register and history card (`routes/history.ts`):** `GET /api/breakdowns` (filters, sort by downtime, counts per machine and category, MTTR, MTBF), `GET /api/equipment/:id/history` (all entry versions, reviews, master-data changes; type and date filters), and PDF/CSV exports `/api/export/breakdowns.*` and `/api/export/history.*`. The shared PDF frame is in `routes/exports.ts` (`tablesPdf`, `csvText`, `sendCopy`).
+- **UI:** maintenance form with a breakdown report section, parts rows and "Repair finished"; a "Complete repair" button; a **Breakdowns** tab (register); a **History card** tab on each equipment page, with details editing for Admin.
+- **Tests:** `test/breakdowns.test.ts` (20 tests), and `e2e/breakdowns.spec.ts` (4 browser tests, including the requested flow: breakdown with parts → verify → release → register downtime → history card).
+- **Version:** 0.2.0 (shown by `/api/health`).
 
 ## Possible next steps (not planned; owner to decide)
 - Validation package for a first site: IQ/OQ protocol templates that use `docs/traceability.md` and the CI report.

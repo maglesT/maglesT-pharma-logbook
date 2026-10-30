@@ -174,8 +174,8 @@ describe('signatures and verification (LB-03, LB-11)', () => {
 
   it('LB-11: a breakdown of sterile equipment needs an impact assessment (Annex 1 5.7)', async () => {
     const steriliser = (await call(t.app, cookies.admin!, 'POST', '/api/equipment', { code: 'AC-01', name: 'Autoclave', kind: 'equipment', sterile: true })).json().id;
-    const res = await create('eng1', steriliser, { logbookType: 'maintenance', activityStart: now(), data: { kind: 'breakdown', description: 'Door seal leak' }, signature: sig('eng1') });
-    expect(res.json().problems[0]).toMatch(/impact assessment/);
+    const res = await create('eng1', steriliser, { logbookType: 'maintenance', activityStart: now(), data: { kind: 'breakdown', description: 'Door seal leak', occurredAt: minutesAgo(5), failureCategory: 'mechanical', partsNone: true, doneBy: 'in_house' }, signature: sig('eng1') });
+    expect(res.json().problems).toEqual(['A breakdown of sterile equipment needs an impact assessment (Annex 1 5.7).']);
   });
 
   it('LB-24: a type without approved settings cannot be used', async () => {

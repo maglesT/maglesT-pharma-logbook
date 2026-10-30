@@ -19,8 +19,11 @@ test('LB-06: a breakdown takes equipment out of service until QA releases it', a
   await page.getByRole('button', { name: '+ Maintenance / breakdown' }).click();
   const form = page.getByRole('dialog');
   await form.getByLabel('Type').selectOption('breakdown');
-  await form.getByLabel('What happened / what is planned').fill('Motor trips on start');
+  await form.getByLabel('Failure category').selectOption('electrical');
+  await form.getByLabel('Failure / symptom').fill('Motor trips on start');
   await form.getByLabel('Work done').fill('Contactor replaced');
+  await form.getByLabel('No parts used').check();
+  await form.getByLabel('Done by').selectOption('in_house');
   await sign(form, 'eng1', 'Sign and save');
   await expect(statusBar(page)).toContainText('Out of service');
   await logOut(page);

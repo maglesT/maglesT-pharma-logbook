@@ -69,7 +69,7 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
                 <td>{code(e.equipmentId)}</td>
                 <td>{TYPE_LABEL[e.logbookType]}{e.batch && ` · batch ${e.batch}`}</td>
                 <td>{plantTime(e.activityStart)}</td>
-                <td>{e.inProgress ? 'In use (not ended)' : 'Awaiting verification'}</td>
+                <td>{e.inProgress ? (e.logbookType === 'maintenance' ? 'Repair not finished' : 'In use (not ended)') : 'Awaiting verification'}</td>
               </tr>
             ))}
           </tbody>

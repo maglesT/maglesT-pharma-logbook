@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { api, ApiError, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, type Entry, type Equipment, type Product, type Settings } from '../api.js';
+import { api, ApiError, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, type Entry, type Equipment, type Part, type Product, type Settings } from '../api.js';
 
 type Data = Record<string, unknown>;
 
@@ -7,7 +7,10 @@ type Data = Record<string, unknown>;
 const EMPTY: Record<string, Data> = {
   equipment_use: { stage: '', remarks: '' },
   equipment_cleaning: { cleaningType: 'batch_to_batch', checklist: {}, remarks: '' },
-  maintenance: { kind: 'preventive', description: '', workDone: '', impactAssessment: '' },
+  maintenance: {
+    kind: 'preventive', description: '', workDone: '', impactAssessment: '', reportedBy: '', failureCategory: '', rootCause: '', parts: [],
+    partsNone: false, toolsUsed: '', doneBy: '', vendorName: '', serviceReportRef: '', workOrderRef: '', deviationRef: '', postRepairChecks: '', recalibrationNeeded: false,
+  },
   calibration: { result: 'pass', certificateRef: '', nextDue: '', remarks: '', comment: '', deviationRef: '' },
   area_cleaning: { cleaningType: 'daily', agent: '', sporicidal: false, disinfectantLot: '', checklist: {}, remarks: '' },
   general_log: { checklist: {}, notes: '' },
@@ -30,7 +33,8 @@ const OPTIONS: Record<string, Record<string, [string, string][]>> = {
 const TEXT_FIELDS: Record<string, [string, string, boolean?][]> = {
   equipment_use: [['stage', 'Stage'], ['remarks', 'Remarks', true]],
   equipment_cleaning: [['remarks', 'Remarks', true]],
-  maintenance: [['description', 'What happened / what is planned', true], ['workDone', 'Work done', true], ['impactAssessment', 'Impact assessment (sterile equipment)', true]],
+  // Maintenance has its own field layout (MaintenanceFields, S9).
+  maintenance: [],
   calibration: [['certificateRef', 'Certificate / report reference'], ['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
   area_cleaning: [['agent', 'Cleaning / disinfecting agent'], ['disinfectantLot', 'Disinfectant lot'], ['remarks', 'Remarks', true]],
   general_log: [['notes', 'Notes', true]],
@@ -45,14 +49,31 @@ const OPTION_LABEL: Record<string, string> = { kind: 'Type', result: 'Result', c
 const HAS_CHECKLIST = new Set(['equipment_cleaning', 'area_cleaning', 'general_log']);
 const HAS_END = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'steriliser_cycle']);
 
+const BREAKDOWN_ONLY = ['occurredAt', 'reportedBy', 'failureCategory', 'rootCause'];
+
+// Maintenance data as the server takes it: empty choices left out, quantities as numbers. An
+// occurrence time the user did not touch is sent exactly as stored (review S9).
+function maintenancePayload(data: Data, occurredLocal: string, storedOccurred: { local: string; iso: unknown }): Data {
+  const out: Data = { ...data, parts: ((data.parts ?? []) as Part[]).map((p) => ({ ...p, quantity: Number(String(p.quantity).replace(',', '.')) })) };
+  if (data.kind === 'breakdown' && storedOccurred.iso && occurredLocal === storedOccurred.local) out.occurredAt = storedOccurred.iso;
+  else if (data.kind === 'breakdown' && occurredLocal) out.occurredAt = new Date(occurredLocal).toISOString();
+  else delete out.occurredAt;
+  for (const k of ['failureCategory', 'doneBy']) if (!out[k]) delete out[k];
+  if (out.doneBy !== 'vendor') Object.assign(out, { vendorName: '', serviceReportRef: '' });
+  if (data.kind !== 'breakdown') for (const k of BREAKDOWN_ONLY) delete out[k];
+  return out;
+}
+
 // One form for every core logbook type. With `correcting`, it edits a copy of that version and
-// asks for a reason; the server stores a new version (LB-17).
+// asks for a reason; the server stores a new version (LB-17). With `completing`, it finishes an
+// open breakdown repair: the reported part stays as reported (D-25).
 export function EntryForm({
   type,
   equipment,
   settings,
   products,
   correcting,
+  completing,
   onDone,
   onCancel,
 }: {
@@ -61,12 +82,20 @@ export function EntryForm({
   settings: Settings;
   products: Product[];
   correcting?: Entry;
+  completing?: Entry;
   onDone: () => void;
   onCancel: () => void;
 }) {
-  const [data, setData] = useState<Data>(correcting ? { ...correcting.data } : { ...EMPTY[type] });
-  const [start, setStart] = useState(localInputValue(correcting?.activityStart ?? new Date()));
-  const [end, setEnd] = useState(localInputValue(correcting?.activityEnd ?? new Date()));
+  const source = correcting ?? completing;
+  const [data, setData] = useState<Data>(source ? { ...EMPTY[type], ...source.data } : { ...EMPTY[type] });
+  // A new breakdown defaults to now; one recorded before S9 has no occurrence time, and none is invented.
+  const storedOccurred = { iso: source?.data.occurredAt, local: source?.data.occurredAt ? localInputValue(String(source.data.occurredAt)) : '' };
+  const [occurredLocal, setOccurredLocal] = useState(source ? storedOccurred.local : localInputValue());
+  // A new breakdown may be reported before the repair has ended.
+  const [repairEnded, setRepairEnded] = useState(true);
+  const [start, setStart] = useState(localInputValue(source?.activityStart ?? new Date()));
+  const [initialEnd] = useState(localInputValue(correcting?.activityEnd ?? new Date()));
+  const [end, setEnd] = useState(initialEnd);
   const [productId, setProductId] = useState<number | ''>(correcting?.productId ?? '');
   const [batch, setBatch] = useState(correcting?.batch ?? '');
   const [lateReason, setLateReason] = useState('');
@@ -77,6 +106,9 @@ export function EntryForm({
   const [needLateReason, setNeedLateReason] = useState(false);
 
   const signs = Boolean(correcting) || PERFORMER_SIGNS.has(type);
+  const openBreakdown = type === 'maintenance' && data.kind === 'breakdown' && !correcting && !completing && !repairEnded;
+  // A correction keeps an open repair open (D-25).
+  const showEnd = completing ? true : correcting ? Boolean(correcting.activityEnd) : HAS_END.has(type) && !openBreakdown;
   const set = (k: string, v: unknown) => setData({ ...data, [k]: v });
   const checklist = (data.checklist ?? {}) as Record<string, boolean>;
 
@@ -86,7 +118,7 @@ export function EntryForm({
     const body: Record<string, unknown> = {
       activityStart: new Date(start).toISOString(),
       // The server decides whether a reading is out of limits.
-      data: type === 'pressure_reading'
+      data: type === 'maintenance' ? maintenancePayload(data, occurredLocal, storedOccurred) : type === 'pressure_reading'
         ? {
             point: data.point,
             // An empty field is sent as missing, never as 0; a decimal comma is accepted (review S6-3).
@@ -96,11 +128,14 @@ export function EntryForm({
           }
         : data,
     };
-    if (HAS_END.has(type) || (correcting && correcting.activityEnd)) body.activityEnd = new Date(end).toISOString();
+    // Completing with the end left as offered means "now", to the second, as "End use" does (review S9).
+    if (showEnd) body.activityEnd = completing && end === initialEnd ? new Date().toISOString() : new Date(end).toISOString();
     if (type === 'equipment_use') Object.assign(body, { productId: productId || undefined, batch: batch || undefined });
     if (signs) body.signature = { username, password };
     try {
-      if (correcting) {
+      if (completing) {
+        await api('POST', `/api/entries/${completing.id}/complete`, { activityEnd: body.activityEnd, data: body.data, signature: body.signature, lateReason: lateReason || undefined });
+      } else if (correcting) {
         await api('POST', `/api/entries/${correcting.id}/correct`, { ...body, reason });
       } else {
         await api('POST', `/api/equipment/${equipment.id}/entries`, { ...body, logbookType: type, lateReason: lateReason || undefined });
@@ -125,7 +160,7 @@ export function EntryForm({
   return (
     <div className="overlay" role="dialog" aria-modal="true">
       <form className="card dialog wide" onSubmit={submit}>
-        <h2>{correcting ? 'Correct' : 'New'}: {TYPE_LABEL[type]} · {equipment.code}</h2>
+        <h2>{completing ? 'Complete repair' : correcting ? 'Correct' : 'New'}: {TYPE_LABEL[type]} · {equipment.code}</h2>
         {settings.sopRef && <p className="muted">SOP {settings.sopRef}</p>}
 
         {type === 'equipment_use' && (
@@ -141,12 +176,18 @@ export function EntryForm({
           </>
         )}
 
-        <label>{type === 'equipment_use' ? 'Start of use' : HAS_END.has(type) ? 'Start' : 'Date and time'}<input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} /></label>
-        {(HAS_END.has(type) || (correcting && correcting.activityEnd)) && (
-          <label>End<input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} /></label>
+        {type === 'maintenance' ? (
+          <MaintenanceFields data={data} set={set} setData={setData} equipment={equipment} occurredLocal={occurredLocal} setOccurredLocal={setOccurredLocal}
+            reportedLocked={Boolean(completing)} start={start} setStart={setStart} end={end} setEnd={setEnd} showEnd={showEnd}
+            newEntry={!correcting && !completing} repairEnded={repairEnded} setRepairEnded={setRepairEnded} />
+        ) : (
+          <>
+            <label>{type === 'equipment_use' ? 'Start of use' : HAS_END.has(type) ? 'Start' : 'Date and time'}<input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} /></label>
+            {showEnd && <label>End<input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} /></label>}
+          </>
         )}
 
-        {Object.entries(OPTIONS[type] ?? {}).map(([k, opts]) => (
+        {Object.entries(type === 'maintenance' ? {} : (OPTIONS[type] ?? {})).map(([k, opts]) => (
           <label key={k}>
             {OPTION_LABEL[k] ?? k}
             <select value={String(data[k])} onChange={(e) => set(k, e.target.value)}>
@@ -213,5 +254,111 @@ export function EntryForm({
         </div>
       </form>
     </div>
+  );
+}
+
+const FAILURE_LABEL: Record<string, string> = {
+  mechanical: 'Mechanical', electrical: 'Electrical', utility: 'Utility', instrumentation: 'Instrumentation', software: 'Software', operator: 'Operator', other: 'Other',
+};
+
+// Maintenance and breakdown fields (S9, D-25): the report (when it occurred, what failed), the repair
+// times, and what was done and used.
+function MaintenanceFields({
+  data, set, setData, equipment, occurredLocal, setOccurredLocal, reportedLocked, start, setStart, end, setEnd, showEnd, newEntry, repairEnded, setRepairEnded,
+}: {
+  data: Data;
+  set: (k: string, v: unknown) => void;
+  setData: (d: Data) => void;
+  equipment: Equipment;
+  occurredLocal: string;
+  setOccurredLocal: (v: string) => void;
+  reportedLocked: boolean;
+  start: string;
+  setStart: (v: string) => void;
+  end: string;
+  setEnd: (v: string) => void;
+  showEnd: boolean;
+  newEntry: boolean;
+  repairEnded: boolean;
+  setRepairEnded: (v: boolean) => void;
+}) {
+  const breakdown = data.kind === 'breakdown';
+  const parts = (data.parts ?? []) as Part[];
+  const setPart = (i: number, k: keyof Part, v: string) => set('parts', parts.map((p, j) => (j === i ? { ...p, [k]: v } : p)));
+  const text = (k: string, label: string, long = false, locked = false) => (
+    <label key={k}>
+      {label}
+      {long
+        ? <textarea value={String(data[k] ?? '')} onChange={(e) => set(k, e.target.value)} disabled={locked} />
+        : <input value={String(data[k] ?? '')} onChange={(e) => set(k, e.target.value)} disabled={locked} />}
+    </label>
+  );
+  // Completing a repair: the report stays as reported (D-25).
+  const locked = reportedLocked;
+  return (
+    <>
+      <label>
+        Type
+        <select value={String(data.kind)} onChange={(e) => set('kind', e.target.value)} disabled={locked}>
+          {OPTIONS.maintenance!.kind!.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+      </label>
+      {breakdown && (
+        <fieldset className="checklist">
+          <legend>Breakdown report</legend>
+          <label>Breakdown occurred at<input type="datetime-local" value={occurredLocal} onChange={(e) => setOccurredLocal(e.target.value)} disabled={locked} /></label>
+          {text('reportedBy', 'Reported by', false, locked)}
+          <label>
+            Failure category
+            <select value={String(data.failureCategory ?? '')} onChange={(e) => set('failureCategory', e.target.value)} disabled={locked}>
+              <option value="">Choose…</option>
+              {FAILURE_CATEGORIES.map((c) => <option key={c} value={c}>{FAILURE_LABEL[c]}</option>)}
+            </select>
+          </label>
+          {text('description', 'Failure / symptom', true, locked)}
+        </fieldset>
+      )}
+      {!breakdown && text('description', 'What happened / what is planned', true)}
+      <label>{breakdown ? 'Repair start' : 'Start'}<input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} disabled={locked} /></label>
+      {breakdown && newEntry && (
+        <label className="check"><input type="checkbox" checked={repairEnded} onChange={(e) => setRepairEnded(e.target.checked)} />Repair finished (untick to report an open breakdown)</label>
+      )}
+      {showEnd && <label>{breakdown ? 'Repair end' : 'End'}<input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} /></label>}
+      {breakdown && text('rootCause', 'Root cause', true)}
+      {text('workDone', 'Work done', true)}
+      <fieldset className="checklist">
+        <legend>Parts / spares used</legend>
+        {parts.map((p, i) => (
+          <div key={i} className="row part">
+            <input aria-label={`Part ${i + 1} name`} placeholder="Part name" value={p.name} onChange={(e) => setPart(i, 'name', e.target.value)} />
+            <input aria-label={`Part ${i + 1} number`} placeholder="Part number" value={p.partNumber} onChange={(e) => setPart(i, 'partNumber', e.target.value)} />
+            <input aria-label={`Part ${i + 1} quantity`} placeholder="Qty" inputMode="decimal" value={String(p.quantity)} onChange={(e) => setPart(i, 'quantity', e.target.value)} />
+            <input aria-label={`Part ${i + 1} lot or serial`} placeholder="Lot / serial" value={p.lotSerial} onChange={(e) => setPart(i, 'lotSerial', e.target.value)} />
+            <button type="button" onClick={() => set('parts', parts.filter((_, j) => j !== i))}>Remove</button>
+          </div>
+        ))}
+        <div className="row">
+          <button type="button" onClick={() => setData({ ...data, partsNone: false, parts: [...parts, { name: '', partNumber: '', quantity: '1', lotSerial: '' }] })}>+ Add part</button>
+          <label className="check"><input type="checkbox" checked={Boolean(data.partsNone)} onChange={(e) => set('partsNone', e.target.checked)} />No parts used</label>
+        </div>
+      </fieldset>
+      {text('toolsUsed', 'Tools, consumables or lubricants used')}
+      <label>
+        Done by
+        <select value={String(data.doneBy ?? '')} onChange={(e) => set('doneBy', e.target.value)}>
+          <option value="">Choose…</option>
+          <option value="in_house">In-house</option>
+          <option value="vendor">External vendor</option>
+        </select>
+      </label>
+      {data.doneBy === 'vendor' && <>{text('vendorName', 'Vendor name')}{text('serviceReportRef', 'Service report reference')}</>}
+      {text('workOrderRef', 'Work order reference (e.g. CMMS WO number)')}
+      {text('deviationRef', 'Deviation reference')}
+      {text('postRepairChecks', 'Post-repair checks done (e.g. test run)', true)}
+      {equipment.kind !== 'area' && (
+        <label className="check"><input type="checkbox" checked={Boolean(data.recalibrationNeeded)} onChange={(e) => set('recalibrationNeeded', e.target.checked)} />Re-calibration needed before use</label>
+      )}
+      {equipment.sterile && text('impactAssessment', 'Impact assessment (sterile equipment)', true)}
+    </>
   );
 }

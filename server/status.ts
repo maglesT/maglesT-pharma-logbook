@@ -40,6 +40,8 @@ interface Facts {
   last_clean_end: Date | null;
   unverified_cleanings: number;
   open_breakdowns: number;
+  // End of the latest repair that asked for re-calibration, when no verified pass followed it (D-25).
+  recalibration_due_since: Date | null;
   calibrations_enabled: boolean;
   // Newest calibration (latest version), verified or not.
   cal_result: string | null;
@@ -102,6 +104,10 @@ async function facts(q: Sql | Tx, ids: number[] | null): Promise<Facts[]> {
          and l.logbook_type in ('equipment_cleaning', 'area_cleaning')) as unverified_cleanings,
       (select count(*)::int from latest l where l.equipment_id = q.id and l.logbook_type = 'maintenance' and l.data->>'kind' = 'breakdown'
          and not exists (select 1 from signatures g where g.object_type = 'entry' and g.object_id = l.id and g.meaning = 'released')) as open_breakdowns,
+      (select max(l.activity_end) from latest l where l.equipment_id = q.id and l.logbook_type = 'maintenance'
+         and coalesce((l.data->>'recalibrationNeeded')::boolean, false)
+         and not exists (select 1 from latest k where k.equipment_id = q.id and k.logbook_type = 'calibration' and k.verified
+                         and k.data->>'result' = 'pass' and k.activity_start >= date_trunc('minute', l.activity_end))) as recalibration_due_since,
       c.data->>'result' as cal_result, c.data->>'nextDue' as cal_due, coalesce(c.verified, false) as cal_verified,
       vc.data->>'result' as vcal_result, vc.data->>'nextDue' as vcal_due,
       -- S6: the latest result per steriliser test type and per glove port, the latest cycle, and
@@ -182,6 +188,16 @@ export function deriveStatus(f: Facts): EquipmentStatus {
         }
       }
     }
+  }
+
+  // D-25: a repair that needs re-calibration blocks use until a verified passed calibration after it.
+  // Where the item is not calibrated in this system, it is a warning (review S9).
+  if (f.recalibration_due_since) {
+    const day = f.recalibration_due_since.toLocaleDateString('en-CA', { timeZone: PLANT_TZ });
+    if (f.needs_calibration && f.calibrations_enabled) {
+      blockers.push(`Re-calibration needed after the repair of ${day}: record and verify a passed calibration.`);
+      calState ??= 'not_calibrated';
+    } else warnings.push(`The repair of ${day} asked for re-calibration; this item is not calibrated in the logbook.`);
   }
 
   // S6 (Annex 1): sterile checks.

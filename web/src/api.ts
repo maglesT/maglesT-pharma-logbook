@@ -200,3 +200,87 @@ export const STATE_LABEL: Record<string, [string, string]> = {
   not_calibrated: ['Not calibrated', 'chip-bad'],
   available: ['Available', 'chip-ok'],
 };
+
+// S9 (D-25): breakdown history, equipment details and history card.
+export const FAILURE_CATEGORIES = ['mechanical', 'electrical', 'utility', 'instrumentation', 'software', 'operator', 'other'] as const;
+export const BREAKDOWN_STATUS_LABEL: Record<string, [string, string]> = {
+  open: ['Open (repair not finished)', 'chip-bad'],
+  awaiting_verification: ['Awaiting verification', 'chip-warn'],
+  awaiting_release: ['Awaiting QA release', 'chip-warn'],
+  released: ['Released', 'chip-ok'],
+};
+
+export interface Part { name: string; partNumber: string; quantity: number | string; lotSerial: string }
+
+export interface BreakdownItem {
+  versionId: number;
+  entryId: number;
+  equipmentId: number;
+  code: string;
+  name: string;
+  location: string;
+  occurredAt: string;
+  repairStart: string;
+  repairEnd: string | null;
+  releasedAt: string | null;
+  downtimeMinutes: number;
+  downtimeFinal: boolean;
+  failureCategory: string | null;
+  description: string;
+  rootCause: string;
+  partsText: string;
+  doneBy: string;
+  workOrderRef: string;
+  status: string;
+}
+
+export interface MachineStats { equipmentId: number; code: string; name: string; failures: number; downtimeHours: number; mttrHours: number | null; mtbfHours: number | null }
+
+export interface Register {
+  items: BreakdownItem[];
+  stats: { machines: MachineStats[]; categories: { category: string; failures: number }[] };
+}
+
+export const downtimeText = (b: { downtimeMinutes: number; downtimeFinal: boolean }) =>
+  `${Math.floor(b.downtimeMinutes / 60)} h ${b.downtimeMinutes % 60} min${b.downtimeFinal ? '' : ' (so far)'}`;
+
+export interface QualificationStep { date: string | null; ref: string }
+export interface Details {
+  assetNumber: string;
+  manufacturer: string;
+  model: string;
+  serialNumber: string;
+  capacity: string;
+  installationDate: string | null;
+  supplier: string;
+  qualificationStatus: 'not_qualified' | 'in_qualification' | 'qualified' | 'requalification_due';
+  iq: QualificationStep;
+  oq: QualificationStep;
+  pq: QualificationStep;
+  lastRequalification: string | null;
+  productContactMoc: string;
+  sopRefs: string;
+}
+export const EMPTY_DETAILS: Details = {
+  assetNumber: '', manufacturer: '', model: '', serialNumber: '', capacity: '', installationDate: null, supplier: '',
+  qualificationStatus: 'not_qualified', iq: { date: null, ref: '' }, oq: { date: null, ref: '' }, pq: { date: null, ref: '' },
+  lastRequalification: null, productContactMoc: '', sopRefs: '',
+};
+export const QUALIFICATION_LABEL: Record<Details['qualificationStatus'], string> = {
+  not_qualified: 'Not qualified', in_qualification: 'In qualification', qualified: 'Qualified', requalification_due: 'Requalification due',
+};
+
+export interface DetailsVersion { id: number; version: number; details: Details; reason: string; changedBy: string; changedAt: string }
+
+export interface EquipmentCard {
+  equipment: Equipment;
+  details: DetailsVersion | null;
+  detailsVersions: DetailsVersion[];
+  locationHistory: { at: string; by: string | null; from: string | null; to: string; reason: string | null }[];
+  status: EquipmentStatus;
+}
+
+export type HistoryEvent =
+  | { kind: 'entry'; at: string; entry: Entry & { latest: boolean }; breakdown?: { downtime: string; parts: string; status: string } }
+  | { kind: 'review'; at: string; review: { id: number; periodFrom: string; periodTo: string; reviewedBy: string | null; reviewedAt: string | null; superseded: boolean; valid: boolean } }
+  | { kind: 'masterdata'; at: string; actor: string | null; action: string; old: unknown; new: unknown; reason: string | null };

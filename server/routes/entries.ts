@@ -4,7 +4,7 @@ import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
 import { parseId, requireRole, type SessionUser } from '../auth.js';
 import { LOGBOOK_TYPES, typeByKey, type LogbookSettings } from '../logbook-types.js';
-import { DATA_SCHEMAS, VERIFIERS, checkData, mayRecord, performerSigns, verificationNeeded, type EquipmentInfo } from '../entries.js';
+import { DATA_SCHEMAS, REPORTED_FIELDS, VERIFIERS, checkData, mayRecord, performerSigns, verificationNeeded, type EntryContext, type EquipmentInfo } from '../entries.js';
 import { SignError, authenticateSigner, contentHash, sign, signBody, type SignInput } from '../signatures.js';
 import { settingsInForce } from './settings.js';
 import { allStatuses, statusOf } from '../status.js';
@@ -25,7 +25,14 @@ const createBody = z.object({
   // Required for types whose performer signs (D-16).
   signature: credentials.optional(),
 });
-const completeBody = z.object({ activityEnd: z.coerce.date(), lateReason: z.string().trim().max(500).optional() });
+// Ends a use, or completes the repair of a breakdown (D-25): then with the repair data and the
+// performer's signature.
+const completeBody = z.object({
+  activityEnd: z.coerce.date(),
+  lateReason: z.string().trim().max(500).optional(),
+  data: z.record(z.unknown()).optional(),
+  signature: credentials.optional(),
+});
 const correctBody = z.object({
   activityStart: z.coerce.date(),
   activityEnd: z.coerce.date().nullable().optional(),
@@ -143,6 +150,16 @@ async function dbNow(tx: Tx): Promise<Date> {
   return r!.now;
 }
 
+// An open breakdown repair or use is completed, not corrected (D-25).
+const isOpenable = (type: string, data: Record<string, unknown>) => type === 'equipment_use' || (type === 'maintenance' && data.kind === 'breakdown');
+
+// An entry made before S9 (its first version has no occurrence time) keeps its old rules (D-25).
+async function isLegacyBreakdown(tx: Tx, entryId: number): Promise<boolean> {
+  const [first] = await tx<{ data: Record<string, unknown>; logbook_type: string }[]>`
+    select data, logbook_type from entries where entry_id = ${entryId} and version = 1`;
+  return first!.logbook_type === 'maintenance' && first!.data.kind === 'breakdown' && first!.data.occurredAt === undefined;
+}
+
 // Entries are insert-only, so the app role cannot row-lock them; every write to a logbook locks
 // its equipment row instead, which serialises changes per logbook (unique `supersedes` backs this up).
 async function latestVersion(tx: Tx, versionId: number): Promise<EntryRow> {
@@ -163,11 +180,11 @@ async function loadEquipment(tx: Tx, id: number): Promise<EquipmentInfo & { acti
   return eq;
 }
 
-function validate(type: string, raw: Record<string, unknown>, settings: LogbookSettings, eq: EquipmentInfo, start: Date) {
+function validate(type: string, raw: Record<string, unknown>, settings: LogbookSettings, eq: EquipmentInfo, start: Date, ctx: EntryContext) {
   const parsed = DATA_SCHEMAS[type]!.safeParse(raw);
   if (!parsed.success) throw new EntryError(400, 'invalid_data', parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`));
   const data = parsed.data as Record<string, unknown>;
-  const problems = checkData(type, data, settings, eq, start);
+  const problems = checkData(type, data, settings, eq, start, ctx);
   if (problems.length) throw new EntryError(400, 'check_failed', problems);
   // Dates inside data are stored as ISO strings so the stored JSON and the signed content match.
   return JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
@@ -232,14 +249,16 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (b.logbookType === 'equipment_cleaning' || b.logbookType === 'area_cleaning') cleaningFits(status, b.activityStart);
         if (isUse && (!b.productId || !b.batch)) throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
         if (isUse && b.activityEnd) throw new EntryError(400, 'check_failed', ['Record the end of use when it happens.']);
-        const end = isUse ? null : (b.activityEnd ?? b.activityStart);
+        // A breakdown may be reported before its repair has ended (D-25); other activities end when recorded.
+        const openBreakdown = b.logbookType === 'maintenance' && b.data.kind === 'breakdown' && !b.activityEnd;
+        const end = isUse || openBreakdown ? null : (b.activityEnd ?? b.activityStart);
         if (end && end < b.activityStart) throw new EntryError(400, 'check_failed', ['The end cannot be before the start.']);
         if (b.productId) {
           const [p] = await tx`select 1 from products where id = ${b.productId} and active`;
           if (!p) throw new EntryError(400, 'check_failed', ['Unknown or inactive product.']);
         }
         const late = timing(await dbNow(tx), [b.activityStart, end], b.lateReason);
-        const data = validate(b.logbookType, b.data, settings, eq, b.activityStart);
+        const data = validate(b.logbookType, b.data, settings, eq, b.activityStart, { end, legacy: false });
         await checkCycleId(tx, b.logbookType, equipmentId, data, null);
         const row = await insertVersion(tx, {
           equipment_id: equipmentId, logbook_type: b.logbookType, settings_id: settingsId, version: 1, supersedes: null,
@@ -256,25 +275,47 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
     }
   });
 
-  // End of an equipment use: a new version with the end time (LB-01, LB-10).
+  // End of an equipment use, or completion of a breakdown repair: a new version with the end time
+  // (LB-01, LB-10). A repair completion adds the repair data and is signed by the performer (D-16, D-25).
   app.post<{ Params: { id: string } }>('/api/entries/:id/complete', anyUser, async (req, reply) => {
     const id = parseId(req.params.id);
     const body = completeBody.safeParse(req.body);
     if (id === null || !body.success) return reply.code(400).send({ error: 'invalid_request' });
+    const b = body.data;
     const user = req.user!;
     try {
+      // Refuse what cannot be completed before checking a password (review S9); re-checked under the lock.
+      const [peek] = await sql<{ logbook_type: string; data: Record<string, unknown>; activity_end: Date | null; replaced: boolean }[]>`
+        select logbook_type, data, activity_end, exists (select 1 from entries x where x.supersedes = e.id) as replaced from entries e where id = ${id}`;
+      if (!peek) throw new EntryError(404, 'not_found');
+      if (!isOpenable(peek.logbook_type, peek.data) || peek.activity_end || peek.replaced) throw new EntryError(409, 'not_open');
+      if (!mayRecord(peek.logbook_type, user.roles)) throw new EntryError(403, 'forbidden');
+      const repair = peek.logbook_type === 'maintenance';
+      if (repair && (!b.signature || !b.data)) throw new EntryError(400, 'signature_required');
+      const signer = repair ? await authenticateSigner(sql, user, { ...b.signature!, contentHash: '0'.repeat(64) } as SignInput,
+        { objectType: 'entry', objectId: id, meaning: 'performed' }) : null;
       const row = await sql.begin(async (tx) => {
         const prev = await latestVersion(tx, id);
-        if (prev.logbook_type !== 'equipment_use' || prev.activity_end) throw new EntryError(409, 'not_open');
-        if (!mayRecord('equipment_use', user.roles)) throw new EntryError(403, 'forbidden');
-        if (body.data.activityEnd < prev.activity_start) throw new EntryError(400, 'check_failed', ['The end cannot be before the start.']);
-        const late = timing(await dbNow(tx), [body.data.activityEnd], body.data.lateReason);
+        if (!isOpenable(prev.logbook_type, prev.data) || prev.activity_end || prev.logbook_type !== peek!.logbook_type) throw new EntryError(409, 'not_open');
+        if (!mayRecord(prev.logbook_type, user.roles)) throw new EntryError(403, 'forbidden');
+        if (b.activityEnd < prev.activity_start) throw new EntryError(400, 'check_failed', ['The end cannot be before the start.']);
+        const late = timing(await dbNow(tx), [b.activityEnd], b.lateReason);
+        let data = prev.data;
+        if (repair) {
+          const eq = await loadEquipment(tx, prev.equipment_id);
+          const [s] = await tx<{ settings: LogbookSettings }[]>`select settings from logbook_settings where id = ${prev.settings_id}`;
+          data = validate('maintenance', b.data!, s!.settings, eq, prev.activity_start, { end: b.activityEnd, legacy: await isLegacyBreakdown(tx, prev.entry_id) });
+          // What was reported stays as reported; changing it is a correction with a reason (LB-17).
+          const changed = REPORTED_FIELDS.filter((k) => prev.data[k] !== undefined && JSON.stringify(prev.data[k]) !== JSON.stringify(data[k]));
+          if (changed.length) throw new EntryError(400, 'check_failed', [`Completing the repair cannot change what was reported (${changed.join(', ')}): use Correct.`]);
+        }
         const next = await insertVersion(tx, {
           ...prev, entry_id: prev.entry_id, version: prev.version + 1, supersedes: prev.id, change: 'completed',
-          activity_end: body.data.activityEnd, late: prev.late || late,
-          late_reason: late ? body.data.lateReason!.trim() : prev.late_reason, correction_reason: null, entered_by: user.id,
+          activity_end: b.activityEnd, data, late: prev.late || late,
+          late_reason: late ? b.lateReason!.trim() : prev.late_reason, correction_reason: null, entered_by: user.id,
         });
         await audit(tx, { actorId: user.id, action: 'entry.completed', objectType: 'entry', objectId: next.id, old: entryContent(prev), new: entryContent(next) });
+        if (signer) await sign(tx, { signer, objectType: 'entry', objectId: next.id, meaning: 'performed', content: entryContent(next), shownHash: hashOf(next) });
         return next;
       });
       return { id: row.id };
@@ -308,7 +349,9 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           cleaningFits((await statusOf(tx, prev.equipment_id))!, b.activityStart);
         }
         // A correction keeps an open use open and a finished activity finished (review S3-2).
-        if (prev.activity_end === null && b.activityEnd) throw new EntryError(400, 'check_failed', ['End the use with "End use", not by a correction.']);
+        if (prev.activity_end === null && b.activityEnd) {
+          throw new EntryError(400, 'check_failed', [prev.logbook_type === 'maintenance' ? 'Complete the repair with "Complete repair", not by a correction.' : 'End the use with "End use", not by a correction.']);
+        }
         if (prev.activity_end !== null && b.activityEnd === null) throw new EntryError(400, 'check_failed', ['A finished activity cannot be reopened.']);
         const end = b.activityEnd === undefined || b.activityEnd === null ? prev.activity_end : b.activityEnd;
         if (end && end < b.activityStart) throw new EntryError(400, 'check_failed', ['The end cannot be before the start.']);
@@ -324,7 +367,11 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (late && !lateReason) {
           throw new EntryError(400, 'late_reason_required', [`The corrected time is more than ${LATE_MINUTES} minutes before the entry was made: give a reason.`]);
         }
-        const data = validate(prev.logbook_type, b.data, s!.settings, eq, b.activityStart);
+        const data = validate(prev.logbook_type, b.data, s!.settings, eq, b.activityStart, { end, legacy: await isLegacyBreakdown(tx, prev.entry_id) });
+        // An open repair stays a breakdown until it is completed (D-25).
+        if (prev.activity_end === null && prev.logbook_type === 'maintenance' && data.kind !== 'breakdown') {
+          throw new EntryError(400, 'check_failed', ['An open breakdown stays a breakdown; complete the repair first.']);
+        }
         await checkCycleId(tx, prev.logbook_type, prev.equipment_id, data, prev.entry_id);
         const next = await insertVersion(tx, {
           ...prev, entry_id: prev.entry_id, version: prev.version + 1, supersedes: prev.id, change: 'corrected',
@@ -355,7 +402,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         const row = await latestVersion(tx, id);
         const [s] = await tx<{ settings: LogbookSettings }[]>`select settings from logbook_settings where id = ${row.settings_id}`;
         if (!verificationNeeded(row.logbook_type, s!.settings)) throw new EntryError(409, 'verification_not_required');
-        if (row.logbook_type === 'equipment_use' && !row.activity_end) throw new EntryError(409, 'not_finished', ['Verify after the activity has ended.']);
+        if (isOpenable(row.logbook_type, row.data) && !row.activity_end) throw new EntryError(409, 'not_finished', ['Verify after the activity has ended.']);
         // Nobody verifies their own work: neither the performer nor whoever made this version.
         const people = await tx<{ entered_by: number }[]>`select distinct entered_by::int from entries where entry_id = ${row.entry_id}`;
         if (people.some((p) => p.entered_by === user.id)) throw new EntryError(403, 'own_entry', ['You cannot verify an entry you made or changed.']);
@@ -471,7 +518,7 @@ export async function present(sql: Sql, rows: EntryRow[], needsVerification?: (r
       ...(needsVerification
         ? {
             awaitingVerification: needsVerification(r) && !mine.some((g) => g.meaning === 'verified'),
-            inProgress: r.logbook_type === 'equipment_use' && !r.activity_end,
+            inProgress: isOpenable(r.logbook_type, r.data) && !r.activity_end,
           }
         : {}),
     };

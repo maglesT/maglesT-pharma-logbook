@@ -15,8 +15,9 @@ import { entryRoutes } from './routes/entries.js';
 import { reviewRoutes } from './routes/review.js';
 import { exportRoutes } from './routes/exports.js';
 import { integrityRoutes } from './routes/integrity.js';
+import { historyRoutes } from './routes/history.js';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
 
 export interface AppOptions {
   // Connection running as the restricted application role.
@@ -60,6 +61,7 @@ export async function buildApp({ sql, logger = false, webRoot, cookieSecure = tr
   reviewRoutes(app, sql);
   exportRoutes(app, sql);
   integrityRoutes(app, sql);
+  historyRoutes(app, sql);
 
   // In production the built web UI is served from the same process.
   const root = webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');

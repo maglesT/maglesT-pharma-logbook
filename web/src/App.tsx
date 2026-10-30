@@ -7,8 +7,9 @@ import { MasterData } from './pages/MasterData.js';
 import { LogbookSettings } from './pages/LogbookSettings.js';
 import { EquipmentPage } from './pages/EquipmentPage.js';
 import { Review } from './pages/Review.js';
+import { Breakdowns } from './pages/Breakdowns.js';
 
-type Page = 'home' | 'users' | 'password' | 'masterdata' | 'settings' | 'equipment' | 'review';
+type Page = 'home' | 'users' | 'password' | 'masterdata' | 'settings' | 'equipment' | 'review' | 'breakdowns';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -44,6 +45,7 @@ export function App() {
         <nav>
           <button className={page === 'home' ? 'tab on' : 'tab'} onClick={() => setPage('home')}>Home</button>
           <button className={page === 'equipment' ? 'tab on' : 'tab'} onClick={() => { setOpenId(undefined); setPage('equipment'); }}>Logbooks</button>
+          <button className={page === 'breakdowns' ? 'tab on' : 'tab'} onClick={() => setPage('breakdowns')}>Breakdowns</button>
           {me.roles.some((r) => r === 'qa' || r === 'supervisor' || r === 'admin') && (
             <button className={page === 'review' ? 'tab on' : 'tab'} onClick={() => setPage('review')}>{me.roles.some((r) => r === 'qa' || r === 'supervisor') ? 'Review' : 'Audit trail'}</button>
           )}
@@ -65,6 +67,7 @@ export function App() {
         {page === 'home' && <Home me={me} onOpen={(id) => { setOpenId(id); setPage('equipment'); }} />}
         {page === 'equipment' && <EquipmentPage me={me} openId={openId} />}
         {page === 'review' && <Review me={me} />}
+        {page === 'breakdowns' && <Breakdowns onOpen={(id) => { setOpenId(id); setPage('equipment'); }} />}
         {page === 'users' && <Users me={me} />}
         {page === 'masterdata' && <MasterData me={me} />}
         {page === 'settings' && <LogbookSettings me={me} />}
