@@ -191,10 +191,13 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   }
 
   // D-25: a repair that needs re-calibration blocks use until a verified passed calibration after it.
+  // Where the item is not calibrated in this system, it is a warning (review S9).
   if (f.recalibration_due_since) {
     const day = f.recalibration_due_since.toLocaleDateString('en-CA', { timeZone: PLANT_TZ });
-    blockers.push(`Re-calibration needed after the repair of ${day}: record and verify a passed calibration.`);
-    calState ??= 'not_calibrated';
+    if (f.needs_calibration && f.calibrations_enabled) {
+      blockers.push(`Re-calibration needed after the repair of ${day}: record and verify a passed calibration.`);
+      calState ??= 'not_calibrated';
+    } else warnings.push(`The repair of ${day} asked for re-calibration; this item is not calibrated in the logbook.`);
   }
 
   // S6 (Annex 1): sterile checks.

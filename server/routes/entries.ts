@@ -284,8 +284,13 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
     const b = body.data;
     const user = req.user!;
     try {
-      const [peek] = await sql<{ logbook_type: string }[]>`select logbook_type from entries where id = ${id}`;
-      const repair = peek?.logbook_type === 'maintenance';
+      // Refuse what cannot be completed before checking a password (review S9); re-checked under the lock.
+      const [peek] = await sql<{ logbook_type: string; data: Record<string, unknown>; activity_end: Date | null; replaced: boolean }[]>`
+        select logbook_type, data, activity_end, exists (select 1 from entries x where x.supersedes = e.id) as replaced from entries e where id = ${id}`;
+      if (!peek) throw new EntryError(404, 'not_found');
+      if (!isOpenable(peek.logbook_type, peek.data) || peek.activity_end || peek.replaced) throw new EntryError(409, 'not_open');
+      if (!mayRecord(peek.logbook_type, user.roles)) throw new EntryError(403, 'forbidden');
+      const repair = peek.logbook_type === 'maintenance';
       if (repair && (!b.signature || !b.data)) throw new EntryError(400, 'signature_required');
       const signer = repair ? await authenticateSigner(sql, user, { ...b.signature!, contentHash: '0'.repeat(64) } as SignInput,
         { objectType: 'entry', objectId: id, meaning: 'performed' }) : null;

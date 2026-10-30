@@ -78,7 +78,7 @@ Updated: 2026-10-30, after slice S9 (breakdown history and equipment history car
 - **Equipment details (migration 0011, `server/breakdowns.ts`):** `equipment_details` is insert-only and versioned. `PUT /api/equipment/:id/details` (Admin, reason, `expectedVersion`) writes the next version. The integrity check covers versions and audit rows. Location history is read from the audit trail.
 - **Register and history card (`routes/history.ts`):** `GET /api/breakdowns` (filters, sort by downtime, counts per machine and category, MTTR, MTBF), `GET /api/equipment/:id/history` (all entry versions, reviews, master-data changes; type and date filters), and PDF/CSV exports `/api/export/breakdowns.*` and `/api/export/history.*`. The shared PDF frame is in `routes/exports.ts` (`tablesPdf`, `csvText`, `sendCopy`).
 - **UI:** maintenance form with a breakdown report section, parts rows and "Repair finished"; a "Complete repair" button; a **Breakdowns** tab (register); a **History card** tab on each equipment page, with details editing for Admin.
-- **Tests:** `test/breakdowns.test.ts` (18 tests), and `e2e/breakdowns.spec.ts` (3 browser tests, including the requested flow: breakdown with parts → verify → release → register downtime → history card).
+- **Tests:** `test/breakdowns.test.ts` (20 tests), and `e2e/breakdowns.spec.ts` (4 browser tests, including the requested flow: breakdown with parts → verify → release → register downtime → history card).
 - **Version:** 0.2.0 (shown by `/api/health`).
 
 ## Possible next steps (not planned; owner to decide)

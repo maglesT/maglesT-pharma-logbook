@@ -129,8 +129,10 @@ describe('breakdown entry (LB-02, LB-06)', () => {
   });
 
   it('LB-05: a repair that needs re-calibration blocks use until a verified passed calibration after it', async () => {
-    const id = await newItem();
+    const id = await newItem({ needsCalibration: true });
     await cleanAndVerify(id);
+    await signEntry('qa', 'verify', (await entry('eng2', id, { logbookType: 'calibration', activityStart: ago(30), lateReason: 'x', data: { result: 'pass', nextDue: '2099-01-01' }, signature: sig('eng2') })).json().id);
+    expect((await status(id)).blockers).toEqual([]);
     const bd = (await entry('eng1', id, { logbookType: 'maintenance', activityStart: ago(20), activityEnd: ago(1), data: repairData({ recalibrationNeeded: true }), signature: sig('eng1') })).json().id;
     await signEntry('sup1', 'verify', bd);
     await signEntry('qa', 'release', bd);
@@ -140,6 +142,26 @@ describe('breakdown entry (LB-02, LB-06)', () => {
     expect((await status(id)).blockers).toHaveLength(1);
     await signEntry('qa', 'verify', cal);
     expect((await status(id)).blockers).toEqual([]);
+  });
+
+  it('LB-05: on an item not calibrated in the logbook, a re-calibration request is a warning, not a block that cannot be cleared', async () => {
+    const id = await newItem({ needsCalibration: false });
+    await cleanAndVerify(id);
+    const bd = (await entry('eng1', id, { logbookType: 'maintenance', activityStart: ago(20), activityEnd: ago(1), data: repairData({ recalibrationNeeded: true }), signature: sig('eng1') })).json().id;
+    await signEntry('sup1', 'verify', bd);
+    await signEntry('qa', 'release', bd);
+    const s = await status(id);
+    expect(s.blockers).toEqual([]);
+    expect(s.warnings).toEqual([expect.stringMatching(/asked for re-calibration/)]);
+  });
+
+  it('LB-10: only an open repair can be completed, and that is checked before the password', async () => {
+    const id = await newItem();
+    const done = (await entry('eng1', id, { logbookType: 'maintenance', activityStart: ago(5), activityEnd: now(), data: repairData(), signature: sig('eng1') })).json().id;
+    const res = await call(t.app, c.eng1!, 'POST', `/api/entries/${done}/complete`, { activityEnd: now(), data: repairData(), signature: { username: 'eng1', password: 'wrong-password' } });
+    expect(res.json().error).toBe('not_open');
+    const [u] = await t.owner`select failed_attempts from users where username = 'eng1'`;
+    expect(u!.failed_attempts).toBe(0);
   });
 
   it('LB-05: areas cannot ask for re-calibration', async () => {
@@ -191,6 +213,8 @@ describe('breakdown register (LB-02, LB-22)', () => {
     expect((await register('&location=Block%20B&status=released')).items).toHaveLength(1);
     expect((await register(`&equipmentId=${b}`)).items).toHaveLength(1);
     expect(all.stats.categories).toEqual([{ category: 'electrical', failures: 1 }, { category: 'utility', failures: 1 }]);
+    // The status filter narrows the rows, not the statistics (review S9).
+    expect((await register('&location=Block%20B&status=released')).stats).toEqual(all.stats);
     const statsA = all.stats.machines.find((m: { equipmentId: number }) => m.equipmentId === a);
     expect(statsA.failures).toBe(1);
     expect(statsA.mttrHours).toBe(3);
@@ -210,6 +234,9 @@ describe('breakdown register (LB-02, LB-22)', () => {
     // Installed on day 5: the window is 144 h.
     const late = breakdownStats([bd(100, 108)], from, to, new Date('2027-01-01'), new Map([[1, new Date(from.getTime() + 96 * h)]]));
     expect(late.machines[0]).toMatchObject({ failures: 1, mtbfHours: 136 });
+    // Overlapping breakdowns count their downtime once: 10–20 h and 15–30 h are 20 h down.
+    const overlap = breakdownStats([bd(10, 20), bd(15, 30)], from, to, new Date('2027-01-01'), new Map());
+    expect(overlap.machines[0]).toMatchObject({ downtimeHours: 20, mtbfHours: 110 });
     // An unreleased breakdown counts as down until now and has no MTTR yet.
     const open = breakdownStats([bd(230, null)], from, to, new Date(from.getTime() + 235 * h), new Map());
     expect(open.machines[0]).toMatchObject({ downtimeHours: 5, mttrHours: null, mtbfHours: 230 });

@@ -120,14 +120,15 @@ export const registerQuery = z.object({
   equipmentId: z.coerce.number().int().positive().optional(),
   location: z.string().trim().max(120).optional(),
   category: z.enum(FAILURE_CATEGORIES).optional(),
-  status: z.enum(['open', 'awaiting_verification', 'awaiting_release', 'released']).optional(),
+  status: z.enum(BREAKDOWN_STATUSES as [BreakdownStatus, ...BreakdownStatus[]]).optional(),
   sort: z.enum(['occurred', 'downtime']).default('occurred'),
 });
 export type RegisterQuery = z.infer<typeof registerQuery>;
 
 // Latest version of every breakdown that occurred in [from, to), with its verification and release.
-// An entry made before S9 has no occurrence time: its repair start stands in (D-25).
-export async function breakdowns(q: Sql | Tx, from: Date, to: Date, f: Partial<RegisterQuery> = {}, now = new Date()): Promise<Breakdown[]> {
+// An entry made before S9 has no occurrence time: its repair start stands in (D-25). Status filter and
+// sort are applied by the caller, so statistics can use the whole list (review S9).
+export async function breakdowns(q: Sql | Tx, from: Date, to: Date, f: Partial<RegisterQuery> & { entryIds?: number[] } = {}, now = new Date()): Promise<Breakdown[]> {
   const rows = await q<{ id: number; entry_id: number; equipment_id: number; code: string; name: string; location: string; activity_start: Date; activity_end: Date | null; data: Record<string, unknown>; occurred_at: Date; verified_at: Date | null; released_at: Date | null }[]>`
     select e.id::int, e.entry_id::int, e.equipment_id::int, q.code, q.name, q.location, e.activity_start, e.activity_end, e.data,
       coalesce((e.data->>'occurredAt')::timestamptz, e.activity_start) as occurred_at,
@@ -141,6 +142,7 @@ export async function breakdowns(q: Sql | Tx, from: Date, to: Date, f: Partial<R
       and ${f.equipmentId ? q`e.equipment_id = ${f.equipmentId}` : q`true`}
       and ${f.location ? q`lower(q.location) = lower(${f.location})` : q`true`}
       and ${f.category ? q`e.data->>'failureCategory' = ${f.category}` : q`true`}
+      and ${f.entryIds ? q`e.entry_id = any(${f.entryIds}::bigint[])` : q`true`}
     order by occurred_at desc, e.entry_id desc`;
   const list = rows.map((r): Breakdown => {
     const status: BreakdownStatus = !r.activity_end ? 'open' : !r.verified_at ? 'awaiting_verification' : !r.released_at ? 'awaiting_release' : 'released';
@@ -171,9 +173,13 @@ export async function breakdowns(q: Sql | Tx, from: Date, to: Date, f: Partial<R
       status,
     };
   });
+  return list;
+}
+
+export const filterAndSort = (list: Breakdown[], f: Partial<RegisterQuery>) => {
   const filtered = f.status ? list.filter((b) => b.status === f.status) : list;
   return f.sort === 'downtime' ? [...filtered].sort((a, b) => b.downtimeMinutes - a.downtimeMinutes) : filtered;
-}
+};
 
 export interface MachineStats {
   equipmentId: number;
@@ -198,11 +204,18 @@ export function breakdownStats(list: Breakdown[], from: Date, to: Date, now: Dat
   const machines: MachineStats[] = [...byMachine.entries()].map(([id, items]) => {
     const start = Math.max(from.getTime(), inServiceSince.get(id)?.getTime() ?? from.getTime());
     const window = Math.max(0, windowEnd - start);
-    const down = items.reduce((sum, b) => {
-      const s = Math.max(b.occurredAt.getTime(), start);
-      const e = Math.min((b.releasedAt ?? now).getTime(), windowEnd);
-      return sum + Math.max(0, e - s);
-    }, 0);
+    // Overlapping breakdowns are down only once (review S9).
+    const spans = items
+      .map((b) => [Math.max(b.occurredAt.getTime(), start), Math.min((b.releasedAt ?? now).getTime(), windowEnd)] as const)
+      .filter(([s, e]) => e > s)
+      .sort((x, y) => x[0] - y[0]);
+    let down = 0;
+    let reach = -Infinity;
+    for (const [s, e] of spans) {
+      if (e <= reach) continue;
+      down += e - Math.max(s, reach);
+      reach = e;
+    }
     const released = items.filter((b) => b.downtimeFinal);
     return {
       equipmentId: id,

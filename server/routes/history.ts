@@ -6,7 +6,7 @@ import { parseId, requireRole } from '../auth.js';
 import { canonical } from '../signatures.js';
 import { PLANT_TZ, statusOf } from '../status.js';
 import {
-  breakdowns, breakdownStats, checkDetails, detailsSchema, detailsVersions, inServiceSince, locationHistory, registerQuery,
+  breakdowns, filterAndSort, breakdownStats, checkDetails, detailsSchema, detailsVersions, inServiceSince, locationHistory, registerQuery,
   type Breakdown,
 } from '../breakdowns.js';
 import { present, type EntryRow } from './entries.js';
@@ -24,6 +24,8 @@ const historyQuery = z.object({ fromDay: isoDay, toDay: isoDay, types: z.string(
 const registerPeriod = registerQuery.refine(inRange, 'invalid period');
 const detailsBody = z.object({ details: detailsSchema, reason: z.string().trim().min(1).max(500), expectedVersion: z.number().int().min(0) });
 const fmt = z.enum(['csv', 'pdf']);
+// Exports are built in memory: same guard as the period and batch exports (review S5-6, S9).
+const MAX_ROWS = 20_000;
 
 const STATUS_LABEL: Record<string, string> = {
   open: 'Open (repair not finished)', awaiting_verification: 'Awaiting verification', awaiting_release: 'Awaiting QA release', released: 'Released',
@@ -39,9 +41,10 @@ async function today(sql: Sql): Promise<string> {
 async function register(sql: Sql, q: z.infer<typeof registerQuery>) {
   const { from, to } = await plantRange(sql, q.fromDay, q.toDay);
   const now = new Date();
-  const items = await breakdowns(sql, from, to, q, now);
-  const stats = breakdownStats(items, from, to, now, await inServiceSince(sql, [...new Set(items.map((b) => b.equipmentId))]));
-  return { from, to, items, stats };
+  const all = await breakdowns(sql, from, to, q, now);
+  // Counts, MTTR and MTBF cover every breakdown of the period, whatever the status filter (review S9).
+  const stats = breakdownStats(all, from, to, now, await inServiceSince(sql, [...new Set(all.map((b) => b.equipmentId))]));
+  return { from, to, items: filterAndSort(all, q), stats };
 }
 
 type Event =
@@ -54,7 +57,8 @@ async function history(sql: Sql, id: number, fromDay: string, toDay: string, typ
   const { from, to } = await plantRange(sql, fromDay, toDay);
   const versions: EntryRow[] = (await periodVersions(sql, id, from, to)).filter((v) => !types || types.has(v.logbook_type));
   const latestIds = new Set(versions.filter((v) => !versions.some((x) => x.supersedes === v.id)).map((v) => v.id));
-  const bds = new Map((await breakdowns(sql, new Date(0), new Date('9999-01-01'), { equipmentId: id })).map((b) => [b.entryId, b]));
+  const bdIds = [...new Set(versions.filter((v) => v.logbook_type === 'maintenance').map((v) => v.entry_id))];
+  const bds = new Map((bdIds.length ? await breakdowns(sql, new Date(0), new Date('9999-01-01'), { equipmentId: id, entryIds: bdIds }) : []).map((b) => [b.entryId, b]));
   const events: Event[] = (await present(sql, versions)).map((e) => {
     const b = e.logbookType === 'maintenance' && e.data.kind === 'breakdown' ? bds.get(e.entryId) : undefined;
     return {
@@ -164,6 +168,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     const q = registerPeriod.safeParse(req.query);
     if (!format.success || !q.success) return reply.code(400).send({ error: 'invalid_request' });
     const { items, stats } = await register(sql, q.data);
+    if (items.length > MAX_ROWS) return reply.code(413).send({ error: 'too_large', message: 'Choose a shorter period.' });
     const name = `breakdowns-${q.data.fromDay}-${q.data.toDay}`;
     if (format.data === 'csv') {
       return sendCopy(reply, 'csv', name, csvText(
@@ -208,6 +213,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     if (!head) return reply.code(404).send({ error: 'not_found' });
     const types = q.data.types ? new Set(q.data.types.split(',').filter(Boolean)) : null;
     const { events } = await history(sql, id, q.data.fromDay, q.data.toDay, types);
+    if (events.length > MAX_ROWS) return reply.code(413).send({ error: 'too_large', message: 'Choose a shorter period.' });
     const rows = events.map(eventRow);
     const eq = head.equipment as { code: string; name: string; kind: string; location: string };
     const name = `history-${eq.code}-${q.data.fromDay}`;

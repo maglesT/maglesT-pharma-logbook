@@ -51,10 +51,12 @@ const HAS_END = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', '
 
 const BREAKDOWN_ONLY = ['occurredAt', 'reportedBy', 'failureCategory', 'rootCause'];
 
-// Maintenance data as the server takes it: empty choices left out, quantities as numbers.
-function maintenancePayload(data: Data, occurredLocal: string): Data {
+// Maintenance data as the server takes it: empty choices left out, quantities as numbers. An
+// occurrence time the user did not touch is sent exactly as stored (review S9).
+function maintenancePayload(data: Data, occurredLocal: string, storedOccurred: { local: string; iso: unknown }): Data {
   const out: Data = { ...data, parts: ((data.parts ?? []) as Part[]).map((p) => ({ ...p, quantity: Number(String(p.quantity).replace(',', '.')) })) };
-  if (data.kind === 'breakdown' && occurredLocal) out.occurredAt = new Date(occurredLocal).toISOString();
+  if (data.kind === 'breakdown' && storedOccurred.iso && occurredLocal === storedOccurred.local) out.occurredAt = storedOccurred.iso;
+  else if (data.kind === 'breakdown' && occurredLocal) out.occurredAt = new Date(occurredLocal).toISOString();
   else delete out.occurredAt;
   for (const k of ['failureCategory', 'doneBy']) if (!out[k]) delete out[k];
   if (out.doneBy !== 'vendor') Object.assign(out, { vendorName: '', serviceReportRef: '' });
@@ -86,11 +88,14 @@ export function EntryForm({
 }) {
   const source = correcting ?? completing;
   const [data, setData] = useState<Data>(source ? { ...EMPTY[type], ...source.data } : { ...EMPTY[type] });
-  const [occurredLocal, setOccurredLocal] = useState(source?.data.occurredAt ? localInputValue(String(source.data.occurredAt)) : localInputValue());
+  // A new breakdown defaults to now; one recorded before S9 has no occurrence time, and none is invented.
+  const storedOccurred = { iso: source?.data.occurredAt, local: source?.data.occurredAt ? localInputValue(String(source.data.occurredAt)) : '' };
+  const [occurredLocal, setOccurredLocal] = useState(source ? storedOccurred.local : localInputValue());
   // A new breakdown may be reported before the repair has ended.
   const [repairEnded, setRepairEnded] = useState(true);
   const [start, setStart] = useState(localInputValue(source?.activityStart ?? new Date()));
-  const [end, setEnd] = useState(localInputValue(correcting?.activityEnd ?? new Date()));
+  const [initialEnd] = useState(localInputValue(correcting?.activityEnd ?? new Date()));
+  const [end, setEnd] = useState(initialEnd);
   const [productId, setProductId] = useState<number | ''>(correcting?.productId ?? '');
   const [batch, setBatch] = useState(correcting?.batch ?? '');
   const [lateReason, setLateReason] = useState('');
@@ -113,7 +118,7 @@ export function EntryForm({
     const body: Record<string, unknown> = {
       activityStart: new Date(start).toISOString(),
       // The server decides whether a reading is out of limits.
-      data: type === 'maintenance' ? maintenancePayload(data, occurredLocal) : type === 'pressure_reading'
+      data: type === 'maintenance' ? maintenancePayload(data, occurredLocal, storedOccurred) : type === 'pressure_reading'
         ? {
             point: data.point,
             // An empty field is sent as missing, never as 0; a decimal comma is accepted (review S6-3).
@@ -123,7 +128,8 @@ export function EntryForm({
           }
         : data,
     };
-    if (showEnd) body.activityEnd = new Date(end).toISOString();
+    // Completing with the end left as offered means "now", to the second, as "End use" does (review S9).
+    if (showEnd) body.activityEnd = completing && end === initialEnd ? new Date().toISOString() : new Date(end).toISOString();
     if (type === 'equipment_use') Object.assign(body, { productId: productId || undefined, batch: batch || undefined });
     if (signs) body.signature = { username, password };
     try {

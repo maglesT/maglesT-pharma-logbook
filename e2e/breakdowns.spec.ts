@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { cleanVerified, localTime, logIn, logOut, newEquipment, openLogbook, sign, statusBar } from './helpers.js';
+import { PASSWORD, apiAs, cleanVerified, localTime, logIn, logOut, newEquipment, openLogbook, post, sign, statusBar } from './helpers.js';
 
 test('LB-06: a breakdown with parts is verified and released, then shows in the register with its downtime and on the history card', async ({ page }) => {
   const { id, code } = await newEquipment({ name: 'Fluid bed dryer', location: 'Granulation' });
@@ -125,4 +125,24 @@ test('LB-18: Admin records equipment details with a reason; the change shows on 
   await expect(page.locator('dl.details')).toContainText('AST-3301');
   await expect(page.locator('dl.details')).toContainText('Version 1, ADMIN');
   await expect(page.locator('table.history tr.masterdata').filter({ hasText: 'Equipment details changed' })).toContainText('Initial record from IQ report');
+});
+
+test('LB-17: completing a repair keeps the reported occurrence time exactly as stored', async ({ page }) => {
+  const { id, code } = await newEquipment({ name: 'Coating pan' });
+  // Reported through the API, to the second: the form must not round it when completing.
+  const op = await apiAs('op1');
+  const occurredAt = new Date(Date.now() - 7 * 60_000 - 27_512).toISOString();
+  await post(op, `/api/equipment/${id}/entries`, { logbookType: 'maintenance', activityStart: new Date().toISOString(),
+    data: { kind: 'breakdown', description: 'Spray gun blocked', occurredAt, failureCategory: 'mechanical' }, signature: { username: 'op1', password: PASSWORD } });
+  await op.dispose();
+
+  await logIn(page, 'eng1');
+  await openLogbook(page, code);
+  await page.getByRole('button', { name: 'Complete repair' }).click();
+  const form = page.getByRole('dialog');
+  await form.getByLabel('No parts used').check();
+  await form.getByLabel('Done by').selectOption('in_house');
+  await sign(form, 'eng1', 'Sign and save');
+  await expect(form).toHaveCount(0);
+  await expect(page.getByRole('row').filter({ hasText: 'Spray gun blocked' })).toContainText('Awaiting verification');
 });
