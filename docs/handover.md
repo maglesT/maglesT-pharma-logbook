@@ -101,6 +101,7 @@ Updated: 2026-10-30, after S11b (faster equipment list, readable history card).
 - **Equipment list:** `allStatuses()` derives the status in groups of 25 items. One query for all 317 items of the trial plant scanned every latest entry once per item and took about 2.3 s, so tiles first showed without a status. Results are identical; about 140 ms on a copy of the trial data. The list shows "Loading status…" until statuses arrive.
 - **History card:** master-data events (item created, master data changed, equipment details changed) show the changed fields in words, e.g. "Location: Line A → Line B", from `server/changes.ts`; the history export uses the same text. The audit trail keeps the raw old and new values.
 - **Version:** `VERSION` in `server/app.ts` now matches `package.json` (0.3.2); it had stayed at 0.3.0 in S11.
+- **Breakdown register (0.3.3):** the register, its PDF and its CSV (`work_done`) now show the repair's "Work done" text next to the failure, so how a machine was repaired is readable without opening the machine.
 
 ## Possible next steps (not planned; owner to decide)
 - Validation package for a first site: IQ/OQ protocol templates that use `docs/traceability.md` and the CI report.

@@ -176,18 +176,18 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     if (format.data === 'csv') {
       return sendCopy(reply, 'csv', name, csvText(
         ['equipment', 'name', 'location', 'entry_id', 'occurred_utc', 'repair_start_utc', 'repair_end_utc', 'released_utc', 'downtime_minutes', 'downtime_final',
-          'category', 'failure', 'root_cause', 'parts', 'done_by', 'work_order', 'deviation', 'status'],
+          'category', 'failure', 'root_cause', 'work_done', 'parts', 'done_by', 'work_order', 'deviation', 'status'],
         items.map((b) => [b.code, b.name, b.location, b.entryId, b.occurredAt, b.repairStart, b.repairEnd, b.releasedAt, b.downtimeMinutes, b.downtimeFinal,
-          b.failureCategory, b.description, b.rootCause, b.partsText, b.doneBy, b.workOrderRef, b.deviationRef, b.status]),
+          b.failureCategory, b.description, b.rootCause, b.workDone, b.partsText, b.doneBy, b.workOrderRef, b.deviationRef, b.status]),
       ));
     }
     const filters = [q.data.equipmentId && `machine ${items[0]?.code ?? q.data.equipmentId}`, q.data.location && `location ${q.data.location}`,
       q.data.category && `category ${q.data.category}`, q.data.status && `status ${STATUS_LABEL[q.data.status]}`].filter(Boolean).join(', ');
     const tables: PdfTable[] = [
-      { heading: `Breakdowns (${items.length})`, columns: ['Machine', 'Occurred', 'Repair end', 'QA released', 'Downtime', 'Category', 'Failure / root cause', 'Parts used', 'Done by / WO', 'Status'],
-        widths: [55, 55, 55, 55, 45, 50, '*', 90, 70, 55],
+      { heading: `Breakdowns (${items.length})`, columns: ['Machine', 'Occurred', 'Repair end', 'QA released', 'Downtime', 'Category', 'Failure / root cause', 'Work done', 'Parts used', 'Done by / WO', 'Status'],
+        widths: [55, 50, 50, 50, 45, 50, '*', '*', 80, 65, 50],
         rows: items.map((b) => ({ cells: [`${b.code}\n${b.name}\n${b.location}`, plant(b.occurredAt), plant(b.repairEnd), plant(b.releasedAt), downtimeText(b),
-          b.failureCategory ?? '', `${b.description}${b.rootCause ? `\nRoot cause: ${b.rootCause}` : ''}`, b.partsText, `${b.doneBy}${b.workOrderRef ? `\nWO ${b.workOrderRef}` : ''}`, STATUS_LABEL[b.status]!] })) },
+          b.failureCategory ?? '', `${b.description}${b.rootCause ? `\nRoot cause: ${b.rootCause}` : ''}`, b.workDone, b.partsText, `${b.doneBy}${b.workOrderRef ? `\nWO ${b.workOrderRef}` : ''}`, STATUS_LABEL[b.status]!] })) },
       { heading: 'Per machine', columns: ['Machine', 'Failures', 'Downtime (h)', 'MTTR (h)', 'MTBF (h)'], widths: ['*', 60, 70, 60, 60],
         rows: stats.machines.map((m) => ({ cells: [`${m.code} · ${m.name}`, String(m.failures), String(m.downtimeHours), m.mttrHours === null ? '—' : String(m.mttrHours), m.mtbfHours === null ? '—' : String(m.mtbfHours)] })) },
       { heading: 'Per failure category', columns: ['Category', 'Failures'], widths: ['*', 60], rows: stats.categories.map((c) => ({ cells: [c.category, String(c.failures)] })) },

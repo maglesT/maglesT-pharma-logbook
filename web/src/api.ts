@@ -236,6 +236,7 @@ export interface BreakdownItem {
   failureCategory: string | null;
   description: string;
   rootCause: string;
+  workDone: string;
   partsText: string;
   doneBy: string;
   workOrderRef: string;

@@ -19,7 +19,7 @@ import { historyRoutes } from './routes/history.js';
 import { voiceRoutes } from './routes/voice.js';
 import type { SpeechProvider } from './voice.js';
 
-export const VERSION = '0.3.2';
+export const VERSION = '0.3.3';
 
 export interface AppOptions {
   // Connection running as the restricted application role.

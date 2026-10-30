@@ -39,7 +39,7 @@ async function cleanAndVerify(id: number) {
 
 const report = (extra: object = {}) => ({ kind: 'breakdown', description: 'Motor trips on start', occurredAt: ago(120), reportedBy: 'Shift A operator', failureCategory: 'electrical', ...extra });
 const repairData = (extra: object = {}) => ({
-  ...report(), rootCause: 'Worn contactor', parts: [{ name: 'Contactor', partNumber: 'LC1D18', quantity: 1, lotSerial: 'SN-4471' }],
+  ...report(), rootCause: 'Worn contactor', workDone: 'Contactor replaced', parts: [{ name: 'Contactor', partNumber: 'LC1D18', quantity: 1, lotSerial: 'SN-4471' }],
   toolsUsed: 'Multimeter', doneBy: 'in_house', workOrderRef: 'WO-2026-118', postRepairChecks: 'Test run 10 min, no trips', ...extra,
 });
 
@@ -207,6 +207,7 @@ describe('breakdown register (LB-02, LB-22)', () => {
     expect(first.downtimeMinutes).toBeGreaterThanOrEqual(179);
     expect(first.downtimeMinutes).toBeLessThanOrEqual(181);
     expect(first.partsText).toBe('1 × Contactor (P/N LC1D18), lot/SN SN-4471');
+    expect(first.workDone).toBe('Contactor replaced');
     expect(first.doneBy).toBe('In-house');
     expect(first.workOrderRef).toBe('WO-2026-118');
     expect(all.items[1]).toMatchObject({ status: 'awaiting_verification', downtimeFinal: false, failureCategory: 'utility' });
