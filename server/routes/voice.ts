@@ -25,6 +25,9 @@ const noteBody = z.object({
   audioBase64: z.string().min(1).max(Math.ceil((MAX_AUDIO_BYTES * 4) / 3) + 4),
 });
 
+// The free-text fields that take voice notes, as people call them.
+const FIELD_LABEL: Record<string, string> = { remarks: 'Remarks', notes: 'Notes', description: 'What happened', workDone: 'Work done', rootCause: 'Root cause' };
+
 // 20 clips an hour per person keeps the service cost and load bounded.
 const limit = rateLimiter(20, 3_600_000);
 
@@ -64,7 +67,7 @@ export function voiceRoutes(app: FastifyInstance, sql: Sql, speech: SpeechProvid
     const audio = Buffer.from(b.audioBase64, 'base64');
     if (audio.length > MAX_AUDIO_BYTES) return refuse(413, 'audio_too_large', 'The recording is too large.');
     if (b.durationMs > MAX_CLIP_MS + 1_000) return refuse(400, 'clip_too_long', `A voice note can be at most ${MAX_CLIP_MS / 1000} seconds.`);
-    const [eq] = await sql<{ kind: 'equipment' | 'instrument' | 'area'; sterile: boolean }[]>`select kind, sterile from equipment where id = ${b.equipmentId} and active`;
+    const [eq] = await sql<{ kind: 'equipment' | 'instrument' | 'area'; sterile: boolean; code: string; name: string }[]>`select kind, sterile, code, name from equipment where id = ${b.equipmentId} and active`;
     if (!eq) return reply.code(404).send({ error: 'not_found' });
     // Only for an entry that could be saved on this item (review S10).
     const lt = typeByKey(b.logbookType);
@@ -75,7 +78,7 @@ export function voiceRoutes(app: FastifyInstance, sql: Sql, speech: SpeechProvid
     const requestedAt = clock!.now;
     let result;
     try {
-      result = await speech.transcribe(audio, mime, b.language);
+      result = await speech.transcribe(audio, mime, b.language, { equipment: `${eq.code} · ${eq.name}`, logbook: lt.label, field: FIELD_LABEL[b.field] ?? b.field });
     } catch (e) {
       if (e instanceof SpeechError) {
         if (e.code !== 'rejected') limit.refund(user.id);

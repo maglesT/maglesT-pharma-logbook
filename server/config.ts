@@ -24,6 +24,8 @@ const schema = z.object({
   GEMINI_BASE_URL: z.string().url().default('https://generativelanguage.googleapis.com'),
   GEMINI_MODEL: z.string().default('gemini-pro-latest'),
   GEMINI_TIMEOUT_MS: z.coerce.number().int().positive().default(90_000),
+  // A voice-note translation waits at most this long before Sarvam's own translation is used.
+  GEMINI_TRANSLATE_TIMEOUT_MS: z.coerce.number().int().positive().default(25_000),
 });
 
 export type Config = z.infer<typeof schema>;

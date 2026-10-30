@@ -3,7 +3,8 @@ import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PASSWORD, call, freshApp, login, seedUser, type TestApp } from './helpers.js';
 import { runIntegrityCheck } from '../server/integrity.js';
-import { SpeechError, rateLimiter, sarvamProvider, type SpeechProvider } from '../server/voice.js';
+import { SpeechError, rateLimiter, sarvamProvider, type SpeechProvider, type Translator } from '../server/voice.js';
+import { AdviceError } from '../server/advice.js';
 
 // S10 voice notes (D-26). The speech service is mocked: no real API calls in tests.
 
@@ -246,6 +247,28 @@ describe('Sarvam client (D-26)', () => {
     expect(r).toEqual({ transcript: 'बेल्ट फट गया', translation: 'The belt is torn.', detectedLanguage: 'hi-IN', model: 'saaras:v3', requestIds: { transcribe: 'req-transcribe', translate: 'req-translate' } });
     expect(seen.map((s) => s.mode).sort()).toEqual(['transcribe', 'translate']);
     expect(seen.every((s) => s.model === 'saaras:v3' && s.language === 'unknown' && s.key === 'secret-key')).toBe(true);
+  });
+
+  it('D-27: with a translator, Sarvam only transcribes and the translator gets the transcript with its context', async () => {
+    seen.length = 0;
+    const asked: unknown[] = [];
+    const translator: Translator = { name: 'gemini', async translate(text, language, context) {
+      asked.push({ text, language, context });
+      return { translation: 'The conveyor belt is torn.', model: 'gemini-test', requestId: 'g-1' };
+    } };
+    const ctx = { equipment: 'TAB-D-BLS · Blister packing machine', logbook: 'Maintenance / breakdown', field: 'What happened' };
+    const r = await sarvamProvider({ apiKey: 'k', baseUrl: base, model: 'saaras:v3', timeoutMs: 2000, translator }).transcribe(Buffer.from('a'), 'audio/webm', 'unknown', ctx);
+    expect(seen.map((s) => s.mode)).toEqual(['transcribe']);
+    expect(asked).toEqual([{ text: 'बेल्ट फट गया', language: 'hi-IN', context: ctx }]);
+    expect(r).toMatchObject({ transcript: 'बेल्ट फट गया', translation: 'The conveyor belt is torn.', model: 'saaras:v3 + gemini-test (translation)', requestIds: { transcribe: 'req-transcribe', translate: 'g-1' } });
+  });
+
+  it('LB-26: when the translator fails, Sarvam\'s own translation is used', async () => {
+    seen.length = 0;
+    const translator: Translator = { name: 'gemini', async translate() { throw new AdviceError('timeout', 'slow'); } };
+    const r = await sarvamProvider({ apiKey: 'k', baseUrl: base, model: 'saaras:v3', timeoutMs: 2000, translator }).transcribe(Buffer.from('a'), 'audio/webm', 'hi-IN');
+    expect(seen.map((s) => s.mode)).toEqual(['transcribe', 'translate']);
+    expect(r).toMatchObject({ translation: 'The belt is torn.', model: 'saaras:v3' });
   });
 
   it('LB-26: service errors and timeouts become clear errors', async () => {

@@ -2,6 +2,7 @@ import type { Sql, Tx } from './db.js';
 import { audit } from './audit.js';
 import { createHash } from 'node:crypto';
 import { canonical, contentHash, sign, type AuthenticatedSigner } from './signatures.js';
+import { AdviceError, geminiJson, type GeminiOptions } from './advice.js';
 
 // S10 voice notes (D-26). The browser sends audio to our server only; the server asks the speech
 // service for the transcript in the spoken language and an English translation. Nothing from a
@@ -36,9 +37,42 @@ export interface SpeechResult {
   requestIds: Record<string, string | null>;
 }
 
+// Where the words will go: lets a translator use the right terms (D-27).
+export interface SpeechContext { equipment: string; logbook: string; field: string }
+
 export interface SpeechProvider {
   name: string;
-  transcribe(audio: Buffer, mime: string, language: string): Promise<SpeechResult>;
+  transcribe(audio: Buffer, mime: string, language: string, context?: SpeechContext): Promise<SpeechResult>;
+}
+
+// Translates a transcript into English with its context (D-27).
+export interface Translator {
+  name: string;
+  translate(text: string, language: string | null, context: SpeechContext | undefined): Promise<{ translation: string; model: string; requestId: string | null }>;
+}
+
+export const TRANSLATE_INSTRUCTIONS = `You translate voice notes spoken by operators and engineers in an Indian pharmaceutical plant
+into English for a GMP logbook entry. The text is a speech-to-text transcript in an Indian language, often mixed with
+English words. Translate faithfully: keep the meaning exactly, add nothing, leave nothing out, do not explain or
+summarise. Keep numbers, units, times, batch numbers, equipment IDs and part numbers exactly as spoken. Use the standard
+English terms of pharmaceutical manufacturing and maintenance (for example granulation, compression, punch, gasket,
+autoclave, line clearance). Write it the way the person said it. If a word cannot be understood, write [unclear].`;
+
+// Gemini as the translator: it reads the transcript together with the machine, logbook and field.
+export function geminiTranslator(opts: GeminiOptions): Translator {
+  return {
+    name: 'gemini',
+    async translate(text, language, context) {
+      const prompt = (context ? `Machine: ${context.equipment}\nLogbook: ${context.logbook}\nField: ${context.field}\n` : '')
+        + `Spoken language: ${language ?? 'detect'}\n\nTranscript:\n${text}`;
+      const r = await geminiJson(opts, TRANSLATE_INSTRUCTIONS, prompt, {
+        type: 'OBJECT', properties: { translation: { type: 'STRING' } }, required: ['translation'],
+      });
+      const translation = (r.json as { translation?: unknown }).translation;
+      if (typeof translation !== 'string' || !translation.trim()) throw new AdviceError('rejected', 'The translator gave no text.');
+      return { translation: translation.trim(), model: r.modelVersion, requestId: r.responseId };
+    },
+  };
 }
 
 export class SpeechError extends Error {
@@ -50,7 +84,9 @@ export class SpeechError extends Error {
 // Sarvam AI: /speech-to-text with saaras:v3, once with mode=transcribe (spoken language) and once
 // with mode=translate (always English). The standalone /speech-to-text-translate endpoint is
 // documented as legacy and points to this mode (D-26).
-export function sarvamProvider(opts: { apiKey: string; baseUrl: string; model: string; timeoutMs: number }): SpeechProvider {
+// With a translator, Sarvam only transcribes and the translator turns the transcript into English with its
+// context; if the translator fails, Sarvam's own translation is used, so voice notes keep working (D-27).
+export function sarvamProvider(opts: { apiKey: string; baseUrl: string; model: string; timeoutMs: number; translator?: Translator | null }): SpeechProvider {
   const call = async (audio: Buffer, mime: string, language: string, mode: 'transcribe' | 'translate') => {
     const form = new FormData();
     form.append('file', new Blob([new Uint8Array(audio)], { type: mime }), `voice.${mime.split('/')[1]?.split(';')[0] ?? 'webm'}`);
@@ -78,7 +114,24 @@ export function sarvamProvider(opts: { apiKey: string; baseUrl: string; model: s
   };
   return {
     name: 'sarvam',
-    async transcribe(audio, mime, language) {
+    async transcribe(audio, mime, language, context) {
+      if (opts.translator) {
+        const original = await call(audio, mime, language, 'transcribe');
+        // The spoken language comes from the transcription.
+        const detectedLanguage = original.language ?? (language !== 'unknown' ? language : null);
+        if (original.transcript.trim()) {
+          try {
+            const t = await opts.translator.translate(original.transcript, detectedLanguage, context);
+            return { transcript: original.transcript, translation: t.translation, detectedLanguage, model: `${opts.model} + ${t.model} (translation)`,
+              requestIds: { transcribe: original.requestId, translate: t.requestId } };
+          } catch (e) {
+            if (!(e instanceof AdviceError)) throw e;
+          }
+        }
+        const english = await call(audio, mime, language, 'translate');
+        return { transcript: original.transcript, translation: english.transcript, detectedLanguage, model: opts.model,
+          requestIds: { transcribe: original.requestId, translate: english.requestId } };
+      }
       const [original, english] = await Promise.all([call(audio, mime, language, 'transcribe'), call(audio, mime, language, 'translate')]);
       return {
         transcript: original.transcript,

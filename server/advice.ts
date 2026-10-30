@@ -169,44 +169,45 @@ export class AdviceError extends Error {
   }
 }
 
+export interface GeminiOptions { apiKey: string; baseUrl: string; model: string; timeoutMs: number }
+
 // Google Gemini generateContent with a JSON response schema (checked against the live API 2026-10-30).
-export function geminiProvider(opts: { apiKey: string; baseUrl: string; model: string; timeoutMs: number }): AdviceProvider {
-  return {
-    name: 'gemini',
-    model: opts.model,
-    async advise(instructions, prompt) {
-      let res: Response;
-      try {
-        res = await fetch(`${opts.baseUrl}/v1beta/models/${encodeURIComponent(opts.model)}:generateContent`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json', 'x-goog-api-key': opts.apiKey },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: instructions }] },
-            contents: [{ role: 'user', parts: [{ text: prompt }] }],
-            generationConfig: { responseMimeType: 'application/json', responseSchema: ADVICE_RESPONSE_SCHEMA },
-          }),
-          signal: AbortSignal.timeout(opts.timeoutMs),
-        });
-      } catch (e) {
-        const name = (e as Error).name;
-        throw name === 'TimeoutError' || name === 'AbortError'
-          ? new AdviceError('timeout', 'The suggestion service did not answer in time.')
-          : new AdviceError('unavailable', 'The suggestion service cannot be reached.');
-      }
-      const body = (await res.json().catch(() => ({}))) as {
-        candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; finishReason?: string }[];
-        modelVersion?: string; responseId?: string; error?: { message?: string };
-      };
-      if (res.status >= 500 || res.status === 429) throw new AdviceError('unavailable', `The suggestion service is not available (${res.status}).`);
-      if (!res.ok) throw new AdviceError('rejected', body.error?.message ?? `The suggestion service refused the request (${res.status}).`);
-      const text = (body.candidates?.[0]?.content?.parts ?? []).filter((p) => !p.thought && p.text).map((p) => p.text).join('');
-      let json: unknown;
-      try {
-        json = JSON.parse(text);
-      } catch {
-        throw new AdviceError('rejected', `The suggestion service gave no usable answer (${body.candidates?.[0]?.finishReason ?? 'empty'}).`);
-      }
-      return { json, modelVersion: body.modelVersion ?? opts.model, responseId: body.responseId ?? null };
-    },
+// Shared by breakdown suggestions and voice-note translation (D-27).
+export async function geminiJson(opts: GeminiOptions, instructions: string, prompt: string, schema: object): Promise<AdviceResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${opts.baseUrl}/v1beta/models/${encodeURIComponent(opts.model)}:generateContent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': opts.apiKey },
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: instructions }] },
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: { responseMimeType: 'application/json', responseSchema: schema },
+      }),
+      signal: AbortSignal.timeout(opts.timeoutMs),
+    });
+  } catch (e) {
+    const name = (e as Error).name;
+    throw name === 'TimeoutError' || name === 'AbortError'
+      ? new AdviceError('timeout', 'The language model did not answer in time.')
+      : new AdviceError('unavailable', 'The language model cannot be reached.');
+  }
+  const body = (await res.json().catch(() => ({}))) as {
+    candidates?: { content?: { parts?: { text?: string; thought?: boolean }[] }; finishReason?: string }[];
+    modelVersion?: string; responseId?: string; error?: { message?: string };
   };
+  if (res.status >= 500 || res.status === 429) throw new AdviceError('unavailable', `The language model is not available (${res.status}).`);
+  if (!res.ok) throw new AdviceError('rejected', body.error?.message ?? `The language model refused the request (${res.status}).`);
+  const text = (body.candidates?.[0]?.content?.parts ?? []).filter((p) => !p.thought && p.text).map((p) => p.text).join('');
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new AdviceError('rejected', `The language model gave no usable answer (${body.candidates?.[0]?.finishReason ?? 'empty'}).`);
+  }
+  return { json, modelVersion: body.modelVersion ?? opts.model, responseId: body.responseId ?? null };
+}
+
+export function geminiProvider(opts: GeminiOptions): AdviceProvider {
+  return { name: 'gemini', model: opts.model, advise: (instructions, prompt) => geminiJson(opts, instructions, prompt, ADVICE_RESPONSE_SCHEMA) };
 }
