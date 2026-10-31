@@ -3,8 +3,11 @@
 // Every activity is back-dated, so every entry is a late entry with the reason "Demo data" (LB-04).
 //
 // Usage: DEMO_DATABASE_URL=postgres://logbook_owner:...@localhost/logbook_demo npm run demo:seed [-- --force]
-// The database must be migrated first (npm run migrate). The script refuses a database that already has
-// entries unless --force is given. Never run it against a production database: it creates users.
+// The database must be migrated first (npm run migrate). It must be a fresh one: the script refuses a
+// database whose name does not contain "demo" or "test" (unless --i-know-this-is-not-production, which
+// also needs DEMO_PASSWORD: the published default password is never used there), that has approved
+// logbook settings, or users other than one initial admin, and, unless --force, one that has entries.
+// --force never skips the other checks. Never run it against a production database: it creates users.
 import { pathToFileURL } from 'node:url';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../server/app.js';
@@ -40,11 +43,42 @@ export interface SeedResult {
 }
 
 // `sql` runs as the application role (logbook_app), exactly like the server.
-export async function seedDemo(sql: Sql, { force = false, password = DEFAULT_PASSWORD } = {}): Promise<SeedResult> {
-  const [{ has } = { has: false }] = await sql<{ has: boolean }[]>`select exists (select 1 from entries) as has`;
-  if (has && !force) throw new SeedError('This database already has logbook entries: refusing to add demo data (use --force to add it anyway).');
-  const taken = await sql<{ username: string }[]>`select username from users where username = any(${DEMO_USERS.map((u) => u[0])})`;
-  if (taken.length) throw new SeedError(`Demo users already exist (${taken.map((u) => u.username).join(', ')}): the demo data is already here.`);
+// A demo or test database by its name.
+export const demoDatabaseName = (name: string) => /demo|test/i.test(name);
+
+export interface SeedOptions {
+  // Add demo data although the database has entries (never skips the other checks).
+  force?: boolean;
+  // Seed a database whose name does not say demo or test; needs an explicit password.
+  notProduction?: boolean;
+  password?: string;
+}
+
+// Why this database must not get demo data; empty when it may.
+export async function seedRefusals(sql: Sql, { force = false, notProduction = false, password }: SeedOptions = {}): Promise<string[]> {
+  const [m] = await sql<{ migrated: boolean }[]>`select to_regclass('entries') is not null as migrated`;
+  if (!m!.migrated) return ['This database is not migrated: run npm run migrate first.'];
+  const [f] = await sql<{ db: string; entries: boolean; approved: boolean; users: number; lone_admin: boolean }[]>`
+    select current_database() as db,
+      exists (select 1 from entries) as entries,
+      exists (select 1 from signatures where object_type = 'settings' and meaning = 'approved') as approved,
+      (select count(*)::int from users) as users,
+      coalesce((select bool_and(r.role = 'admin') from user_roles r), true) as lone_admin`;
+  const problems: string[] = [];
+  if (!demoDatabaseName(f!.db) && !notProduction) {
+    problems.push(`Database "${f!.db}" is not named as a demo or test database (use --i-know-this-is-not-production if it really is not production).`);
+  }
+  if (notProduction && !password) problems.push('Set DEMO_PASSWORD: the default demo password is only used on demo and test databases.');
+  if (f!.users > 1 || (f!.users === 1 && !f!.lone_admin)) problems.push('This database has user accounts other than one initial admin: refusing to add demo users.');
+  if (f!.approved) problems.push('This database has approved logbook settings: refusing to add demo settings.');
+  if (f!.entries && !force) problems.push('This database already has logbook entries: refusing to add demo data (use --force to add it anyway).');
+  return problems;
+}
+
+export async function seedDemo(sql: Sql, opts: SeedOptions = {}): Promise<SeedResult> {
+  const problems = await seedRefusals(sql, opts);
+  if (problems.length) throw new SeedError(problems.join('\n'));
+  const password = opts.password ?? DEFAULT_PASSWORD;
 
   const app = await buildApp({ sql, webRoot: '/nonexistent' });
   try {
@@ -184,7 +218,8 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   }
   const sql = connect(url, { role: process.env.DB_APP_ROLE ?? 'logbook_app' });
   try {
-    const r = await seedDemo(sql, { force: process.argv.includes('--force'), password: process.env.DEMO_PASSWORD || undefined });
+    const r = await seedDemo(sql, { force: process.argv.includes('--force'), notProduction: process.argv.includes('--i-know-this-is-not-production'),
+      password: process.env.DEMO_PASSWORD || undefined });
     console.log(`Demo data created: ${r.entries} entries. Users ${DEMO_USERS.map((u) => u[0]).join(', ')}; password: ${r.password}`);
   } catch (e) {
     console.error(e instanceof SeedError ? e.message : e);

@@ -126,6 +126,21 @@ describe('report views (D-28)', () => {
     expect(Object.keys(rows[0]!)).toEqual(['equipment_code', 'performed_at', 'result', 'next_due', 'certificate_ref', 'read_at', 'data_as_of']);
   });
 
+  it('LB-11: a next due date that is not a real date is refused; one stored anyway reads as null, not as an error', async () => {
+    const id = await newItem('HT-10', 'instrument');
+    const res = await call(t.app, c.eng1!, 'POST', `/api/equipment/${id}/entries`, { logbookType: 'calibration', activityStart: now(),
+      data: { result: 'pass', nextDue: '2027-02-30' }, signature: sig('eng1') });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_data');
+    // A row written past the app (e.g. before this check existed) must not break every read.
+    await t.owner.unsafe(`insert into ${base}.entries (equipment_id, logbook_type, settings_id, version, change, activity_start, activity_end, data, entered_by)
+      select ${id}, 'calibration', (select max(id) from ${base}.logbook_settings where logbook_type = 'calibration'), 1, 'created', now(), now(),
+        '{"result": "pass", "nextDue": "2027-02-30", "certificateRef": "OLD"}', (select id from ${base}.users where username = 'eng1')`);
+    const rows = await view('calibration_v1', `equipment_code = 'HT-10'`);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ certificate_ref: 'OLD', next_due: null });
+  });
+
   it('LB-24: logbook_sop_v1 gives the SOP references of the approved settings in force only', async () => {
     // A newer draft is not in force until QA approves it.
     await approve('maintenance', 'SOP-ENG-099', false);
@@ -138,7 +153,7 @@ describe('report views (D-28)', () => {
 });
 
 describe('the report role reads the views only (D-28)', () => {
-  it('LB-18: logbook_report reads the four views but cannot read or change any table', async () => {
+  it('LB-21: logbook_report reads the four views but cannot read or change any table', async () => {
     for (const v of ['equipment_v1', 'entry_v1', 'calibration_v1', 'logbook_sop_v1']) {
       expect((await asReport(t.owner, `select count(*) from ${t.reportSchema}.${v}`)).error).toBeUndefined();
       // Refused either as not permitted or as a view that cannot be written at all.
@@ -161,9 +176,27 @@ describe('the report role reads the views only (D-28)', () => {
     }
     expect((await asReport(t.owner, `select nextval('${base}.entry_ids')`)).error).toBe('42501');
     expect((await asReport(t.owner, `create table ${t.reportSchema}.x (a int)`)).error).toBe('42501');
+    // No temporary objects either, so no functions of its own (D-28).
+    expect((await asReport(t.owner, 'create temporary table x (a int)')).error).toBe('42501');
+    expect((await asReport(t.owner, 'create function pg_temp.f() returns int language sql as $$ select 1 $$')).error).toBe('42501');
   });
 
-  it('LB-18: the role cannot log in until the site gives it a password, and is a member of no role', async () => {
+  it('LB-21: a function in the reader\'s WHERE clause sees only what the views return, never superseded versions or drafts', async () => {
+    // A "leaky" function that keeps every value it is shown; the owner makes it, the role may call it.
+    await t.owner.unsafe(`create table ${base}.leaked (v text)`);
+    await t.owner.unsafe(`create function ${base}.leak(v text) returns boolean language plpgsql volatile security definer cost 0.0001
+      set search_path = ${base} as $$ begin insert into leaked values (v); return true; end $$`);
+    await t.owner.unsafe(`grant execute on function ${base}.leak(text) to logbook_report`);
+    expect((await asReport(t.owner, `select * from ${t.reportSchema}.entry_v1 where ${base}.leak(data::text)`)).error).toBeUndefined();
+    expect((await asReport(t.owner, `select * from ${t.reportSchema}.calibration_v1 where ${base}.leak(coalesce(certificate_ref, '-'))`)).error).toBeUndefined();
+    expect((await asReport(t.owner, `select * from ${t.reportSchema}.logbook_sop_v1 where ${base}.leak(sop_ref)`)).error).toBeUndefined();
+    const seen = (await t.owner.unsafe<{ v: string }[]>(`select v from ${base}.leaked`)).map((r) => r.v);
+    expect(seen.some((v) => v.includes('Rinse water clear'))).toBe(true);
+    // CERT-1 is only in the superseded first version of the HT-9 calibration; SOP-ENG-099 only in a draft.
+    expect(seen.filter((v) => v.includes('CERT-1') || v.includes('SOP-ENG-099'))).toEqual([]);
+  });
+
+  it('LB-21: the role cannot log in until the site gives it a password, and is a member of no role', async () => {
     const [r] = await t.owner<{ rolcanlogin: boolean; rolsuper: boolean; member_of: number }[]>`
       select rolcanlogin, rolsuper, (select count(*)::int from pg_auth_members m where m.member = r.oid) as member_of
       from pg_roles r where rolname = 'logbook_report'`;

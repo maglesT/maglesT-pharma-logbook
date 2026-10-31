@@ -24,7 +24,8 @@ npm run test:e2e   # browser tests of the main flows (Playwright; once: npx play
 ```
 
 Demo data (D-28): the shared investigation scenario of the Deviations system (FBD-01, CMP-02, HT-01, batches PCM-2610-013/014),
-created through the API on a separate, migrated database; it refuses a database that already has entries unless `--force`:
+created through the API on a separate, migrated database whose name contains `demo` or `test`; it refuses a database with approved
+settings, with users other than one initial admin, or (unless `--force`) with entries:
 `DEMO_DATABASE_URL=postgres://logbook_owner:dev@localhost:5432/logbook_demo npm run demo:seed` (prints the demo users and password;
 `DEMO_PASSWORD` overrides it). Never run it against a production database.
 
@@ -50,11 +51,30 @@ nothing else. Only if the site's Deviations & CAPA system is to read the logbook
 ALTER ROLE logbook_report LOGIN PASSWORD '...' CONNECTION LIMIT 4;   -- a long random password, kept by the Deviations system
 -- to withdraw access later: ALTER ROLE logbook_report NOLOGIN;
 ```
-Then allow it to connect only from the Deviations server: in `pg_hba.conf`, above the general rules, add
-`hostssl logbook logbook_report <deviations-server-ip>/32 scram-sha-256` (use `host` only on a trusted private network)
-and reload PostgreSQL. The compose file does not publish the database port: publish it on the internal interface only
-(e.g. `ports: ["10.0.0.5:5432:5432"]` under `db`) or put the Deviations system on the same Docker network. List the role
-in the periodic access review (CP-03). Nothing changes for logbook users.
+What the compose setup does: the `db` container (image `postgres:16`) publishes no port, so only containers on the
+compose network can reach it; SSL is off; and the image's `pg_hba.conf` ends with `host all all all scram-sha-256`, which
+admits any role with a password from any address that can reach it. To let the Deviations server in, and only it:
+1. Make the database reachable: publish the port on an internal interface only (e.g. `ports: ["10.0.0.5:5432:5432"]`
+   under `db`), or run the Deviations system on the same Docker network.
+2. If the connection crosses a network you do not fully trust, switch SSL on: put a server certificate and key in the data
+   volume (owned by the postgres user, key mode 0600) and add `command: ["postgres", "-c", "ssl=on", "-c",
+   "ssl_cert_file=/var/lib/postgresql/data/server.crt", "-c", "ssl_key_file=/var/lib/postgresql/data/server.key"]` under `db`.
+3. In `pg_hba.conf` (in the data volume, `/var/lib/postgresql/data/pg_hba.conf`), **above** the final catch-all line, add
+   ```
+   hostssl logbook logbook_report <deviations-server-ip>/32 scram-sha-256   # with SSL on (step 2)
+   # host  logbook logbook_report <deviations-server-ip>/32 scram-sha-256   # instead, without SSL, trusted private network only
+   host    all     logbook_report all                         reject
+   ```
+   The first matching line wins: without the `reject` line the catch-all would still let the role in from anywhere.
+   A `hostssl` line never matches while SSL is off. With Docker port publishing the address PostgreSQL sees may be the
+   Docker gateway rather than the Deviations server; check `select client_addr from pg_stat_activity` after a first connection.
+4. Reload: `docker compose -f ops/docker-compose.yml exec db psql -U logbook_owner -d logbook -c "select pg_reload_conf()"`.
+
+The migration also takes the right to create temporary objects in the database from PUBLIC (and gives it to `logbook_app`),
+so the report role cannot define functions of its own. That right belongs to the database, not to a backup: after
+restoring a backup into a new database, run, as the owner,
+`REVOKE TEMPORARY ON DATABASE <name> FROM PUBLIC; GRANT TEMPORARY ON DATABASE <name> TO logbook_app;`.
+List the role in the periodic access review (CP-03). Nothing changes for logbook users.
 
 ## Operating the system
 

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { asReport, freshDb, type TestDb } from './helpers.js';
-import { EVENT_AT, SeedError, seedDemo } from '../db/demo-seed.js';
+import { EVENT_AT, SeedError, demoDatabaseName, seedDemo, seedRefusals } from '../db/demo-seed.js';
 
 // S15 (D-28): the demo seed builds the shared investigation scenario through the API; the report
 // views, read as logbook_report, show what the Deviations system needs.
@@ -93,8 +93,18 @@ describe('demo seed (D-28)', () => {
     expect(reasons.map((r) => r.late_reason)).toEqual(['Demo data']);
   });
 
-  it('refuses a database that already has entries unless forced', async () => {
+  it('refuses a database that is not fresh, and --force does not skip the users and settings checks', async () => {
     await expect(seedDemo(t.sql)).rejects.toThrow(/already has logbook entries/);
+    const forced = (await seedRefusals(t.sql, { force: true })).join(' ');
+    expect(forced).toMatch(/user accounts other than one initial admin/);
+    expect(forced).toMatch(/approved logbook settings/);
+    expect(forced).not.toMatch(/entries/);
     await expect(seedDemo(t.sql, { force: true })).rejects.toBeInstanceOf(SeedError);
+  });
+
+  it('refuses a database not named as demo or test, and never uses the published password there', async () => {
+    expect(['logbook_demo', 'logbook_test', 'DEMO1'].every(demoDatabaseName)).toBe(true);
+    expect(['logbook', 'plant_prod'].some(demoDatabaseName)).toBe(false);
+    expect(await seedRefusals(t.sql, { force: true, notProduction: true })).toContain('Set DEMO_PASSWORD: the default demo password is only used on demo and test databases.');
   });
 });

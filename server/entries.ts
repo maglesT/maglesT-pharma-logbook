@@ -14,6 +14,10 @@ const part = z.object({
 });
 // What a breakdown report states; completing the repair adds to it but cannot change it (LB-17).
 export const REPORTED_FIELDS = ['kind', 'occurredAt', 'reportedBy', 'description', 'failureCategory'] as const;
+const isRealDate = (day: string) => {
+  const d = new Date(`${day}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.getUTCFullYear() > 0 && d.toISOString().slice(0, 10) === day;
+};
 const outOfLimit = { comment: z.string().trim().max(1000).default(''), deviationRef: z.string().trim().max(60).default('') };
 
 export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
@@ -52,8 +56,8 @@ export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
   calibration: z.object({
     result: z.enum(['pass', 'fail']),
     certificateRef: z.string().trim().max(100).default(''),
-    // Plant-local date YYYY-MM-DD (D-19).
-    nextDue: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    // Plant-local date YYYY-MM-DD (D-19); a real calendar date (not e.g. 2026-02-30).
+    nextDue: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isRealDate, 'not a real date'),
     remarks: z.string().trim().max(1000).default(''),
     ...outOfLimit,
   }),
