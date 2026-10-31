@@ -23,7 +23,7 @@ npm run ci         # typecheck, tests, build — run before pushing
 npm run test:e2e   # browser tests of the main flows (Playwright; once: npx playwright install chromium)
 ```
 
-Demo data (D-28): the shared investigation scenario of the Deviations system (FBD-01, CMP-02, HT-01, batches PCM-2610-013/014),
+Demo data (D-28): the shared investigation scenario of the Deviations system (FBD-01, PRESS-01, HT-01, rooms GRAN-1 and COMP-1, product RAB-GR-20, batches RAB26002/RAB26004),
 created through the API on a separate, migrated database whose name contains `demo` or `test`; it refuses a database with approved
 settings, with users other than one initial admin, or (unless `--force`) with entries:
 `DEMO_DATABASE_URL=postgres://logbook_owner:dev@localhost:5432/logbook_demo npm run demo:seed` (prints the demo users and password;

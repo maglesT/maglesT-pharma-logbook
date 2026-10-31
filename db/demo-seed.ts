@@ -31,8 +31,9 @@ const WHO: Record<Who, string> = { admin: 'demo.admin', qa: 'qa.priya', sup: 'su
 
 // Plant time (IST, UTC+05:30) to an ISO timestamp.
 export const ist = (dayTime: string) => new Date(`${dayTime}:00+05:30`).toISOString();
-// The event under investigation: low tablet hardness on CMP-02 from about 14:00 IST.
-export const EVENT_AT = ist('2026-10-31T14:00');
+// The event under investigation: the failed breaking-force (hardness) check on PRESS-01 / HT-01 for batch
+// RAB26004, at about 22:00 IST.
+export const EVENT_AT = ist('2026-10-31T22:00');
 const daysBefore = (iso: string, days: number) => new Date(Date.parse(iso) - days * 86_400_000).toISOString();
 
 export class SeedError extends Error {}
@@ -125,7 +126,7 @@ async function run(app: FastifyInstance, sql: Sql, password: string): Promise<Se
 
   // Master data.
   if (!(await api('admin', 'GET', '/api/site'))) await api('admin', 'PUT', '/api/site', { name: 'Demo Tablet Plant', code: 'DEMO', reason: DEMO_REASON });
-  const product = (await api('admin', 'POST', '/api/products', { code: 'PCM500', name: 'Paracetamol 500 mg Tablets' })).id as number;
+  const product = (await api('admin', 'POST', '/api/products', { code: 'RAB-GR-20', name: 'Rabeprazole sodium 20 mg gastro-resistant tablets (DEMO-ONLY)' })).id as number;
   const item = async (code: string, name: string, kind: 'equipment' | 'instrument' | 'area', location: string, sopRefs = '', more: object = {}) => {
     const id = (await api('admin', 'POST', '/api/equipment', { code, name, kind, location })).id as number;
     if (sopRefs) {
@@ -133,11 +134,11 @@ async function run(app: FastifyInstance, sql: Sql, password: string): Promise<Se
     }
     return id;
   };
-  await item('GRN-RM-1', 'Granulation room 1', 'area', 'Block A, ground floor');
-  await item('CMP-RM-2', 'Compression room 2', 'area', 'Block A, ground floor');
-  const fbd = await item('FBD-01', 'Fluid bed dryer', 'equipment', 'GRN-RM-1', 'SOP-PRD-014', { manufacturer: 'Demo Process Equipment', model: 'FBD-120' });
-  const cmp = await item('CMP-02', 'Rotary tablet press', 'equipment', 'CMP-RM-2', 'SOP-PRD-021, SOP-ENG-010', { manufacturer: 'Demo Press Works', model: 'RTP-37' });
-  const ht = await item('HT-01', 'Tablet hardness tester', 'instrument', 'CMP-RM-2', 'SOP-QC-005', { manufacturer: 'Demo Instruments', model: 'HT-500' });
+  await item('GRAN-1', 'Granulation room 1', 'area', 'Block A, ground floor');
+  await item('COMP-1', 'Compression room 1', 'area', 'Block A, ground floor');
+  const fbd = await item('FBD-01', 'Fluid bed dryer', 'equipment', 'GRAN-1', 'SOP-PRD-014', { manufacturer: 'Demo Process Equipment', model: 'FBD-120' });
+  const press = await item('PRESS-01', 'Rotary tablet press', 'equipment', 'COMP-1', 'SOP-PRD-021, SOP-ENG-010', { manufacturer: 'Demo Press Works', model: 'RTP-37' });
+  const ht = await item('HT-01', 'Tablet hardness tester', 'instrument', 'COMP-1', 'SOP-QC-005', { manufacturer: 'Demo Instruments', model: 'HT-500' });
 
   // Logbook settings: drafted by Admin, approved by QA with an e-signature (LB-24). Approval makes
   // them effective now; the back-dated entries below are recorded under these settings.
@@ -175,36 +176,36 @@ async function run(app: FastifyInstance, sql: Sql, password: string): Promise<Se
     data: { result: 'pass', certificateRef: 'CAL-HT01-2607', nextDue: '2026-10-30', remarks: 'Checked with reference weights 2, 5, 10 kg' }, signature: sig('eng') });
   await signLatest('qa', 'verify', cal);
 
-  // CMP-02: preventive maintenance 40 days before the event, none since.
+  // PRESS-01: preventive maintenance 40 days before the event, none since.
   const pmEnd = daysBefore(EVENT_AT, 40);
-  const pm = await record('eng', cmp, { logbookType: 'maintenance', activityStart: daysBefore(pmEnd, 4 / 24), activityEnd: pmEnd,
+  const pm = await record('eng', press, { logbookType: 'maintenance', activityStart: daysBefore(pmEnd, 4 / 24), activityEnd: pmEnd,
     data: { kind: 'preventive', description: 'Preventive maintenance per SOP-ENG-010', workDone: 'Turret, punches and dies inspected; cams and guides lubricated; force rollers checked' }, signature: sig('eng') });
   await signLatest('sup', 'verify', pm);
-  await clean(cmp, '2026-09-21T15:00', '2026-09-21T16:00', 'major');
+  await clean(press, '2026-09-22T09:00', '2026-09-22T10:00', 'major');
 
-  // FBD-01: batch 013, cleaning, batch 014 (granulation drying), cleaning.
+  // FBD-01: batch RAB26002, cleaning, batch RAB26004 (granulation drying), cleaning.
   await clean(fbd, '2026-10-27T09:00', '2026-10-27T10:00', 'major');
-  await use(fbd, 'PCM-2610-013', 'Granulation drying', '2026-10-27T11:00', '2026-10-27T15:00');
+  await use(fbd, 'RAB26002', 'Granulation drying', '2026-10-27T11:00', '2026-10-27T15:00');
   await clean(fbd, '2026-10-27T16:00', '2026-10-27T17:00', 'batch_to_batch');
-  await use(fbd, 'PCM-2610-014', 'Granulation drying', '2026-10-30T09:00', '2026-10-30T13:00');
-  await clean(fbd, '2026-10-30T14:00', '2026-10-30T15:00', 'batch_to_batch');
+  await use(fbd, 'RAB26004', 'Granulation drying', '2026-10-31T08:00', '2026-10-31T12:00');
+  await clean(fbd, '2026-10-31T13:00', '2026-10-31T14:00', 'batch_to_batch');
 
-  // CMP-02: breakdown two days before the event, reported, repaired, verified and released by QA.
-  const reported = { kind: 'breakdown', description: 'Upper punch sticking', occurredAt: ist('2026-10-29T09:40'),
+  // PRESS-01: breakdown two days before the event, reported, repaired, verified and released by QA.
+  const reported = { kind: 'breakdown', description: 'Upper punch sticking', occurredAt: ist('2026-10-29T19:40'),
     reportedBy: 'Suresh Yadav (operator)', failureCategory: 'mechanical' };
-  const bd = await record('op', cmp, { logbookType: 'maintenance', activityStart: ist('2026-10-29T10:00'), data: reported, signature: sig('op') });
+  const bd = await record('op', press, { logbookType: 'maintenance', activityStart: ist('2026-10-29T20:00'), data: reported, signature: sig('op') });
   const repaired = await api('eng', 'POST', `/api/entries/${bd}/complete`, {
-    activityEnd: ist('2026-10-29T12:30'), lateReason: DEMO_REASON, signature: sig('eng'),
+    activityEnd: ist('2026-10-29T22:30'), lateReason: DEMO_REASON, signature: sig('eng'),
     data: { ...reported, rootCause: 'Dry punch guides and worn upper punch tips', workDone: 'Upper punches and guides cleaned and polished, guides lubricated',
       partsNone: true, doneBy: 'in_house', postRepairChecks: 'Trial run 15 min, no sticking' } });
   await signLatest('sup', 'verify', repaired.id);
   await signLatest('qa', 'release', repaired.id);
-  await clean(cmp, '2026-10-29T13:00', '2026-10-29T13:45', 'batch_to_batch');
+  await clean(press, '2026-10-29T23:00', '2026-10-29T23:45', 'batch_to_batch');
 
-  // CMP-02: batch 013, cleaning between batches, batch 014 (the event at about 14:00).
-  await use(cmp, 'PCM-2610-013', 'Compression', '2026-10-29T14:00', '2026-10-30T06:00');
-  await clean(cmp, '2026-10-30T07:00', '2026-10-30T08:00', 'batch_to_batch');
-  await use(cmp, 'PCM-2610-014', 'Compression', '2026-10-31T09:00', '2026-10-31T16:30');
+  // PRESS-01: batch RAB26002, cleaning between batches, batch RAB26004 from about 19:00 (the event at about 22:00).
+  await use(press, 'RAB26002', 'Compression', '2026-10-30T08:00', '2026-10-30T20:00');
+  await clean(press, '2026-10-30T21:00', '2026-10-30T22:00', 'batch_to_batch');
+  await use(press, 'RAB26004', 'Compression', '2026-10-31T19:00', '2026-10-31T23:30');
 
   for (const who of Object.keys(cookies) as Who[]) await api(who, 'POST', '/api/logout');
   return { password, entries };
