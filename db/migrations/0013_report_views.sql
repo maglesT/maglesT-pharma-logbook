@@ -27,8 +27,13 @@ begin
   -- to this installation's tables (transaction-local; reset at the end).
   -- PUBLIC may create temporary objects by default; take that from everyone but the app role, so the
   -- report role cannot define functions of its own. The database owner keeps it as owner.
-  execute format('revoke temporary on database %I from public', current_database());
-  execute format('grant temporary on database %I to logbook_app', current_database());
+  -- Only while PUBLIC still has it (a database's ACL is one catalog row: repeated changes from parallel
+  -- test runs would collide).
+  if exists (select from pg_database d, aclexplode(coalesce(d.datacl, acldefault('d', d.datdba))) a
+             where d.datname = current_database() and a.grantee = 0 and a.privilege_type = 'TEMPORARY') then
+    execute format('revoke temporary on database %I from public', current_database());
+    execute format('grant temporary on database %I to logbook_app', current_database());
+  end if;
   perform set_config('search_path', format('%I, %I', rep, base), true);
 end $$;
 
