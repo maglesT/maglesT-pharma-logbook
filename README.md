@@ -23,6 +23,11 @@ npm run ci         # typecheck, tests, build — run before pushing
 npm run test:e2e   # browser tests of the main flows (Playwright; once: npx playwright install chromium)
 ```
 
+Demo data (D-28): the shared investigation scenario of the Deviations system (FBD-01, CMP-02, HT-01, batches PCM-2610-013/014),
+created through the API on a separate, migrated database; it refuses a database that already has entries unless `--force`:
+`DEMO_DATABASE_URL=postgres://logbook_owner:dev@localhost:5432/logbook_demo npm run demo:seed` (prints the demo users and password;
+`DEMO_PASSWORD` overrides it). Never run it against a production database.
+
 Tests use `TEST_DATABASE_URL` (default `postgres://logbook_owner:dev@localhost:5432/logbook_test`);
 each test file gets its own schema.
 
@@ -37,6 +42,19 @@ First time only, create the admin account (prints a temporary password):
 restricted role `logbook_app`, which cannot update or delete entries, signatures or the audit trail (LB-18).
 Either give it its own login (`ALTER ROLE logbook_app LOGIN PASSWORD '...'`) and point `DATABASE_URL` at it,
 or, on a single box, let the owner login switch to it with `DB_APP_ROLE=logbook_app` (compose default).
+
+**Read-only role for the Deviations system (D-28).** Migration 0013 creates the role `logbook_report` without a login.
+It can read the four views in the schema `report` (`equipment_v1`, `entry_v1`, `calibration_v1`, `logbook_sop_v1`) and
+nothing else. Only if the site's Deviations & CAPA system is to read the logbook, give it a login, as the database owner:
+```sql
+ALTER ROLE logbook_report LOGIN PASSWORD '...' CONNECTION LIMIT 4;   -- a long random password, kept by the Deviations system
+-- to withdraw access later: ALTER ROLE logbook_report NOLOGIN;
+```
+Then allow it to connect only from the Deviations server: in `pg_hba.conf`, above the general rules, add
+`hostssl logbook logbook_report <deviations-server-ip>/32 scram-sha-256` (use `host` only on a trusted private network)
+and reload PostgreSQL. The compose file does not publish the database port: publish it on the internal interface only
+(e.g. `ports: ["10.0.0.5:5432:5432"]` under `db`) or put the Deviations system on the same Docker network. List the role
+in the periodic access review (CP-03). Nothing changes for logbook users.
 
 ## Operating the system
 

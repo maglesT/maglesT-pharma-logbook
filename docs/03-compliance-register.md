@@ -101,7 +101,7 @@ SchM clause numbers were re-checked against the official gazette PDF (layout-pre
 | P11 11.30 (open systems) | Closed system: access is controlled by the manufacturer (on-premise, or hosted under the CP-06 agreement). |
 | P11 11.10(h) (device checks, "as appropriate") | No device or instrument input in v1. The QR code only opens an equipment page; the logged-in user enters and confirms. Revisit if terminals per area are wanted. |
 | P11 11.200(b), 11.300(c), (e) | No biometrics, tokens or cards. |
-| A11 5 | No data interfaces in v1. |
+| A11 5 | No interface writes data into the logbook. Since S15 (D-28) there is one outgoing data exchange: read-only report views (schema `report`, role `logbook_report`) that the site's Deviations & CAPA system reads to support investigations. The logbook receives nothing, so no input checks apply on its side; the exchange is secured by a role that can read four views and nothing else (tested), and each row carries `read_at` and `data_as_of`. The checks on receiving and processing the data belong to the Deviations system's own validation (CP-01 there). The site lists the role in its periodic access review (CP-03). |
 | A11 15 | The logbook never certifies or releases batches; no "release" meaning applies to batches. |
 | 211.182 dedicated-equipment exemption | Not used (C4/SchM have no exemption). |
 

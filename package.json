@@ -1,6 +1,6 @@
 {
   "name": "pharma-logbook",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
   "description": "Electronic equipment, instrument and area logbook for pharmaceutical manufacturing",
@@ -15,6 +15,7 @@
     "migrate:prod": "node dist/db/migrate.js",
     "migrate": "tsx db/migrate.ts",
     "create-admin": "tsx db/create-admin.ts",
+    "demo:seed": "tsx db/demo-seed.ts",
     "integrity": "tsx db/integrity.ts",
     "traceability": "tsx scripts/traceability.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
