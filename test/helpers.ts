@@ -13,6 +13,8 @@ export interface TestDb {
   owner: Sql;
   // Restricted application connection, as the app uses it in production.
   sql: Sql;
+  // Where this schema's report views are (S15): `report` on a site, <schema>_report in tests.
+  reportSchema: string;
   close: () => Promise<void>;
 }
 
@@ -26,9 +28,11 @@ export async function freshDb(): Promise<TestDb> {
   return {
     owner,
     sql,
+    reportSchema: `${schema}_report`,
     close: async () => {
       await sql.end();
       await owner.unsafe(`drop schema ${schema} cascade`);
+      await owner.unsafe(`drop schema if exists ${schema}_report cascade`);
       await owner.end();
     },
   };
@@ -72,4 +76,17 @@ export async function login(app: FastifyInstance, username: string, password = P
 // JSON request helper carrying the session cookie.
 export function call(app: FastifyInstance, cookie: string, method: 'GET' | 'POST' | 'PATCH' | 'PUT', url: string, payload?: object) {
   return app.inject({ method, url, headers: { cookie }, ...(method === 'GET' ? {} : { payload: payload ?? {} }) });
+}
+
+// Runs one statement as the report role, in its own transaction; returns the rows or the SQLSTATE.
+export async function asReport(owner: Sql, statement: string): Promise<{ rows?: Record<string, unknown>[]; error?: string }> {
+  try {
+    const rows = await owner.begin(async (tx) => {
+      await tx.unsafe('set local role logbook_report');
+      return tx.unsafe(statement);
+    });
+    return { rows: [...rows] as Record<string, unknown>[] };
+  } catch (e) {
+    return { error: (e as { code?: string }).code ?? String(e) };
+  }
 }

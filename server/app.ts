@@ -21,7 +21,7 @@ import { adviceRoutes } from './routes/advice.js';
 import type { SpeechProvider } from './voice.js';
 import type { AdviceProvider } from './advice.js';
 
-export const VERSION = '0.4.2';
+export const VERSION = '0.5.0';
 
 export interface AppOptions {
   // Connection running as the restricted application role.

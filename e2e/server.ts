@@ -19,6 +19,7 @@ const speech: SpeechProvider = {
 await globalSetup();
 const owner = connect(TEST_DATABASE_URL);
 await owner.unsafe(`drop schema if exists ${E2E_SCHEMA} cascade`);
+await owner.unsafe(`drop schema if exists ${E2E_SCHEMA}_report cascade`);
 await owner.unsafe(`create schema ${E2E_SCHEMA}`);
 await owner.end();
 
