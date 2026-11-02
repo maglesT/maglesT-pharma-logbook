@@ -4,7 +4,7 @@ import { connect } from '../server/db.js';
 import { migrate } from '../db/migrate.js';
 import { buildApp } from '../server/app.js';
 import globalSetup from '../test/global-setup.js';
-import { PASSWORD, TEST_DATABASE_URL, login, seedUser, call } from '../test/helpers.js';
+import { PASSWORD, TEST_DATABASE_URL, fakeSignOn, login, seedUser, call } from '../test/helpers.js';
 import { E2E_PORT, E2E_SCHEMA, USERS } from './config.js';
 import type { SpeechProvider } from '../server/voice.js';
 
@@ -29,7 +29,7 @@ for (const [username, roles] of Object.entries(USERS)) await seedUser(schemaOwne
 await schemaOwner.end();
 
 const sql = connect(TEST_DATABASE_URL, { role: 'logbook_app', searchPath: E2E_SCHEMA });
-const app = await buildApp({ sql, webRoot: new URL('../dist/web', import.meta.url).pathname, cookieSecure: false, speech });
+const app = await buildApp({ sql, signOn: fakeSignOn(), webRoot: new URL('../dist/web', import.meta.url).pathname, cookieSecure: false, speech });
 
 const admin = (await login(app, 'admin')).cookie;
 const qa = (await login(app, 'qa1')).cookie;

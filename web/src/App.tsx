@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError, type Me } from './api.js';
-import { Login, ChangePassword } from './pages/Login.js';
+import { Login } from './pages/Login.js';
 import { Home } from './pages/Home.js';
-import { Users } from './pages/Users.js';
 import { MasterData } from './pages/MasterData.js';
 import { LogbookSettings } from './pages/LogbookSettings.js';
 import { EquipmentPage } from './pages/EquipmentPage.js';
 import { Review } from './pages/Review.js';
 import { Breakdowns } from './pages/Breakdowns.js';
 
-type Page = 'home' | 'users' | 'password' | 'masterdata' | 'settings' | 'equipment' | 'review' | 'breakdowns';
+type Page = 'home' | 'masterdata' | 'settings' | 'equipment' | 'review' | 'breakdowns';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -30,12 +29,13 @@ export function App() {
   }, [refresh]);
 
   if (me === undefined) return <main className="page">Loading…</main>;
-  if (me === null) return <Login onLoggedIn={refresh} />;
-  if (me.passwordChangeRequired) return <ChangePassword me={me} forced onDone={refresh} />;
+  if (me === null) return <Login />;
 
+  // Ends the core session too (shared terminals): the browser goes to core's sign-out page.
   const logout = async () => {
-    await api('POST', '/api/logout');
+    const r = await api<{ logoutUrl: string | null }>('POST', '/api/logout');
     setMe(null);
+    if (r.logoutUrl) window.location.assign(r.logoutUrl);
   };
 
   return (
@@ -53,13 +53,9 @@ export function App() {
           {(me.roles.includes('admin') || me.roles.includes('qa')) && (
             <button className={page === 'settings' ? 'tab on' : 'tab'} onClick={() => setPage('settings')}>Logbook settings</button>
           )}
-          {me.roles.includes('admin') && (
-            <button className={page === 'users' ? 'tab on' : 'tab'} onClick={() => setPage('users')}>Users</button>
-          )}
         </nav>
         <span className="who">
           {me.fullName}
-          <button className="link" onClick={() => setPage('password')}>Change password</button>
           <button className="link" onClick={logout}>Log out</button>
         </span>
       </header>
@@ -68,10 +64,8 @@ export function App() {
         {page === 'equipment' && <EquipmentPage me={me} openId={openId} />}
         {page === 'review' && <Review me={me} />}
         {page === 'breakdowns' && <Breakdowns onOpen={(id) => { setOpenId(id); setPage('equipment'); }} />}
-        {page === 'users' && <Users me={me} />}
         {page === 'masterdata' && <MasterData me={me} />}
         {page === 'settings' && <LogbookSettings me={me} />}
-        {page === 'password' && <ChangePassword me={me} onDone={() => setPage('home')} />}
       </main>
     </>
   );

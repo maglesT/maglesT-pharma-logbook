@@ -36,7 +36,6 @@ jobs:
           psql -q postgres://logbook_owner:dev@localhost:5432/postgres -c "create database logbook_ci"
           export DATABASE_URL=postgres://logbook_owner:dev@localhost:5432/logbook_ci
           MIGRATION_DATABASE_URL=$DATABASE_URL node dist/db/migrate.js
-          MIGRATION_DATABASE_URL=$DATABASE_URL node dist/db/create-admin.js admin "CI Admin" > /dev/null
           BACKUP_DIR=./backups ops/backup.sh
           ADMIN_URL=postgres://logbook_owner:dev@localhost:5432/postgres ops/restore-check.sh "$(ls ./backups/*.dump | tail -1)"
   # Browser tests of the main flows (docs/05 section 5) against the built UI and the real server.

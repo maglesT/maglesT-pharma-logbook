@@ -26,6 +26,13 @@ independent checks; every mismatch and how this draft handles it is in
 
 SchM clause numbers were re-checked against the official gazette PDF (layout-preserving text of Part I; sha256 9187…d271).
 
+## Medhanta platform (D-29)
+From B1-2 the Logbook signs people on through Medhanta core. Unique accounts, password rules and ageing, lockout
+with its urgent alert, and the record of access grants (parts of LB-20 and LB-21) are met by the platform's rules
+PL-01, PL-03, PL-04 and PL-05 (`maglesT/databsee`, `docs/03-compliance-register.md`), with the same clauses. The
+Logbook keeps the authority check per action (roles from core's token only), sessions with the idle timeout, the
+id of each person in its records, and its audit trail. Its tests: `test/accounts.test.ts` (PL-01, LB-18, LB-20, LB-21).
+
 ## A. Product rules
 
 ### Logbook content

@@ -41,7 +41,6 @@ export interface Me {
   username: string;
   fullName: string;
   roles: Role[];
-  passwordChangeRequired: boolean;
 }
 
 export interface User {
