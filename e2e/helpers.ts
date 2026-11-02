@@ -1,9 +1,8 @@
 import { expect, request, type APIRequestContext, type Locator, type Page } from '@playwright/test';
 import { connect } from '../server/db.js';
-import { PASSWORD, TEST_DATABASE_URL } from '../test/helpers.js';
+import { TEST_DATABASE_URL } from '../test/helpers.js';
 import { E2E_PORT, E2E_SCHEMA } from './config.js';
 
-export { PASSWORD };
 const baseURL = `http://127.0.0.1:${E2E_PORT}`;
 
 // Owner connection to the e2e schema, only to move time behind the application's back.
@@ -22,11 +21,18 @@ export async function logOut(page: Page) {
   await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible();
 }
 
-// Signs in an open dialog or form sign box (user ID + password, LB-20).
-export async function sign(scope: Locator, username: string, button = 'Sign') {
-  await scope.getByLabel('User ID', { exact: true }).fill(username);
-  await scope.getByLabel('Password', { exact: true }).fill(PASSWORD);
+// Signs in an open dialog or form sign box (PL-05): the click opens the window where core asks for the password
+// again; the test server's stand-in confirms the signed-in person at once.
+export async function sign(scope: Locator, _username: string, button = 'Sign') {
   await scope.getByRole('button', { name: button, exact: true }).click();
+}
+
+// A signing proof through the API, as the sign window gets it: /sign, core, /cb.
+export async function proofOf(ctx: APIRequestContext, meaning: string): Promise<string> {
+  const html = await (await ctx.get(`/sign?meanings=${meaning}`)).text();
+  const proof = /"signProof":"([^"]+)"/.exec(html)?.[1];
+  expect(proof, html).toBeTruthy();
+  return proof!;
 }
 
 export async function openLogbook(page: Page, code: string) {
@@ -64,11 +70,11 @@ export async function newEquipment(body: object = {}): Promise<{ id: number; cod
 export async function recordAndVerify(equipmentId: number, body: object, performer = 'op1', verifier = 'sup1') {
   const by = await apiAs(performer);
   const now = new Date().toISOString();
-  const { id } = await post(by, `/api/equipment/${equipmentId}/entries`, { activityStart: now, signature: { username: performer, password: PASSWORD }, ...body });
+  const { id } = await post(by, `/api/equipment/${equipmentId}/entries`, { activityStart: now, signature: { proof: await proofOf(by, 'performed') }, ...body });
   await by.dispose();
   const check = await apiAs(verifier);
   const [version] = await (await check.get(`/api/entries/${id}/versions`)).json();
-  await post(check, `/api/entries/${id}/verify`, { username: verifier, password: PASSWORD, contentHash: version.contentHash });
+  await post(check, `/api/entries/${id}/verify`, { proof: await proofOf(check, 'verified'), contentHash: version.contentHash });
   await check.dispose();
   return id as number;
 }
@@ -84,7 +90,7 @@ export async function approveSettings(logbookType: string, settings: object = {}
   await admin.dispose();
   const qa = await apiAs('qa1');
   const versions = (await (await qa.get('/api/logbook-types')).json()).flatMap((t: { versions: { id: number; contentHash: string }[] }) => t.versions);
-  await post(qa, `/api/settings/${id}/approve`, { username: 'qa1', password: PASSWORD, contentHash: versions.find((v: { id: number }) => v.id === id).contentHash });
+  await post(qa, `/api/settings/${id}/approve`, { proof: await proofOf(qa, 'approved'), contentHash: versions.find((v: { id: number }) => v.id === id).contentHash });
   await qa.dispose();
 }
 

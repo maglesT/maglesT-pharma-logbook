@@ -1,5 +1,5 @@
 import { Fragment, useState, type FormEvent, type ReactNode } from 'react';
-import { api, ApiError, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
+import { api, ApiError, getSignProof, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
 import { VoiceButton } from '../components/VoiceNote.js';
 
 type Data = Record<string, unknown>;
@@ -104,13 +104,9 @@ export function EntryForm({
   const [batch, setBatch] = useState(correcting?.batch ?? '');
   const [lateReason, setLateReason] = useState('');
   const [reason, setReason] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
   const [problems, setProblems] = useState<string[]>([]);
   // Voice-note drafts per field, with the text the field had before; signed on save (D-26).
   const [drafts, setDrafts] = useState<Record<string, VoiceDraft & { previous: string }>>({});
-  const [voiceUser, setVoiceUser] = useState('');
-  const [voicePassword, setVoicePassword] = useState('');
   const [needLateReason, setNeedLateReason] = useState(false);
 
   const signs = Boolean(correcting) || PERFORMER_SIGNS.has(type);
@@ -167,13 +163,16 @@ export function EntryForm({
     // Completing with the end left as offered means "now", to the second, as "End use" does (review S9).
     if (showEnd) body.activityEnd = completing && end === initialEnd ? new Date().toISOString() : new Date(end).toISOString();
     if (type === 'equipment_use') Object.assign(body, { productId: productId || undefined, batch: batch || undefined });
-    if (signs) body.signature = { username, password };
-    if (voiceDrafts.length) {
-      if (!voiceUser.trim() || !voicePassword) return setProblems(['Sign to confirm the voice-note text: enter your user ID and password.']);
-      body.voiceNotes = voiceDrafts.map(([field, d]) => ({ id: d.id, field, finalText: String(data[field] ?? ''), shownHash: d.shownHash }));
-      body.voiceSignature = { username: voiceUser, password: voicePassword };
-    }
     try {
+      // One password entry at core covers both signatures of this save (performed / corrected, voice note confirmed).
+      const proof = signs || voiceDrafts.length
+        ? await getSignProof([...(signs ? [correcting ? 'corrected' : 'performed'] : []), ...(voiceDrafts.length ? ['voice_confirmed'] : [])])
+        : '';
+      if (signs) body.signature = { proof };
+      if (voiceDrafts.length) {
+        body.voiceNotes = voiceDrafts.map(([field, d]) => ({ id: d.id, field, finalText: String(data[field] ?? ''), shownHash: d.shownHash }));
+        body.voiceSignature = { proof };
+      }
       if (completing) {
         await api('POST', `/api/entries/${completing.id}/complete`, { activityEnd: body.activityEnd, data: body.data, signature: body.signature,
           voiceNotes: body.voiceNotes, voiceSignature: body.voiceSignature, lateReason: lateReason || undefined });
@@ -186,7 +185,7 @@ export function EntryForm({
     } catch (err) {
       if (err instanceof ApiError && err.code === 'late_reason_required') setNeedLateReason(true);
       const msg: Record<string, string> = {
-        wrong_credentials: 'User ID or password is wrong. Repeated failures lock your account.',
+        wrong_credentials: 'Your password was not confirmed for this signature. Try again.',
         late_reason_required: 'This is a late entry: give the reason below.',
         future_time: 'A time cannot be in the future.',
         type_not_configured: 'This logbook type has no approved settings yet.',
@@ -291,8 +290,7 @@ export function EntryForm({
           <div className="signbox">
             <strong>Sign: {correcting ? 'Corrected' : 'Performed'}</strong>
             <p className="muted">Your electronic signature is the legally binding equivalent of your handwritten signature.</p>
-            <label>User ID<input value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="off" /></label>
-            <label>Password<input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" /></label>
+            <p className="muted">“Sign and save” opens a small window where you enter your password again.</p>
           </div>
         )}
         {voiceDrafts.length > 0 && voice && (
@@ -300,15 +298,14 @@ export function EntryForm({
             <strong>Sign: Voice note confirmed</strong>
             <p>“{voice.statement}”</p>
             <p className="muted">This covers the English text of: {voiceDrafts.map(([f]) => f).join(', ')}. The audio and the original-language transcript are kept with the entry.</p>
-            <label>Voice note user ID<input value={voiceUser} onChange={(e) => setVoiceUser(e.target.value)} autoComplete="off" /></label>
-            <label>Voice note password<input type="password" value={voicePassword} onChange={(e) => setVoicePassword(e.target.value)} autoComplete="current-password" /></label>
+            <p className="muted">Signed with the same password entry as this save.</p>
           </div>
         )}
 
         {problems.length > 0 && <ul className="error">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
         <div className="actions">
           <button type="button" onClick={onCancel}>Cancel</button>
-          <button className="primary" type="submit" disabled={Boolean(correcting) && !reason.trim()}>{signs ? 'Sign and save' : 'Save'}</button>
+          <button className="primary" type="submit" disabled={Boolean(correcting) && !reason.trim()}>{signs || voiceDrafts.length ? 'Sign and save' : 'Save'}</button>
         </div>
       </form>
     </div>

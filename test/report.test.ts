@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PASSWORD, asReport, call, freshApp, login, seedUser, type TestApp } from './helpers.js';
+import { asReport, call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
 
 // S15 (D-28): read-only report views for the Deviations & CAPA system, read through logbook_report.
 
@@ -8,7 +8,7 @@ let base: string;
 const c: Record<string, string> = {};
 let product: number;
 
-const sig = (username: string) => ({ username, password: PASSWORD });
+const sig = (username: string) => ({ proof: proofFor(username) });
 const now = () => new Date().toISOString();
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
 const plantDay = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });

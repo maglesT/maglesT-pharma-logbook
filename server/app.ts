@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import { randomBytes } from 'node:crypto';
 import fastifyCookie from '@fastify/cookie';
 import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
@@ -7,7 +8,6 @@ import path from 'node:path';
 import type { Sql } from './db.js';
 import { BACKGROUND_HEADER, SESSION_COOKIE, loadSession } from './auth.js';
 import { authRoutes } from './routes/auth.js';
-import { alertRoutes } from './routes/alerts.js';
 import { masterDataRoutes } from './routes/masterdata.js';
 import { settingsRoutes } from './routes/settings.js';
 import { entryRoutes } from './routes/entries.js';
@@ -28,6 +28,8 @@ export interface AppOptions {
   sql: Sql;
   // Sign-on through Medhanta core (D-29); tests pass a stand-in.
   signOn: SignOn;
+  // Key for the short signing proofs made after core's re-authentication (B1-4); random per process by default.
+  proofKey?: Buffer;
   logger?: boolean;
   webRoot?: string;
   // Secure flag on the session cookie; off only for plain-HTTP development.
@@ -38,9 +40,10 @@ export interface AppOptions {
   advisor?: AdviceProvider | null;
 }
 
-export async function buildApp({ sql, signOn, logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ sql, signOn, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger, trustProxy: true });
   app.decorate('cookieSecure', cookieSecure);
+  app.decorate('proofKey', proofKey);
   await app.register(fastifyCookie);
 
   app.addHook('onRequest', async (req, reply) => {
@@ -63,7 +66,6 @@ export async function buildApp({ sql, signOn, logger = false, webRoot, cookieSec
   });
 
   authRoutes(app, sql, signOn);
-  alertRoutes(app, sql);
   masterDataRoutes(app, sql);
   settingsRoutes(app, sql);
   entryRoutes(app, sql);
@@ -89,5 +91,6 @@ export async function buildApp({ sql, signOn, logger = false, webRoot, cookieSec
 declare module 'fastify' {
   interface FastifyInstance {
     cookieSecure: boolean;
+    proofKey: Buffer;
   }
 }

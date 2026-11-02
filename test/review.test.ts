@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PASSWORD, call, freshApp, login, seedUser, type TestApp } from './helpers.js';
+import { call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
 import { runs } from '../server/routes/exports.js';
 
 let t: TestApp;
 const c: Record<string, string> = {};
 let mixer: number;
 let product: number;
-const sig = (username: string) => ({ username, password: PASSWORD });
+const sig = (username: string) => ({ proof: proofFor(username) });
 const now = () => new Date().toISOString();
 // Plant-local days covering yesterday to tomorrow.
 const dayOf = (offset: number) => new Date(Date.now() + offset * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });

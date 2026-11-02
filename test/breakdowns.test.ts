@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PASSWORD, call, freshApp, login, seedUser, type TestApp } from './helpers.js';
+import { call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
 import { breakdownStats, type Breakdown } from '../server/breakdowns.js';
 import { changeLines } from '../server/changes.js';
 import { runIntegrityCheck } from '../server/integrity.js';
@@ -11,7 +11,7 @@ const c: Record<string, string> = {};
 let product: number;
 let n = 0;
 
-const sig = (username: string) => ({ username, password: PASSWORD });
+const sig = (username: string) => ({ proof: proofFor(username) });
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
 const now = () => new Date().toISOString();
 const today = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
@@ -159,10 +159,9 @@ describe('breakdown entry (LB-02, LB-06)', () => {
   it('LB-10: only an open repair can be completed, and that is checked before the password', async () => {
     const id = await newItem();
     const done = (await entry('eng1', id, { logbookType: 'maintenance', activityStart: ago(5), activityEnd: now(), data: repairData(), signature: sig('eng1') })).json().id;
-    const res = await call(t.app, c.eng1!, 'POST', `/api/entries/${done}/complete`, { activityEnd: now(), data: repairData(), signature: { username: 'eng1', password: 'wrong-password' } });
+    const res = await call(t.app, c.eng1!, 'POST', `/api/entries/${done}/complete`, { activityEnd: now(), data: repairData(), signature: { proof: 'not-a-proof' } });
     expect(res.json().error).toBe('not_open');
-    const [u] = await t.owner`select failed_attempts from users where username = 'eng1'`;
-    expect(u!.failed_attempts).toBe(0);
+    expect(await t.owner`select 1 from audit_log where action = 'signature.failed' and object_id = ${String(done)}`).toHaveLength(0);
   });
 
   it('LB-05: areas cannot ask for re-calibration', async () => {

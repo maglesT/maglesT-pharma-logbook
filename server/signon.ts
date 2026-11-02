@@ -10,6 +10,7 @@ export interface Identity {
   roles: string[];        // this product's roles in core's permission register
   refreshToken?: string;
   idToken?: string;
+  authTime?: number;      // when the person last entered their password at core (seconds), from the ID token
 }
 
 export interface SignOn {
@@ -40,7 +41,11 @@ export function oidcSignOn(s: OidcSettings): SignOn {
     const me = await fetch(`${s.issuer}/me`, { headers: { authorization: `Bearer ${t.access_token}` }, signal: AbortSignal.timeout(10_000) });
     if (!me.ok) throw new Error(`sign-on refused (${me.status})`);
     const c = (await me.json()) as { sub: string; name?: string; preferred_username?: string; roles?: string[] };
-    return { sub: c.sub, login: c.preferred_username ?? '', name: c.name ?? '', roles: c.roles ?? [], refreshToken: t.refresh_token, idToken: t.id_token };
+    // The ID token comes straight from core's token endpoint over TLS (OIDC Core 3.1.3.7): its claims are read as is.
+    const id = t.id_token ? JSON.parse(Buffer.from(t.id_token.split('.')[1] ?? '', 'base64url').toString('utf8')) as { sub?: string; aud?: string | string[]; auth_time?: number } : {};
+    if (id.sub !== undefined && id.sub !== c.sub) throw new Error('sign-on refused (token mismatch)');
+    return { sub: c.sub, login: c.preferred_username ?? '', name: c.name ?? '', roles: c.roles ?? [], refreshToken: t.refresh_token, idToken: t.id_token,
+      authTime: id.auth_time };
   }
   return {
     authUrl: ({ state, challenge, prompt, loginHint }) => `${s.issuer}/auth?${new URLSearchParams({

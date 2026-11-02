@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PASSWORD, call, freshApp, login, seedUser, type TestApp } from './helpers.js';
+import { call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
 
 let t: TestApp;
 const c: Record<string, string> = {};
@@ -9,7 +9,7 @@ let room: number;
 let nonSterile: number;
 let n = 0;
 
-const sig = (username: string) => ({ username, password: PASSWORD });
+const sig = (username: string) => ({ proof: proofFor(username) });
 const now = () => new Date().toISOString();
 
 async function approve(type: string, extra: object = {}) {

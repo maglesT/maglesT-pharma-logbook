@@ -9,7 +9,6 @@ export type Role = (typeof ROLES)[number];
 // Product defaults (register LB-21); not regulatory numbers. Passwords, their ageing and lockout are core's (D-29).
 export const POLICY = {
   sessionIdleMinutes: 15,
-  maxFailedAttempts: 5,
   // A session's roles are renewed from core at least this often, so a revoked right or a deactivated person is out
   // within this time (platform PL-01).
   roleCheckMinutes: 5,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, plantTime, TYPE_LABEL, type Alert, type Entry, type Equipment, type EquipmentStatus, type Me } from '../api.js';
+import { api, plantTime, TYPE_LABEL, type Entry, type Equipment, type EquipmentStatus, type Me } from '../api.js';
 import { StatusChip } from '../components/StatusChip.js';
 
 export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => void }) {
@@ -12,32 +12,8 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
     void api<Equipment[]>('GET', '/api/equipment').then(setEquipment);
   }, []);
   const code = (id: number) => equipment.find((e) => e.id === id)?.code ?? '';
-  const watches = me.roles.includes('admin') || me.roles.includes('qa');
-  const [alerts, setAlerts] = useState<Alert[]>([]);
-
-  const load = async (background = false) => setAlerts(await api<Alert[]>('GET', '/api/alerts', undefined, background));
-  useEffect(() => {
-    if (!watches) return;
-    void load();
-    const timer = setInterval(() => void load(true).catch(() => window.location.reload()), 30_000);
-    return () => clearInterval(timer);
-  }, [watches]);
-
-  const ack = async (id: number) => {
-    await api('POST', `/api/alerts/${id}/ack`);
-    await load();
-  };
-
   return (
     <>
-      {alerts.map((a) => (
-        <div key={a.id} className="alert" role="alert">
-          <span>
-            <strong>Security alert</strong> · {plantTime(a.createdAt)} · {a.message}
-          </span>
-          <button onClick={() => ack(a.id)}>Acknowledge</button>
-        </div>
-      ))}
       <h1>Home</h1>
       <p className="greeting">Good {new Date().getHours() < 12 ? 'morning' : new Date().getHours() < 17 ? 'afternoon' : 'evening'}, {me.fullName.split(' (')[0]}. Here is how the plant stands right now.</p>
       {(() => {

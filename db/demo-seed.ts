@@ -13,8 +13,9 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../server/app.js';
 import { connect, type Sql } from '../server/db.js';
 import { randomUUID } from 'node:crypto';
-import { hashPassword } from '../server/passwords.js';
 import type { SignOn } from '../server/signon.js';
+import { randomBytes } from 'node:crypto';
+import { MEANINGS, makeProof } from '../server/signatures.js';
 
 export const DEMO_REASON = 'Demo data';
 const DEFAULT_PASSWORD = 'Demo-Logbook-2026';
@@ -82,9 +83,10 @@ export async function seedDemo(sql: Sql, opts: SeedOptions = {}): Promise<SeedRe
   if (problems.length) throw new SeedError(problems.join('\n'));
   const password = opts.password ?? DEFAULT_PASSWORD;
 
-  const app = await buildApp({ sql, signOn: demoSignOn(), webRoot: '/nonexistent' });
+  const proofKey = randomBytes(32);
+  const app = await buildApp({ sql, signOn: demoSignOn(), proofKey, webRoot: '/nonexistent' });
   try {
-    return await run(app, sql, password);
+    return await run(app, proofKey, password);
   } finally {
     await app.close();
   }
@@ -92,8 +94,8 @@ export async function seedDemo(sql: Sql, opts: SeedOptions = {}): Promise<SeedRe
 
 // The demo people as Medhanta core would sign them on (D-29), in this process only. On a platform installation the
 // same logins and roles must also exist in core for anyone to sign in to the demo.
+const subs = new Map<string, string>();
 function demoSignOn(): SignOn {
-  const subs = new Map<string, string>();
   const who = async (login: string) => {
     const u = DEMO_USERS.find(([l]) => l === login);
     if (!u) throw new SeedError(`unknown demo login ${login}`);
@@ -108,7 +110,7 @@ function demoSignOn(): SignOn {
   };
 }
 
-async function run(app: FastifyInstance, sql: Sql, password: string): Promise<SeedResult> {
+async function run(app: FastifyInstance, proofKey: Buffer, password: string): Promise<SeedResult> {
   const cookies = {} as Record<Who, string>;
   let entries = 0;
   const api = async (who: Who, method: 'GET' | 'POST' | 'PUT', url: string, payload?: object) => {
@@ -116,7 +118,8 @@ async function run(app: FastifyInstance, sql: Sql, password: string): Promise<Se
     if (res.statusCode >= 300) throw new SeedError(`${method} ${url} as ${WHO[who]} failed (${res.statusCode}): ${res.body}`);
     return res.json();
   };
-  const sig = (who: Who) => ({ username: WHO[who], password });
+  // Each signature carries a proof as /cb makes it after core's re-authentication (B1-4).
+  const sig = (who: Who) => ({ proof: makeProof(proofKey, { sub: subs.get(WHO[who])!, roles: [DEMO_USERS.find(([l]) => l === WHO[who])![2]] }, [...MEANINGS]) });
   const signIn = async (who: Who) => {
     const go = await app.inject({ method: 'GET', url: `/login?login_hint=${WHO[who]}` });
     const pending = go.cookies.find((c) => c.name === 'signon');
@@ -126,11 +129,9 @@ async function run(app: FastifyInstance, sql: Sql, password: string): Promise<Se
     cookies[who] = `sid=${sid.value}`;
   };
 
-  // People are core's (D-29): signing on creates each one's Logbook id; the demo password is their local signing
-  // password until e-signatures re-authenticate through core.
+  // People are core's (D-29): signing on creates each one's Logbook id. On a platform installation create them in
+  // core with the demo password.
   for (const who of Object.keys(WHO) as Who[]) await signIn(who);
-  const hash = await hashPassword(password);
-  await sql`update users set password_hash = ${hash} where username = any(${Object.values(WHO)})`;
 
   // Master data.
   if (!(await api('admin', 'GET', '/api/site'))) await api('admin', 'PUT', '/api/site', { name: 'Demo Tablet Plant', code: 'DEMO', reason: DEMO_REASON });

@@ -2,8 +2,9 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
-import { SESSION_COOKIE, asRoles, newSessionId, requireRole, sessionKey } from '../auth.js';
+import { SESSION_COOKIE, asRoles, loadSession, newSessionId, requireRole, sessionKey } from '../auth.js';
 import { challengeOf, newVerifier, type SignOn } from '../signon.js';
+import { MEANINGS, makeProof } from '../signatures.js';
 
 // B1-2 (D-29): sign-on through Medhanta core (platform PL-01). /login sends the browser to core, /cb comes back
 // with a code; the Logbook roles come from core's token only. A person without a Logbook role is refused.
@@ -17,6 +18,13 @@ const page = (title: string, text: string) => `<!doctype html><html lang="en"><h
 <style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;color:#333}a{color:#e8590c}</style>
 </head><body><h1>${title}</h1><p>${text}</p><p><a href="/login">Sign in again</a></p></body></html>`;
 
+// Hands the outcome to the sign dialog that opened this window, then closes it.
+// The page holds a proof: never cached.
+const signPage = (msg: { signProof: string } | { signError: string }) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta http-equiv="Cache-Control" content="no-store"><title>Signature</title></head><body><p>${'signError' in msg ? msg.signError : 'Password confirmed.'} You can close this window.</p>
+<script>if (window.opener) { window.opener.postMessage(${JSON.stringify(msg).replace(/</g, '\\u003c')}, location.origin); window.close(); }</script>
+</body></html>`;
+
 export function authRoutes(app: FastifyInstance, sql: Sql, signOn: SignOn) {
   app.get('/login', async (req, reply) => {
     const q = z.object({ login_hint: z.string().max(40).optional() }).parse(req.query);
@@ -27,9 +35,26 @@ export function authRoutes(app: FastifyInstance, sql: Sql, signOn: SignOn) {
     return reply.redirect(signOn.authUrl({ state, challenge: challengeOf(verifier), loginHint: q.login_hint }));
   });
 
+  // B1-4 (PL-05): a signature starts here, in a small window the sign dialog opens. Core asks the signed-in person
+  // for their password again (prompt=login, max_age=0); /cb then hands the dialog a short signing proof.
+  app.get('/sign', async (req, reply) => {
+    // The meanings the person is about to sign, as the sign dialog shows them; the proof is good for those only.
+    const q = z.object({ meanings: z.string().regex(/^[a-z_]+(,[a-z_]+){0,1}$/) }).safeParse(req.query);
+    if (!q.success || !q.data.meanings.split(',').every((m) => (MEANINGS as readonly string[]).includes(m))) {
+      return reply.code(400).header('cache-control', 'no-store').type('text/html').send(signPage({ signError: 'Unknown signature meaning.' }));
+    }
+    const sid = req.cookies[SESSION_COOKIE];
+    const user = sid ? await loadSession(sql, signOn, sid) : null;
+    if (!user) return reply.code(401).header('cache-control', 'no-store').type('text/html').send(signPage({ signError: 'Your session has ended. Sign in again.' }));
+    const state = newVerifier();
+    const verifier = newVerifier();
+    void reply.setCookie(PENDING_COOKIE, `${state}.${verifier}.sign.${Date.now()}.${q.data.meanings}`, { path: '/cb', httpOnly: true, sameSite: 'lax', secure: app.cookieSecure, maxAge: PENDING_SECONDS });
+    return reply.redirect(signOn.authUrl({ state, challenge: challengeOf(verifier), prompt: 'login', loginHint: user.username }));
+  });
+
   app.get('/cb', async (req, reply) => {
     const q = z.object({ code: z.string().min(1), state: z.string().min(1) }).safeParse(req.query);
-    const [state, verifier] = (req.cookies[PENDING_COOKIE] ?? '').split('.');
+    const [state, verifier, mode, startedAt, meanings] = (req.cookies[PENDING_COOKIE] ?? '').split('.');
     void reply.clearCookie(PENDING_COOKIE, { path: '/cb' });
     if (!q.success || !state || !verifier || state !== q.data.state) {
       return reply.code(400).type('text/html').send(page('Sign-in expired', 'This sign-in link is no longer valid.'));
@@ -38,7 +63,17 @@ export function authRoutes(app: FastifyInstance, sql: Sql, signOn: SignOn) {
     try {
       who = await signOn.exchange(q.data.code, verifier);
     } catch {
+      if (mode === 'sign') return reply.header('cache-control', 'no-store').type('text/html').send(signPage({ signError: 'Your password was not confirmed.' }));
       return reply.code(401).type('text/html').send(page('Sign-in failed', 'The sign-in service did not confirm who you are.'));
+    }
+    // The signature itself checks that this is the signed-in person, with the same rights (authenticateSigner).
+    if (mode === 'sign') {
+      // PL-05: core must have asked for the password after this signature started (prompt=login, max_age=0 are only
+      // a request; the ID token's auth_time shows what core did). One second's leeway: auth_time has whole seconds.
+      if (!who.authTime || who.authTime * 1000 < Number(startedAt) - 1000) {
+        return reply.header('cache-control', 'no-store').type('text/html').send(signPage({ signError: 'Your password was not asked for again. Try again.' }));
+      }
+      return reply.header('cache-control', 'no-store').type('text/html').send(signPage({ signProof: makeProof(app.proofKey, who, (meanings ?? '').split(',')) }));
     }
     const roles = asRoles(who.roles);
     const name = who.name.trim() || who.login;
