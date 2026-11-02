@@ -44,7 +44,7 @@ restricted role `logbook_app`, which cannot update or delete entries, signatures
 Either give it its own login (`ALTER ROLE logbook_app LOGIN PASSWORD '...'`) and point `DATABASE_URL` at it,
 or, on a single box, let the owner login switch to it with `DB_APP_ROLE=logbook_app` (compose default).
 
-**Read-only role for the Deviations system (D-28).** Migration 0013 creates the role `logbook_report` without a login.
+**Read-only role for the Deviations system (D-28).** Migration 0013 creates the role `logbook_report` without a login. (On the Medhanta platform, D-29, it is not created: other products read the views through platform links.)
 It can read the four views in the schema `report` (`equipment_v1`, `entry_v1`, `calibration_v1`, `logbook_sop_v1`) and
 nothing else. Only if the site's Deviations & CAPA system is to read the logbook, give it a login, as the database owner:
 ```sql
