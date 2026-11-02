@@ -5,6 +5,7 @@ import { scheduleIntegrityCheck } from './integrity.js';
 import { geminiTranslator, sarvamProvider } from './voice.js';
 import { geminiProvider } from './advice.js';
 import { oidcSignOn } from './signon.js';
+import { createHash } from 'node:crypto';
 
 const config = loadConfig();
 const sql = connect(config.DATABASE_URL, { role: config.DB_APP_ROLE });
@@ -21,7 +22,9 @@ const speech = config.SARVAM_API_KEY
 const advisor = gemini ? geminiProvider(gemini) : null;
 const signOn = oidcSignOn({ issuer: config.OIDC_ISSUER, clientId: config.OIDC_CLIENT_ID, clientSecret: config.OIDC_CLIENT_SECRET,
   redirectUri: config.OIDC_REDIRECT_URI });
-const app = await buildApp({ sql, signOn, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
+// Signing proofs (B1-4) stay valid across a restart and between instances: the key is derived from the client secret.
+const proofKey = createHash('sha256').update(`logbook-signing-proof:${config.OIDC_CLIENT_SECRET}`).digest();
+const app = await buildApp({ sql, signOn, proofKey, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
 
 await app.listen({ port: config.PORT, host: config.HOST });
 const stopIntegrity = scheduleIntegrityCheck(sql, (msg) => app.log.info(msg));

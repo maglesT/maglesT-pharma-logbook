@@ -21,12 +21,12 @@ export type SignInput = z.infer<typeof signBody>;
 // A proof is good for this long after the password was entered, and only once.
 export const PROOF_SECONDS = 120;
 
-interface ProofBody { sub: string; roles: string[]; at: number; nonce: string }
+interface ProofBody { sub: string; roles: string[]; meanings: string[]; at: number; nonce: string }
 const mac = (key: Buffer, body: string) => createHmac('sha256', key).update(body).digest('base64url');
 
 /** Made by /cb right after core re-authenticated the person. */
-export function makeProof(key: Buffer, who: Pick<Identity, 'sub' | 'roles'>, at = Date.now()): string {
-  const body = Buffer.from(JSON.stringify({ sub: who.sub, roles: who.roles, at, nonce: randomBytes(16).toString('base64url') } satisfies ProofBody)).toString('base64url');
+export function makeProof(key: Buffer, who: Pick<Identity, 'sub' | 'roles'>, meanings: string[], at = Date.now()): string {
+  const body = Buffer.from(JSON.stringify({ sub: who.sub, roles: who.roles, meanings, at, nonce: randomBytes(16).toString('base64url') } satisfies ProofBody)).toString('base64url');
   return `${body}.${mac(key, body)}`;
 }
 
@@ -87,6 +87,7 @@ export async function authenticateSigner(
       : Date.now() - p.at > PROOF_SECONDS * 1000 || p.at > Date.now() + 5_000 ? 'proof expired'
       : !u?.employee_id || p.sub !== u.employee_id ? 'signed by another person'
       : asRoles(p.roles).join() !== user.roles.join() ? 'rights changed'
+      : !p.meanings?.includes(context.meaning) ? 'proof for another meaning'
       : null;
     if (!why && !(await tx`select 1 from signing_proofs where nonce = ${p!.nonce}`).length) return true;
     await audit(tx, { actorId: user.id, action: 'signature.failed', objectType: context.objectType,

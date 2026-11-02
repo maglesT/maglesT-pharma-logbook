@@ -133,7 +133,7 @@ test('LB-17: completing a repair keeps the reported occurrence time exactly as s
   const op = await apiAs('op1');
   const occurredAt = new Date(Date.now() - 7 * 60_000 - 27_512).toISOString();
   await post(op, `/api/equipment/${id}/entries`, { logbookType: 'maintenance', activityStart: new Date().toISOString(),
-    data: { kind: 'breakdown', description: 'Spray gun blocked', occurredAt, failureCategory: 'mechanical' }, signature: { proof: await proofOf(op) } });
+    data: { kind: 'breakdown', description: 'Spray gun blocked', occurredAt, failureCategory: 'mechanical' }, signature: { proof: await proofOf(op, 'performed') } });
   await op.dispose();
 
   await logIn(page, 'eng1');

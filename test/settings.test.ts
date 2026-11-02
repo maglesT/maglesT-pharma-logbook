@@ -136,7 +136,7 @@ describe('e-signatures (LB-19, LB-20)', () => {
     const id = await draft('glove_integrity');
     expect((await approve(qa, id, 'op1')).statusCode).toBe(401);                              // another person
     expect((await approve(qa, id, 'qa1', 'made-up.proof')).statusCode).toBe(401);             // not made by /cb
-    const forged = makeProof(Buffer.alloc(32, 9), { sub: directory.get('qa1')!.sub, roles: ['qa'] });
+    const forged = makeProof(Buffer.alloc(32, 9), { sub: directory.get('qa1')!.sub, roles: ['qa'] }, ['approved']);
     expect((await approve(qa, id, 'qa1', forged)).statusCode).toBe(401);                       // wrong key
     expect((await approve(qa, id, 'qa1', proofFor('qa1', Date.now() - (PROOF_SECONDS + 1) * 1000))).statusCode).toBe(401); // too old
     const fails = await t.owner`select reason from audit_log where action = 'signature.failed' and object_id = ${String(id)} order by id`;
@@ -145,13 +145,14 @@ describe('e-signatures (LB-19, LB-20)', () => {
     expect(await t.owner`select 1 from signatures where object_id = ${id}`).toHaveLength(0);
   });
 
-  it('PL-05: a signing proof is used once, and refused if the signer\'s rights changed at core', async () => {
+  it('PL-05: a signing proof is used once, only for the meaning it was made for, and refused if the signer\'s rights changed at core', async () => {
     const id = await draft('steriliser_test');
     const proof = proofFor('qa1');
     expect((await approve(qa, id, 'qa1', proof)).statusCode).toBe(200);
     const again = await draft('general_log');
     expect((await approve(qa, again, 'qa1', proof)).statusCode).toBe(401);
-    const changed = makeProof(TEST_PROOF_KEY, { sub: directory.get('qa1')!.sub, roles: ['qa', 'supervisor'] });
+    const changed = makeProof(TEST_PROOF_KEY, { sub: directory.get('qa1')!.sub, roles: ['qa', 'supervisor'] }, ['approved']);
+    expect((await approve(qa, again, 'qa1', proofFor('qa1', undefined, ['verified']))).statusCode).toBe(401);   // made for another meaning
     expect((await approve(qa, again, 'qa1', changed)).statusCode).toBe(401);
   });
 

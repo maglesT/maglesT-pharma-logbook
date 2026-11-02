@@ -24,7 +24,7 @@ export function SignDialog({
     setBusy(true);
     setError('');
     try {
-      await onSign({ proof: await getSignProof() });
+      await onSign({ proof: await getSignProof([meaning]) });
     } catch (err) {
       setError(
         err instanceof ApiError && err.code === 'wrong_credentials'

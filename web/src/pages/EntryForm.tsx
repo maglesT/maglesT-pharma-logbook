@@ -165,7 +165,9 @@ export function EntryForm({
     if (type === 'equipment_use') Object.assign(body, { productId: productId || undefined, batch: batch || undefined });
     try {
       // One password entry at core covers both signatures of this save (performed / corrected, voice note confirmed).
-      const proof = signs || voiceDrafts.length ? await getSignProof() : '';
+      const proof = signs || voiceDrafts.length
+        ? await getSignProof([...(signs ? [correcting ? 'corrected' : 'performed'] : []), ...(voiceDrafts.length ? ['voice_confirmed'] : [])])
+        : '';
       if (signs) body.signature = { proof };
       if (voiceDrafts.length) {
         body.voiceNotes = voiceDrafts.map(([field, d]) => ({ id: d.id, field, finalText: String(data[field] ?? ''), shownHash: d.shownHash }));

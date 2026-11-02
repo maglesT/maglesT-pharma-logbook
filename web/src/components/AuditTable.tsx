@@ -23,7 +23,7 @@ const ACTION: Record<string, string> = {
   'logout': 'Logged out',
   'login.failed': 'Failed login',
   'password.changed': 'Password changed',
-  'signature.failed': 'Signature refused (wrong password)',
+  'signature.failed': 'Signature refused',
   'user.created': 'User created',
   'user.updated': 'User changed',
   'user.locked': 'Account locked (too many wrong passwords)',
@@ -81,7 +81,7 @@ const refs = (ids: number[]) => (ids.length ? ` (from ${ids.map((i) => `#${i}`).
 function lines(a: AuditRow): string[] {
   if (signed(a.action)) {
     const n = (isObj(a.newValue) ? a.newValue : {}) as { signatureId?: number };
-    return [`${MEANING_LABEL[a.action.slice(7)] ?? 'Signature'} signature recorded with user ID and password${n.signatureId ? ` (signature no. ${n.signatureId})` : ''}`];
+    return [`${MEANING_LABEL[a.action.slice(7)] ?? 'Signature'} signature recorded after the signer entered their password${n.signatureId ? ` (signature no. ${n.signatureId})` : ''}`];
   }
   if (a.action === 'breakdown_advice.generated' && isObj(a.newValue)) {
     const n = a.newValue as { modelVersion?: string; basedOn?: number[]; advice?: Advice };

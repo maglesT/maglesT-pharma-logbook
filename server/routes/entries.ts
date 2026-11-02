@@ -113,10 +113,8 @@ class EntryError extends Error {
 // A refused request body names what is missing, so the screen can show it (S11).
 const FIELD_PROBLEM: Record<string, string> = {
   reason: 'Give the reason for the correction.',
-  'signature.username': 'Enter your user ID to sign.',
-  'signature.password': 'Enter your password to sign.',
-  username: 'Enter your user ID to sign.',
-  password: 'Enter your password to sign.',
+  'signature.proof': 'Sign again: confirm your password in the sign window.',
+  proof: 'Sign again: confirm your password in the sign window.',
 };
 function invalid(reply: FastifyReply, issues: z.ZodIssue[] = []) {
   const problems = [...new Set(issues.map((i) => FIELD_PROBLEM[i.path.join('.')] ?? `${i.path.join('.') || 'request'}: ${i.message}`))];

@@ -15,7 +15,7 @@ import { connect, type Sql } from '../server/db.js';
 import { randomUUID } from 'node:crypto';
 import type { SignOn } from '../server/signon.js';
 import { randomBytes } from 'node:crypto';
-import { makeProof } from '../server/signatures.js';
+import { MEANINGS, makeProof } from '../server/signatures.js';
 
 export const DEMO_REASON = 'Demo data';
 const DEFAULT_PASSWORD = 'Demo-Logbook-2026';
@@ -119,7 +119,7 @@ async function run(app: FastifyInstance, proofKey: Buffer, password: string): Pr
     return res.json();
   };
   // Each signature carries a proof as /cb makes it after core's re-authentication (B1-4).
-  const sig = (who: Who) => ({ proof: makeProof(proofKey, { sub: subs.get(WHO[who])!, roles: [DEMO_USERS.find(([l]) => l === WHO[who])![2]] }) });
+  const sig = (who: Who) => ({ proof: makeProof(proofKey, { sub: subs.get(WHO[who])!, roles: [DEMO_USERS.find(([l]) => l === WHO[who])![2]] }, [...MEANINGS]) });
   const signIn = async (who: Who) => {
     const go = await app.inject({ method: 'GET', url: `/login?login_hint=${WHO[who]}` });
     const pending = go.cookies.find((c) => c.name === 'signon');

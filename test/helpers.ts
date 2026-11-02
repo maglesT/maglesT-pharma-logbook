@@ -3,7 +3,7 @@ import { connect, type Sql } from '../server/db.js';
 import { migrate } from '../db/migrate.js';
 import { buildApp, type AppOptions } from '../server/app.js';
 import type { Identity, SignOn } from '../server/signon.js';
-import { makeProof } from '../server/signatures.js';
+import { MEANINGS, makeProof } from '../server/signatures.js';
 import { randomUUID } from 'node:crypto';
 import type { Role } from '../server/auth.js';
 
@@ -52,7 +52,7 @@ export function fakeSignOn(people = directory): SignOn {
   const who = (login: string): Identity => {
     const p = people.get(login);
     if (!p?.active) throw new Error('sign-on refused');
-    return { ...p, login, roles: [...p.roles], refreshToken: login, idToken: `id-${login}` };
+    return { ...p, login, roles: [...p.roles], refreshToken: login, idToken: `id-${login}`, authTime: Math.floor(Date.now() / 1000) };
   };
   return {
     // Core would ask for the password; the stand-in signs in whoever login_hint names.
@@ -66,9 +66,9 @@ export function fakeSignOn(people = directory): SignOn {
 
 // Signing proofs (B1-4): what /cb makes after core re-authenticated the person, for the stand-in's people.
 export const TEST_PROOF_KEY = Buffer.alloc(32, 7);
-export function proofFor(username: string, at?: number): string {
+export function proofFor(username: string, at?: number, meanings: string[] = [...MEANINGS]): string {
   const p = directory.get(username);
-  return makeProof(TEST_PROOF_KEY, { sub: p?.sub ?? '00000000-0000-0000-0000-000000000000', roles: p?.roles ?? [] }, at);
+  return makeProof(TEST_PROOF_KEY, { sub: p?.sub ?? '00000000-0000-0000-0000-000000000000', roles: p?.roles ?? [] }, meanings, at);
 }
 export const sig = (username: string) => ({ proof: proofFor(username) });
 

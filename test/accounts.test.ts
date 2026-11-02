@@ -102,16 +102,30 @@ describe('sign-on through core', () => {
   it('PL-05: /sign asks core for the signed-in person\'s password again and hands the sign window a signing proof', async () => {
     await seedUser(t.owner, uniq('op'), ['operator']);
     const { cookie } = await login(t.app, `op${n}`);
-    expect((await t.app.inject({ method: 'GET', url: '/sign' })).statusCode).toBe(401);
-    const start = await t.app.inject({ method: 'GET', url: '/sign', headers: { cookie } });
+    expect((await t.app.inject({ method: 'GET', url: '/sign?meanings=performed' })).statusCode).toBe(401);
+    expect((await t.app.inject({ method: 'GET', url: '/sign?meanings=anything', headers: { cookie } })).statusCode).toBe(400);
+    const start = await t.app.inject({ method: 'GET', url: '/sign?meanings=performed,voice_confirmed', headers: { cookie } });
     expect(start.statusCode).toBe(302);
     expect(new URL(String(start.headers.location), 'http://x').searchParams.get('code')).toBe(`op${n}`);   // login_hint: this person
     const pending = start.cookies.find((c) => c.name === 'signon')!;
-    expect(pending.value).toMatch(/\.sign$/);
+    expect(pending.value).toMatch(/\.sign\.\d+\.performed,voice_confirmed$/);
     const page = await t.app.inject({ method: 'GET', url: String(start.headers.location), headers: { cookie: `signon=${pending.value}` } });
     expect(page.body).toMatch(/"signProof":"[^"]+"/);
     expect(page.body).toContain('location.origin');   // posted only to the Logbook's own window
     expect(page.cookies.find((c) => c.name === 'sid')).toBeUndefined();   // a signature never opens a session
+    expect(page.headers['cache-control']).toBe('no-store');
+  });
+
+  it('PL-05: a signature is refused when core did not ask for the password again after it started (auth_time)', async () => {
+    await seedUser(t.owner, uniq('op'), ['operator']);
+    const { cookie } = await login(t.app, `op${n}`);
+    const start = await t.app.inject({ method: 'GET', url: '/sign?meanings=performed', headers: { cookie } });
+    const pending = start.cookies.find((c) => c.name === 'signon')!;
+    // As if core answered from its existing session: the password was last entered before this signature started.
+    const old = pending.value.replace(/\.sign\.\d+\./, `.sign.${Date.now() + 60_000}.`);
+    const page = await t.app.inject({ method: 'GET', url: String(start.headers.location), headers: { cookie: `signon=${old}` } });
+    expect(page.body).toContain('Your password was not asked for again');
+    expect(page.body).not.toContain('signProof');
   });
 
   it(`LB-21: session expires after ${POLICY.sessionIdleMinutes} idle minutes`, async () => {

@@ -350,9 +350,9 @@ export interface AdviceResponse { entryId: number; similar: SimilarBreakdown[]; 
 
 // B1-4 (D-29, PL-05): every signature starts with the person entering their password again at Medhanta core, in a
 // small window opened on the Sign click. Core's answer comes back as a short signing proof for this one save.
-export function getSignProof(): Promise<string> {
+export function getSignProof(meanings: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
-    const w = window.open('/sign', 'medhanta-sign', 'width=480,height=640');
+    const w = window.open(`/sign?meanings=${meanings.join(',')}`, 'medhanta-sign', 'width=480,height=640');
     if (!w) return reject(new Error('Allow pop-up windows for this site to sign.'));
     const done = (fn: () => void) => { window.removeEventListener('message', onMessage); clearInterval(timer); fn(); };
     const onMessage = (e: MessageEvent) => {

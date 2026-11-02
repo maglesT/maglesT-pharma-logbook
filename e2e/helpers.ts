@@ -28,8 +28,8 @@ export async function sign(scope: Locator, _username: string, button = 'Sign') {
 }
 
 // A signing proof through the API, as the sign window gets it: /sign, core, /cb.
-export async function proofOf(ctx: APIRequestContext): Promise<string> {
-  const html = await (await ctx.get('/sign')).text();
+export async function proofOf(ctx: APIRequestContext, meaning: string): Promise<string> {
+  const html = await (await ctx.get(`/sign?meanings=${meaning}`)).text();
   const proof = /"signProof":"([^"]+)"/.exec(html)?.[1];
   expect(proof, html).toBeTruthy();
   return proof!;
@@ -70,11 +70,11 @@ export async function newEquipment(body: object = {}): Promise<{ id: number; cod
 export async function recordAndVerify(equipmentId: number, body: object, performer = 'op1', verifier = 'sup1') {
   const by = await apiAs(performer);
   const now = new Date().toISOString();
-  const { id } = await post(by, `/api/equipment/${equipmentId}/entries`, { activityStart: now, signature: { proof: await proofOf(by) }, ...body });
+  const { id } = await post(by, `/api/equipment/${equipmentId}/entries`, { activityStart: now, signature: { proof: await proofOf(by, 'performed') }, ...body });
   await by.dispose();
   const check = await apiAs(verifier);
   const [version] = await (await check.get(`/api/entries/${id}/versions`)).json();
-  await post(check, `/api/entries/${id}/verify`, { proof: await proofOf(check), contentHash: version.contentHash });
+  await post(check, `/api/entries/${id}/verify`, { proof: await proofOf(check, 'verified'), contentHash: version.contentHash });
   await check.dispose();
   return id as number;
 }
@@ -90,7 +90,7 @@ export async function approveSettings(logbookType: string, settings: object = {}
   await admin.dispose();
   const qa = await apiAs('qa1');
   const versions = (await (await qa.get('/api/logbook-types')).json()).flatMap((t: { versions: { id: number; contentHash: string }[] }) => t.versions);
-  await post(qa, `/api/settings/${id}/approve`, { proof: await proofOf(qa), contentHash: versions.find((v: { id: number }) => v.id === id).contentHash });
+  await post(qa, `/api/settings/${id}/approve`, { proof: await proofOf(qa, 'approved'), contentHash: versions.find((v: { id: number }) => v.id === id).contentHash });
   await qa.dispose();
 }
 
