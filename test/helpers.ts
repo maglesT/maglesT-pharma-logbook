@@ -3,6 +3,8 @@ import { connect, type Sql } from '../server/db.js';
 import { migrate } from '../db/migrate.js';
 import { buildApp, type AppOptions } from '../server/app.js';
 import { hashPassword } from '../server/passwords.js';
+import type { Identity, SignOn } from '../server/signon.js';
+import { randomUUID } from 'node:crypto';
 import type { Role } from '../server/auth.js';
 
 export const TEST_DATABASE_URL =
@@ -42,9 +44,29 @@ export interface TestApp extends TestDb {
   app: FastifyInstance;
 }
 
+// Stand-in for Medhanta core (D-29): the people core knows, by login, with their Logbook roles. Tests change an
+// entry to revoke a role or deactivate someone (`active: false`); renewals then see it, as core's would.
+export const directory = new Map<string, Omit<Identity, 'login' | 'refreshToken' | 'idToken'> & { active: boolean }>();
+
+export function fakeSignOn(people = directory): SignOn {
+  const who = (login: string): Identity => {
+    const p = people.get(login);
+    if (!p?.active) throw new Error('sign-on refused');
+    return { ...p, login, roles: [...p.roles], refreshToken: login, idToken: `id-${login}` };
+  };
+  return {
+    // Core would ask for the password; the stand-in signs in whoever login_hint names.
+    authUrl: ({ state, loginHint }) => `/cb?${new URLSearchParams({ state, code: loginHint ?? '' })}`,
+    exchange: async (code) => who(code),
+    refresh: async (token) => who(token),
+    // Core's end-session page; here a page of the app itself, so browser tests stay on the test server.
+    logoutUrl: (idToken) => `/?signed-out=${idToken ?? ''}`,
+  };
+}
+
 export async function freshApp(opts: Pick<AppOptions, 'speech' | 'advisor'> = {}): Promise<TestApp> {
   const db = await freshDb();
-  const app = await buildApp({ sql: db.sql, webRoot: '/nonexistent', ...opts });
+  const app = await buildApp({ sql: db.sql, signOn: fakeSignOn(), webRoot: '/nonexistent', ...opts });
   return {
     ...db,
     app,
@@ -57,18 +79,22 @@ export async function freshApp(opts: Pick<AppOptions, 'speech' | 'advisor'> = {}
 
 export const PASSWORD = 'Correct-Horse-9';
 
-// Seeds an active user with a known, already-changed password.
+// Seeds a person as core knows them (directory) and their id-map row. The password is the local signing password,
+// used until e-signatures re-authenticate through core (B1-4).
 export async function seedUser(owner: Sql, username: string, roles: Role[], password = PASSWORD): Promise<number> {
+  const sub = randomUUID();
+  directory.set(username, { sub, name: username.toUpperCase(), roles: [...roles], active: true });
   const hash = await hashPassword(password);
   const [u] = await owner<{ id: number }[]>`
-    insert into users (username, full_name, password_hash, must_change_password)
-    values (${username}, ${username.toUpperCase()}, ${hash}, false) returning id::int`;
-  for (const r of roles) await owner`insert into user_roles (user_id, role) values (${u!.id}, ${r})`;
+    insert into users (employee_id, username, full_name, password_hash, must_change_password)
+    values (${sub}, ${username}, ${username.toUpperCase()}, ${hash}, false) returning id::int`;
   return u!.id;
 }
 
-export async function login(app: FastifyInstance, username: string, password = PASSWORD) {
-  const res = await app.inject({ method: 'POST', url: '/api/login', payload: { username, password } });
+// Signs on through the stand-in for core: /login, then /cb.
+export async function login(app: FastifyInstance, username: string) {
+  const start = await app.inject({ method: 'GET', url: `/login?login_hint=${encodeURIComponent(username)}` });
+  const res = await app.inject({ method: 'GET', url: String(start.headers.location) });
   const cookie = res.cookies.find((c) => c.name === 'sid');
   return { res, cookie: cookie ? `sid=${cookie.value}` : '' };
 }

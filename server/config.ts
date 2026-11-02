@@ -6,6 +6,11 @@ const schema = z.object({
   MIGRATION_DATABASE_URL: z.string().url().optional(),
   // Set only when DATABASE_URL logs in as the owner (local development): the app then switches role.
   DB_APP_ROLE: z.string().optional(),
+  // Sign-on through Medhanta core (D-29), written by the platform's apply.
+  OIDC_ISSUER: z.string().url(),
+  OIDC_CLIENT_ID: z.string().default('logbook'),
+  OIDC_CLIENT_SECRET: z.string().min(1),
+  OIDC_REDIRECT_URI: z.string().url(),
   // Set to false only for plain-HTTP development; production runs behind TLS.
   COOKIE_SECURE: z.enum(['true', 'false']).default('true').transform((v) => v === 'true'),
   PORT: z.coerce.number().int().positive().default(3000),

@@ -6,5 +6,5 @@ export const USERS = {
   op1: ['operator'],
   sup1: ['supervisor'],
   eng1: ['engineering'],
-  locky: ['operator'],
+  norole: [],
 } as const;

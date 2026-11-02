@@ -7,7 +7,6 @@ import path from 'node:path';
 import type { Sql } from './db.js';
 import { BACKGROUND_HEADER, SESSION_COOKIE, loadSession } from './auth.js';
 import { authRoutes } from './routes/auth.js';
-import { userRoutes } from './routes/users.js';
 import { alertRoutes } from './routes/alerts.js';
 import { masterDataRoutes } from './routes/masterdata.js';
 import { settingsRoutes } from './routes/settings.js';
@@ -20,12 +19,15 @@ import { voiceRoutes } from './routes/voice.js';
 import { adviceRoutes } from './routes/advice.js';
 import type { SpeechProvider } from './voice.js';
 import type { AdviceProvider } from './advice.js';
+import type { SignOn } from './signon.js';
 
 export const VERSION = '0.5.0';
 
 export interface AppOptions {
   // Connection running as the restricted application role.
   sql: Sql;
+  // Sign-on through Medhanta core (D-29); tests pass a stand-in.
+  signOn: SignOn;
   logger?: boolean;
   webRoot?: string;
   // Secure flag on the session cookie; off only for plain-HTTP development.
@@ -36,7 +38,7 @@ export interface AppOptions {
   advisor?: AdviceProvider | null;
 }
 
-export async function buildApp({ sql, logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ sql, signOn, logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger, trustProxy: true });
   app.decorate('cookieSecure', cookieSecure);
   await app.register(fastifyCookie);
@@ -48,7 +50,7 @@ export async function buildApp({ sql, logger = false, webRoot, cookieSecure = tr
       return reply.code(415).send({ error: 'json_required' });
     }
     const sid = req.cookies[SESSION_COOKIE];
-    if (sid) req.user = (await loadSession(sql, sid, !req.headers[BACKGROUND_HEADER])) ?? undefined;
+    if (sid) req.user = (await loadSession(sql, signOn, sid, !req.headers[BACKGROUND_HEADER])) ?? undefined;
   });
 
   app.get('/api/health', async (_req, reply) => {
@@ -60,8 +62,7 @@ export async function buildApp({ sql, logger = false, webRoot, cookieSecure = tr
     }
   });
 
-  authRoutes(app, sql);
-  userRoutes(app, sql);
+  authRoutes(app, sql, signOn);
   alertRoutes(app, sql);
   masterDataRoutes(app, sql);
   settingsRoutes(app, sql);

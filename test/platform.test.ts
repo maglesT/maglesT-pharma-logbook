@@ -101,7 +101,8 @@ describe('Logbook on a platform database (D-29)', () => {
 
   it('LB-18 on the platform the app reads its own database from LOGBOOK_DATABASE_URL, as the restricted login', () => {
     const url = 'postgres://logbook_app:pw@db:5432/logbook';
-    expect(loadConfig({ LOGBOOK_DATABASE_URL: url }).DATABASE_URL).toBe(url);
-    expect(loadConfig({ LOGBOOK_DATABASE_URL: url }).DB_APP_ROLE).toBeUndefined();
+    const env = { LOGBOOK_DATABASE_URL: url, OIDC_ISSUER: 'https://site.test/oidc', OIDC_CLIENT_SECRET: 'x', OIDC_REDIRECT_URI: 'https://logbook.site.test/cb' };
+    expect(loadConfig(env).DATABASE_URL).toBe(url);
+    expect(loadConfig(env).DB_APP_ROLE).toBeUndefined();
   });
 });

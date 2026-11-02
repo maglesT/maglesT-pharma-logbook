@@ -11,9 +11,10 @@
 import { pathToFileURL } from 'node:url';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../server/app.js';
-import { audit } from '../server/audit.js';
 import { connect, type Sql } from '../server/db.js';
-import { hashPassword, temporaryPassword } from '../server/passwords.js';
+import { randomUUID } from 'node:crypto';
+import { hashPassword } from '../server/passwords.js';
+import type { SignOn } from '../server/signon.js';
 
 export const DEMO_REASON = 'Demo data';
 const DEFAULT_PASSWORD = 'Demo-Logbook-2026';
@@ -81,12 +82,30 @@ export async function seedDemo(sql: Sql, opts: SeedOptions = {}): Promise<SeedRe
   if (problems.length) throw new SeedError(problems.join('\n'));
   const password = opts.password ?? DEFAULT_PASSWORD;
 
-  const app = await buildApp({ sql, webRoot: '/nonexistent' });
+  const app = await buildApp({ sql, signOn: demoSignOn(), webRoot: '/nonexistent' });
   try {
     return await run(app, sql, password);
   } finally {
     await app.close();
   }
+}
+
+// The demo people as Medhanta core would sign them on (D-29), in this process only. On a platform installation the
+// same logins and roles must also exist in core for anyone to sign in to the demo.
+function demoSignOn(): SignOn {
+  const subs = new Map<string, string>();
+  const who = async (login: string) => {
+    const u = DEMO_USERS.find(([l]) => l === login);
+    if (!u) throw new SeedError(`unknown demo login ${login}`);
+    if (!subs.has(login)) subs.set(login, randomUUID());
+    return { sub: subs.get(login)!, login, name: u[1], roles: [u[2]], refreshToken: login };
+  };
+  return {
+    authUrl: ({ state, loginHint }) => `/cb?${new URLSearchParams({ state, code: loginHint ?? '' })}`,
+    exchange: (code) => who(code),
+    refresh: (token) => who(token),
+    logoutUrl: () => null,
+  };
 }
 
 async function run(app: FastifyInstance, sql: Sql, password: string): Promise<SeedResult> {
@@ -98,31 +117,19 @@ async function run(app: FastifyInstance, sql: Sql, password: string): Promise<Se
     return res.json();
   };
   const sig = (who: Who) => ({ username: WHO[who], password });
-  // First login with a temporary password, then the user sets the demo password (LB-20).
-  const firstLogin = async (who: Who, temp: string) => {
-    const res = await app.inject({ method: 'POST', url: '/api/login', payload: { username: WHO[who], password: temp } });
+  const signIn = async (who: Who) => {
+    const go = await app.inject({ method: 'GET', url: `/login?login_hint=${WHO[who]}` });
+    const res = await app.inject({ method: 'GET', url: String(go.headers.location) });
     const sid = res.cookies.find((c) => c.name === 'sid');
-    if (!sid) throw new SeedError(`login of ${WHO[who]} failed`);
+    if (!sid) throw new SeedError(`sign-on of ${WHO[who]} failed`);
     cookies[who] = `sid=${sid.value}`;
-    await api(who, 'POST', '/api/me/password', { current: temp, new: password });
   };
 
-  // The first Admin, as `npm run create-admin` makes it; every other account through the users API.
-  const temp = temporaryPassword();
-  const hash = await hashPassword(temp);
-  await sql.begin(async (tx) => {
-    const [u] = await tx<{ id: number }[]>`
-      insert into users (username, full_name, password_hash, temp_password_expires_at)
-      values (${WHO.admin}, ${DEMO_USERS[0][1]}, ${hash}, now() + interval '24 hours') returning id::int`;
-    await tx`insert into user_roles (user_id, role) values (${u!.id}, 'admin')`;
-    await audit(tx, { actorId: null, action: 'user.created', objectType: 'user', objectId: u!.id,
-      new: { username: WHO.admin, fullName: DEMO_USERS[0][1], roles: ['admin'] }, reason: 'demo data (demo seed script)' });
-  });
-  await firstLogin('admin', temp);
-  for (const [username, fullName, role] of DEMO_USERS.slice(1)) {
-    const created = await api('admin', 'POST', '/api/users', { username, fullName, roles: [role] });
-    await firstLogin((Object.entries(WHO).find(([, u]) => u === username)![0]) as Who, created.temporaryPassword);
-  }
+  // People are core's (D-29): signing on creates each one's Logbook id; the demo password is their local signing
+  // password until e-signatures re-authenticate through core.
+  for (const who of Object.keys(WHO) as Who[]) await signIn(who);
+  const hash = await hashPassword(password);
+  await sql`update users set password_hash = ${hash} where username = any(${Object.values(WHO)})`;
 
   // Master data.
   if (!(await api('admin', 'GET', '/api/site'))) await api('admin', 'PUT', '/api/site', { name: 'Demo Tablet Plant', code: 'DEMO', reason: DEMO_REASON });
