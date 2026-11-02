@@ -82,6 +82,8 @@ describe('master data', () => {
         expect(res.statusCode).toBe(503);
         expect(res.json()).toEqual({ error: 'connection_off', message: 'Connection to master data is off. Ask your administrator.' });
       }
+      // The audit trail stays readable: it needs master data only for names.
+      expect((await call(t.app, admin, 'GET', '/api/audit')).statusCode).toBe(200);
     } finally {
       t.master.cut = false;
     }

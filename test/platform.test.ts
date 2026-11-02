@@ -156,5 +156,9 @@ describe('master data through the platform views (D-29)', () => {
     } finally {
       await mdAdmin.unsafe('grant select on all tables in schema report to logbook_app');
     }
+    // master_data unreachable (server down, network): the same message, not an error page.
+    const nowhere = connect('postgres://logbook_app:x@127.0.0.1:1/master_data');
+    await expect(sqlMaster(nowhere).items()).rejects.toBeInstanceOf(ConnectionOff);
+    await nowhere.end();
   });
 });

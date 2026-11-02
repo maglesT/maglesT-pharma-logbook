@@ -33,8 +33,13 @@ export class ConnectionOff extends Error {
   statusCode = 503;
   constructor() { super(CONNECTION_OFF); }
 }
-// A cut link: the grant is gone (42501) or the login is off (28000).
-const isCut = (e: unknown) => ['42501', '28000'].includes((e as { code?: string }).code ?? '');
+// A cut link: the grant is gone (42501), the login is off (28000), or master_data cannot be reached (connection
+// errors: class 08, admin shutdown 57P01, or the client's own connect errors).
+const isCut = (e: unknown) => {
+  const code = (e as { code?: string }).code ?? '';
+  return ['42501', '28000', '57P01', 'ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'CONNECT_TIMEOUT', 'CONNECTION_CLOSED',
+    'CONNECTION_ENDED', 'CONNECTION_DESTROYED'].includes(code) || code.startsWith('08');
+};
 
 /** Reads master_data's views; a cut link throws ConnectionOff and nothing is served from a copy (platform D-02). */
 export function sqlMaster(md: Sql): Master {
@@ -51,9 +56,9 @@ export function sqlMaster(md: Sql): Master {
       ...(await md`select id, code, name, version, active, room_code, make, model, serial from report.equipment_v1`).map(row('equipment')),
       ...(await md`select id, code, name, version, active, room_code, make, model, serial, needs_calibration from report.instrument_v1`).map(row('instrument')),
       ...(await md`select id, code, name, version, active from report.room_v1`).map(row('area')),
-    ]),
+    ].sort((a, b) => a.itemId.localeCompare(b.itemId))),   // one insert order everywhere (no deadlock on first sight)
     products: () => read(async () => (await md<MasterProduct[]>`
-      select id as "itemId", code, name, version, active from report.product_v1`).map((p) => ({ ...p }))),
+      select id as "itemId", code, name, version, active from report.product_v1 order by id`).map((p) => ({ ...p }))),
   };
 }
 
@@ -68,6 +73,7 @@ export interface LogbookItem extends MasterItem {
 /**
  * Every master equipment, instrument and room with its local id and Logbook settings. A master item seen for the
  * first time gets its local row here (the id map); a code still held by a local item not yet moved (B1-5) is skipped.
+ * Items held locally before the move get their item_id from the data move (B1-5); until then they are not shown.
  * The row's old name and location columns get the values at first sight: only report.equipment_v1 shows them,
  * documented as "as at the move or first sight" (D-29 4).
  */

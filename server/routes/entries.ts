@@ -259,6 +259,7 @@ async function insertVersion(tx: Tx, master: Master, v: Omit<EntryRow, 'id' | 'e
   const item = await logbookItem(tx, master, v.equipment_id);
   if (!item) throw new EntryError(409, 'equipment_unknown', ['No such equipment in master data.']);
   const product = v.product_id ? (await logbookProducts(tx, master)).find((p) => p.id === v.product_id) : undefined;
+  if (v.product_id && !product) throw new EntryError(409, 'check_failed', ['Unknown product in master data.']);
   await tx`insert into entry_master_values (entry_version_id, item_id, item_code, item_name, item_version,
       product_item_id, product_code, product_name, product_version)
     values (${row!.id}, ${item.itemId}, ${item.code}, ${item.name}, ${item.version},

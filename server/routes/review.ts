@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
 import { parseId, requireRole } from '../auth.js';
-import { logbookItems, logbookProducts, type Master } from '../master.js';
+import { ConnectionOff, logbookItems, logbookProducts, type Master } from '../master.js';
 import { SignError, authenticateSigner, canonical, contentHash, sign, signBody } from '../signatures.js';
 import { ENTRY_COLS, hashOf, present, type EntryRow } from './entries.js';
 import { PLANT_TZ } from '../status.js';
@@ -78,7 +78,14 @@ export async function batchVersions(q: Sql | Tx, batch: string): Promise<EntryRo
 // Names in the subjects are master data, read live by code (D-29); the code never changes.
 async function named(q: Sql | Tx, master: Master, rows: AuditRow[]): Promise<AuditRow[]> {
   if (!rows.some((r) => r.subject?.code)) return rows;
-  const [items, products] = await Promise.all([logbookItems(q, master), logbookProducts(q, master)]);
+  let items, products;
+  try {
+    [items, products] = await Promise.all([logbookItems(q, master), logbookProducts(q, master)]);
+  } catch (e) {
+    // The audit trail stays readable when the link is cut; names then show as last stored, codes are exact.
+    if (e instanceof ConnectionOff) return rows;
+    throw e;
+  }
   const items_ = new Map(items.map((i) => [i.code, i.name]));
   const products_ = new Map(products.map((p) => [p.code, p.name]));
   return rows.map((r) => r.subject?.code
