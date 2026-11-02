@@ -6,7 +6,8 @@
 do $$
 begin
   if exists (select from pg_default_acl d join pg_namespace n on n.oid = d.defaclnamespace
-             where n.nspname = 'public' and d.defaclrole = current_user::regrole) then
+             where n.nspname = 'public' and d.defaclrole = current_user::regrole)
+     and exists (select from pg_roles where rolname = 'logbook_app') then
     execute format('alter default privileges for role %I in schema public revoke all on tables from logbook_app', current_user);
     execute format('alter default privileges for role %I in schema public revoke all on sequences from logbook_app', current_user);
   end if;

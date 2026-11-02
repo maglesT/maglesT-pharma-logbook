@@ -17,10 +17,9 @@ declare
   rep text := case when current_schema() = 'public' then 'report' else current_schema() || '_report' end;
 begin
   -- Production: the site gives this role LOGIN and a password at install (README, "Database roles").
-  -- On the Medhanta platform (D-29) the migration login may not create roles, and other products read the
-  -- views through platform links instead, so the role is then left out.
-  if not exists (select from pg_roles where rolname = 'logbook_report')
-     and (select rolsuper or rolcreaterole from pg_roles where rolname = current_user) then
+  -- On the Medhanta platform (D-29; its init creates the schema `platform`) other products read the views
+  -- through platform links, so the role is left out there.
+  if not exists (select from pg_roles where rolname = 'logbook_report') and to_regnamespace('platform') is null then
     create role logbook_report nologin;
   end if;
   execute format('create schema if not exists %I', rep);
