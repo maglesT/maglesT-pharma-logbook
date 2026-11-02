@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
+import { logbookItem } from '../master.js';
 import { parseId, requireRole } from '../auth.js';
 import { mayRecord } from '../entries.js';
 import { VOICE_LANGUAGES, typeByKey, type LogbookSettings } from '../logbook-types.js';
@@ -67,8 +68,9 @@ export function voiceRoutes(app: FastifyInstance, sql: Sql, speech: SpeechProvid
     const audio = Buffer.from(b.audioBase64, 'base64');
     if (audio.length > MAX_AUDIO_BYTES) return refuse(413, 'audio_too_large', 'The recording is too large.');
     if (b.durationMs > MAX_CLIP_MS + 1_000) return refuse(400, 'clip_too_long', `A voice note can be at most ${MAX_CLIP_MS / 1000} seconds.`);
-    const [eq] = await sql<{ kind: 'equipment' | 'instrument' | 'area'; sterile: boolean; code: string; name: string }[]>`select kind, sterile, code, name from equipment where id = ${b.equipmentId} and active`;
-    if (!eq) return reply.code(404).send({ error: 'not_found' });
+    // The item as master data has it now, live (D-29); only an active one takes entries.
+    const eq = await logbookItem(sql, app.master, b.equipmentId);
+    if (!eq?.active) return reply.code(404).send({ error: 'not_found' });
     // Only for an entry that could be saved on this item (review S10).
     const lt = typeByKey(b.logbookType);
     if (!lt || !lt.appliesTo.includes(eq.kind) || (lt.sterile && !eq.sterile)) return refuse(400, 'type_not_for_equipment', 'This logbook type does not apply to this item.');

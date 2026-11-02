@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
+import { logbookItems } from '../master.js';
 import { parseId, requireRole } from '../auth.js';
 import { settingsInForce } from './settings.js';
 import type { LogbookSettings } from '../logbook-types.js';
@@ -23,15 +24,19 @@ export function adviceRoutes(app: FastifyInstance, sql: Sql, advisor: AdviceProv
     const id = parseId(req.params.id);
     if (id === null) return reply.code(400).send({ error: 'invalid_request' });
     const user = req.user!;
-    const [row] = await sql<{ id: number; entry_id: number; equipment_id: number; logbook_type: string; data: Record<string, unknown>; code: string; name: string; location: string }[]>`
-      select e.id::int, e.entry_id::int, e.equipment_id::int, e.logbook_type, e.data, q.code, q.name, q.location
+    const [found] = await sql<{ id: number; entry_id: number; equipment_id: number; logbook_type: string; data: Record<string, unknown>; code: string }[]>`
+      select e.id::int, e.entry_id::int, e.equipment_id::int, e.logbook_type, e.data, q.code
       from entries e join equipment q on q.id = e.equipment_id
       where e.entry_id = (select entry_id from entries where id = ${id}) order by e.version desc limit 1`;
-    if (!row) return reply.code(404).send({ error: 'not_found' });
+    if (!found) return reply.code(404).send({ error: 'not_found' });
+    // Name and room are master data, read live (D-29).
+    const items = await logbookItems(sql, app.master);
+    const item = items.find((i) => i.id === found.equipment_id);
+    const row = { ...found, name: item?.name ?? found.code, location: item?.room ?? '' };
     if (row.logbook_type !== 'maintenance' || row.data.kind !== 'breakdown') {
       return reply.code(409).send({ error: 'not_a_breakdown', problems: ['Suggestions are for breakdown entries.'] });
     }
-    const similar = await similarBreakdowns(sql, row.entry_id, row.equipment_id, (row.data.failureCategory as string | undefined) ?? null);
+    const similar = await similarBreakdowns(sql, items, row.entry_id, row.equipment_id, (row.data.failureCategory as string | undefined) ?? null);
     const listed = similar.map((s) => ({ ...s, relationLabel: RELATION_LABEL[s.relation] }));
 
     const s = await settingsInForce(sql, 'breakdown_advice');

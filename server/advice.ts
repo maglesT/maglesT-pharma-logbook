@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Sql } from './db.js';
+import type { LogbookItem } from './master.js';
 import { breakdowns, type Breakdown } from './breakdowns.js';
 import { downtimeText } from './routes/history.js';
 
@@ -53,13 +54,12 @@ async function latestDetails(sql: Sql) {
 }
 
 // Past breakdowns related to this one, closest relation first, newest first within a relation.
-export async function similarBreakdowns(sql: Sql, entryId: number, equipmentId: number, failureCategory: string | null, now = new Date()): Promise<Similar[]> {
-  const [eq] = await sql<{ name: string }[]>`select name from equipment where id = ${equipmentId}`;
+export async function similarBreakdowns(sql: Sql, items: LogbookItem[], entryId: number, equipmentId: number, failureCategory: string | null, now = new Date()): Promise<Similar[]> {
+  const eq = items.find((i) => i.id === equipmentId);
   if (!eq) return [];
-  const [items, details, recent] = await Promise.all([
-    sql<{ id: number; name: string }[]>`select id::int, name from equipment`,
+  const [details, recent] = await Promise.all([
     latestDetails(sql),
-    breakdowns(sql, new Date(now.getTime() - YEARS_BACK * 365 * 864e5), now, {}, now),
+    breakdowns(sql, items, new Date(now.getTime() - YEARS_BACK * 365 * 864e5), now, {}, now),
   ]);
   const names = new Map(items.map((i) => [i.id, i.name]));
   const ownModel = makeModel(details.get(equipmentId));

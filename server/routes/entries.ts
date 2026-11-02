@@ -5,6 +5,7 @@ import { audit } from '../audit.js';
 import { parseId, requireRole, type SessionUser } from '../auth.js';
 import { LOGBOOK_TYPES, typeByKey, type LogbookSettings } from '../logbook-types.js';
 import { DATA_SCHEMAS, REPORTED_FIELDS, VERIFIERS, checkData, mayCorrect, mayRecord, performerSigns, verificationNeeded, type EntryContext, type EquipmentInfo } from '../entries.js';
+import { logbookItem, logbookProducts, type Master } from '../master.js';
 import { SignError, authenticateSigner, contentHash, proofOnly, sign, signBody, type AuthenticatedSigner } from '../signatures.js';
 import { settingsInForce } from './settings.js';
 import { allStatuses, statusOf } from '../status.js';
@@ -221,9 +222,16 @@ async function latestVersion(tx: Tx, versionId: number): Promise<EntryRow> {
   return row;
 }
 
-async function loadEquipment(tx: Tx, id: number): Promise<EquipmentInfo & { active: boolean }> {
-  const [eq] = await tx<(EquipmentInfo & { active: boolean })[]>`
-    select kind, sterile, classified, active from equipment where id = ${id} for update`;
+// PL-08 (A11 5): a product must be in master data and active when an entry refers to it.
+async function activeProduct(tx: Tx, master: Master, id: number) {
+  const p = (await logbookProducts(tx, master)).find((x) => x.id === id);
+  if (!p?.active) throw new EntryError(400, 'check_failed', ['Unknown or inactive product.']);
+}
+
+// The item's kind never changes; sterile and classified are the Logbook's own settings (D-29).
+async function loadEquipment(tx: Tx, id: number): Promise<EquipmentInfo> {
+  const [eq] = await tx<EquipmentInfo[]>`
+    select kind, sterile, classified from equipment where id = ${id} for update`;
   if (!eq) throw new EntryError(404, 'not_found');
   return eq;
 }
@@ -238,7 +246,7 @@ function validate(type: string, raw: Record<string, unknown>, settings: LogbookS
   return JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
 }
 
-async function insertVersion(tx: Tx, v: Omit<EntryRow, 'id' | 'entered_at' | 'entry_id'> & { entry_id?: number }): Promise<EntryRow> {
+async function insertVersion(tx: Tx, master: Master, v: Omit<EntryRow, 'id' | 'entered_at' | 'entry_id'> & { entry_id?: number }): Promise<EntryRow> {
   const [row] = await tx.unsafe<EntryRow[]>(
     `insert into entries (equipment_id, logbook_type, settings_id, entry_id, version, supersedes, change, activity_start,
        activity_end, product_id, batch, data, late, late_reason, correction_reason, entered_by)
@@ -247,6 +255,14 @@ async function insertVersion(tx: Tx, v: Omit<EntryRow, 'id' | 'entered_at' | 'en
     [v.equipment_id, v.logbook_type, v.settings_id, v.entry_id ?? null, v.version, v.supersedes, v.change, v.activity_start,
       v.activity_end, v.product_id, v.batch, tx.json(v.data as never), v.late, v.late_reason, v.correction_reason, v.entered_by] as never[],
   );
+  // PL-07: the master values this version is made with, kept as they are now.
+  const item = await logbookItem(tx, master, v.equipment_id);
+  if (!item) throw new EntryError(409, 'equipment_unknown', ['No such equipment in master data.']);
+  const product = v.product_id ? (await logbookProducts(tx, master)).find((p) => p.id === v.product_id) : undefined;
+  await tx`insert into entry_master_values (entry_version_id, item_id, item_code, item_name, item_version,
+      product_item_id, product_code, product_name, product_version)
+    values (${row!.id}, ${item.itemId}, ${item.code}, ${item.name}, ${item.version},
+      ${product?.itemId ?? null}, ${product?.code ?? null}, ${product?.name ?? null}, ${product?.version ?? null})`;
   return row!;
 }
 
@@ -280,7 +296,10 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
 
       const created = await sql.begin(async (tx) => {
         const eq = await loadEquipment(tx, equipmentId);
-        if (!eq.active) throw new EntryError(409, 'equipment_retired');
+        // PL-08 (A11 5): the item must be in master data and active when the entry is written.
+        const item = await logbookItem(tx, app.master, equipmentId);
+        if (!item) throw new EntryError(409, 'equipment_unknown', ['No such active equipment in master data.']);
+        if (!item.active) throw new EntryError(409, 'equipment_retired');
         if (!type.appliesTo.includes(eq.kind)) throw new EntryError(400, 'type_not_for_equipment');
         if (type.sterile && !eq.sterile) throw new EntryError(400, 'type_not_for_equipment');
         const { id: settingsId, settings } = await settingsFor(tx, b.logbookType);
@@ -302,15 +321,12 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         const openBreakdown = b.logbookType === 'maintenance' && b.data.kind === 'breakdown' && !b.activityEnd;
         const end = isUse || openBreakdown ? null : (b.activityEnd ?? b.activityStart);
         if (end && end < b.activityStart) throw new EntryError(400, 'check_failed', ['The end cannot be before the start.']);
-        if (b.productId) {
-          const [p] = await tx`select 1 from products where id = ${b.productId} and active`;
-          if (!p) throw new EntryError(400, 'check_failed', ['Unknown or inactive product.']);
-        }
+        if (b.productId) await activeProduct(tx, app.master, b.productId);
         const late = timing(await dbNow(tx), [b.activityStart, end], b.lateReason);
         const data = validate(b.logbookType, b.data, settings, eq, b.activityStart, { end, legacy: false });
         await checkCycleId(tx, b.logbookType, equipmentId, data, null);
         await guardVoice(tx, user, equipmentId, b.logbookType, data, b.voiceNotes);
-        const row = await insertVersion(tx, {
+        const row = await insertVersion(tx, app.master, {
           equipment_id: equipmentId, logbook_type: b.logbookType, settings_id: settingsId, version: 1, supersedes: null,
           change: 'created', activity_start: b.activityStart, activity_end: end, product_id: b.productId ?? null,
           batch: b.batch ?? null, data, late, late_reason: late ? b.lateReason!.trim() : null, correction_reason: null, entered_by: user.id,
@@ -363,7 +379,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           if (changed.length) throw new EntryError(400, 'check_failed', [`Completing the repair cannot change what was reported (${changed.join(', ')}): use Correct.`]);
           await guardVoice(tx, user, prev.equipment_id, prev.logbook_type, data, b.voiceNotes);
         }
-        const next = await insertVersion(tx, {
+        const next = await insertVersion(tx, app.master, {
           ...prev, entry_id: prev.entry_id, version: prev.version + 1, supersedes: prev.id, change: 'completed',
           activity_end: b.activityEnd, data, late: prev.late || late,
           late_reason: late ? b.lateReason!.trim() : prev.late_reason, correction_reason: null, entered_by: user.id,
@@ -413,6 +429,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (prev.logbook_type === 'equipment_use' && (b.productId === null || b.batch === null)) {
           throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
         }
+        if (b.productId && b.productId !== prev.product_id) await activeProduct(tx, app.master, b.productId);
         const now = await dbNow(tx);
         timing(now, [b.activityStart, end], 'n/a');
         // LB-04: lateness is judged against when the entry was first made (review S3-1).
@@ -430,7 +447,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         }
         await checkCycleId(tx, prev.logbook_type, prev.equipment_id, data, prev.entry_id);
         await guardVoice(tx, user, prev.equipment_id, prev.logbook_type, data, b.voiceNotes);
-        const next = await insertVersion(tx, {
+        const next = await insertVersion(tx, app.master, {
           ...prev, entry_id: prev.entry_id, version: prev.version + 1, supersedes: prev.id, change: 'corrected',
           activity_start: b.activityStart, activity_end: end, late, late_reason: lateReason,
           product_id: b.productId === undefined ? prev.product_id : b.productId,

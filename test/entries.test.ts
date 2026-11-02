@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { call, freshApp, login, proofFor, seedUser, type TestApp } from './helpers.js';
+import { call, freshApp, login, proofFor, seedUser, type TestApp, addItem, addProduct, type ItemBody, changeItem } from './helpers.js';
 
 let t: TestApp;
 const cookies: Record<string, string> = {};
@@ -34,7 +34,7 @@ const verify = async (who: string, versionId: number) => {
 // A fresh item that has been cleaned and verified, so a use may start on it (S4 blocking).
 let readyCount = 0;
 async function ready(kind: 'equipment' | 'area' = 'equipment'): Promise<number> {
-  const id = (await call(t.app, cookies.admin!, 'POST', '/api/equipment', { code: `RDY-${++readyCount}`, name: 'Ready item', kind })).json().id as number;
+  const id = (await addItem(t, { code: `RDY-${++readyCount}`, name: 'Ready item', kind })) as number;
   const cleaning = kind === 'area'
     ? { logbookType: 'area_cleaning', activityStart: now(), data: { cleaningType: 'daily' }, signature: sig('op2') }
     : { logbookType: 'equipment_cleaning', activityStart: now(), data: { cleaningType: 'major', checklist: { 'Previous product removed': true } }, signature: sig('op2') };
@@ -50,12 +50,12 @@ beforeAll(async () => {
     cookies[u === 'qa1' ? 'qa' : u] = (await login(t.app, u)).cookie;
   }
   cookies.qa1 = cookies.qa!;
-  const eq = async (body: object) => (await call(t.app, cookies.admin!, 'POST', '/api/equipment', body)).json().id as number;
+  const eq = async (body: ItemBody) => (await addItem(t, body)) as number;
   mixer = await eq({ code: 'RMG-01', name: 'Mixer', kind: 'equipment', cleanHoldHours: 72 });
   room = await eq({ code: 'GR-01', name: 'Granulation room', kind: 'area' });
   cleanRoom = await eq({ code: 'FIL-B', name: 'Filling room B', kind: 'area', sterile: true, classified: true });
   balance = await eq({ code: 'BAL-01', name: 'Balance', kind: 'instrument' });
-  product = (await call(t.app, cookies.admin!, 'POST', '/api/products', { code: 'PCM500', name: 'Paracetamol 500 mg' })).json().id;
+  product = await addProduct(t, 'PCM500', 'Paracetamol 500 mg');
   await approveSettings('equipment_use');
   await approveSettings('equipment_cleaning', { checklist: ['Previous product removed'] });
   await approveSettings('maintenance');
@@ -91,6 +91,37 @@ describe('equipment use (LB-01, LB-10)', () => {
 
   it('LB-03: a use entry needs no signature; Admin cannot record entries', async () => {
     expect((await create('admin', mixer, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'X', data: {} })).statusCode).toBe(403);
+  });
+});
+
+describe('master data at writing (D-29)', () => {
+  it('PL-08 at writing, the Logbook refuses an inactive or unknown item (recipe step 4, A11 5)', async () => {
+    const id = await ready();
+    changeItem(t, `RDY-${readyCount}`, { active: false });
+    const res = await create('op1', id, { logbookType: 'general_log', activityStart: now(), data: { notes: 'x', checklist: {} } });
+    expect(res.json().error).toBe('equipment_retired');
+    t.master.items_.delete(`RDY-${readyCount}`);
+    const gone = await create('op1', id, { logbookType: 'general_log', activityStart: now(), data: { notes: 'x', checklist: {} } });
+    expect(gone.json()).toMatchObject({ error: 'equipment_unknown', problems: ['No such active equipment in master data.'] });
+  });
+
+  it('PL-08 at writing, the Logbook refuses an inactive product', async () => {
+    const retired = await addProduct(t, 'OLD-1', 'Retired product', false);
+    const res = await create('op1', await ready(), { logbookType: 'equipment_use', activityStart: now(), productId: retired, batch: 'B1', data: { stage: 'x' } });
+    expect(res.json()).toMatchObject({ error: 'check_failed', problems: ['Unknown or inactive product.'] });
+  });
+
+  it('PL-07 an entry keeps the master values it was made with; a later rename in core does not change them', async () => {
+    const id = await ready();
+    const code = `RDY-${readyCount}`;
+    const res = await create('op1', id, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B7', data: { stage: 'Mixing' } });
+    expect(res.statusCode).toBe(201);
+    changeItem(t, code, { name: 'Renamed mixer' });
+    t.master.products_.set('PCM500', { ...t.master.products_.get('PCM500')!, name: 'Paracetamol 500 mg tablets', version: 2 });
+    const [kept] = await t.owner`select item_code, item_name, item_version, product_code, product_name, product_version
+      from entry_master_values where entry_version_id = ${res.json().id}`;
+    expect(kept).toEqual({ item_code: code, item_name: 'Ready item', item_version: 1, product_code: 'PCM500', product_name: 'Paracetamol 500 mg', product_version: 1 });
+    await expect(t.sql`update entry_master_values set item_name = 'x'`).rejects.toThrow(/permission denied/);
   });
 });
 
@@ -173,7 +204,7 @@ describe('signatures and verification (LB-03, LB-11)', () => {
   });
 
   it('LB-11: a breakdown of sterile equipment needs an impact assessment (Annex 1 5.7)', async () => {
-    const steriliser = (await call(t.app, cookies.admin!, 'POST', '/api/equipment', { code: 'AC-01', name: 'Autoclave', kind: 'equipment', sterile: true })).json().id;
+    const steriliser = (await addItem(t, { code: 'AC-01', name: 'Autoclave', kind: 'equipment', sterile: true }));
     const res = await create('eng1', steriliser, { logbookType: 'maintenance', activityStart: now(), data: { kind: 'breakdown', description: 'Door seal leak', occurredAt: minutesAgo(5), failureCategory: 'mechanical', partsNone: true, doneBy: 'in_house' }, signature: sig('eng1') });
     expect(res.json().problems).toEqual(['A breakdown of sterile equipment needs an impact assessment (Annex 1 5.7).']);
   });

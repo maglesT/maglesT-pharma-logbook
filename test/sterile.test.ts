@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
+import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem , addProduct } from './helpers.js';
 
 let t: TestApp;
 const c: Record<string, string> = {};
@@ -41,7 +41,7 @@ beforeAll(async () => {
   t = await freshApp();
   for (const [u, roles] of [['admin', ['admin']], ['qa1', ['qa']], ['op1', ['operator']], ['sup1', ['supervisor']]] as const) await seedUser(t.owner, u, [...roles]);
   for (const [k, u] of [['admin', 'admin'], ['qa', 'qa1'], ['op1', 'op1'], ['sup1', 'sup1']] as const) c[k] = (await login(t.app, u)).cookie;
-  const eq = async (body: object) => (await call(t.app, c.admin!, 'POST', '/api/equipment', { code: `S-${++n}`, name: 'Item', ...body })).json().id as number;
+  const eq = async (body: object) => (await addItem(t, { code: `S-${++n}`, name: 'Item', ...body })) as number;
   autoclave = await eq({ kind: 'equipment', sterile: true });
   isolator = await eq({ kind: 'equipment', sterile: true });
   room = await eq({ kind: 'area', sterile: true, classified: true });
@@ -85,7 +85,7 @@ describe('sterilisation cycles (LB-12)', () => {
 
 describe('steriliser tests (LB-12, A1 8.60–8.61)', () => {
   it('LB-12: a failed leak test takes the steriliser out of service and stops new cycles until a pass', async () => {
-    const ac = (await call(t.app, c.admin!, 'POST', '/api/equipment', { code: `AC-${++n}`, name: 'Autoclave 2', kind: 'equipment', sterile: true })).json().id;
+    const ac = (await addItem(t, { code: `AC-${++n}`, name: 'Autoclave 2', kind: 'equipment', sterile: true }));
     expect((await test(ac, 'leak', 'fail')).statusCode).toBe(201);
     const s = await status(ac);
     expect(s.state).toBe('out_of_service');
@@ -102,7 +102,7 @@ describe('steriliser tests (LB-12, A1 8.60–8.61)', () => {
   });
 
   it('LB-12: each test type is judged on its own latest result', async () => {
-    const ac = (await call(t.app, c.admin!, 'POST', '/api/equipment', { code: `AC-${++n}`, name: 'Autoclave 3', kind: 'equipment', sterile: true })).json().id;
+    const ac = (await addItem(t, { code: `AC-${++n}`, name: 'Autoclave 3', kind: 'equipment', sterile: true }));
     await test(ac, 'air_removal', 'fail');
     await passedTest(ac, 'leak');
     const s = await status(ac);
@@ -149,7 +149,7 @@ describe('pressure readings (LB-16)', () => {
 
 describe('review fixes (S6)', () => {
   it('LB-12: a steam cycle is refused on a steriliser without a verified passed test (D-22)', async () => {
-    const ac = (await call(t.app, c.admin!, 'POST', '/api/equipment', { code: `AC-${++n}`, name: 'New autoclave', kind: 'equipment', sterile: true })).json().id;
+    const ac = (await addItem(t, { code: `AC-${++n}`, name: 'New autoclave', kind: 'equipment', sterile: true }));
     expect((await cycle(ac, 'C-1')).json().problems[0]).toMatch(/No verified passed steriliser test/);
     // Dry heat is not subject to the steam tests.
     expect((await cycle(ac, 'D-1', 'pass', { cycleType: 'dry_heat' })).statusCode).toBe(201);
@@ -157,9 +157,9 @@ describe('review fixes (S6)', () => {
 
   it('LB-12: a cycle cannot be recorded while the steriliser is in use', async () => {
     await approve('equipment_use');
-    const ac = (await call(t.app, c.admin!, 'POST', '/api/equipment', { code: `AC-${++n}`, name: 'Busy autoclave', kind: 'equipment', sterile: true })).json().id;
+    const ac = (await addItem(t, { code: `AC-${++n}`, name: 'Busy autoclave', kind: 'equipment', sterile: true }));
     await passedTest(ac);
-    const product = (await call(t.app, c.admin!, 'POST', '/api/products', { code: `PR-${n}`, name: 'Vials' })).json().id;
+    const product = await addProduct(t, `PR-${n}`, 'Vials');
     expect((await entry('op1', ac, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'V1', data: {} })).statusCode).toBe(201);
     expect((await cycle(ac, 'C-9')).json().problems).toContain('In use: end the current use first.');
   });

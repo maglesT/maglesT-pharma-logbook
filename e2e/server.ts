@@ -5,6 +5,7 @@ import { migrate } from '../db/migrate.js';
 import { buildApp } from '../server/app.js';
 import globalSetup from '../test/global-setup.js';
 import { TEST_DATABASE_URL, TEST_PROOF_KEY, fakeSignOn, login, proofFor, seedUser, call } from '../test/helpers.js';
+import type { Master } from '../server/master.js';
 import { E2E_PORT, E2E_SCHEMA, USERS } from './config.js';
 import type { SpeechProvider } from '../server/voice.js';
 
@@ -29,11 +30,24 @@ for (const [username, roles] of Object.entries(USERS)) await seedUser(schemaOwne
 await schemaOwner.end();
 
 const sql = connect(TEST_DATABASE_URL, { role: 'logbook_app', searchPath: E2E_SCHEMA });
-const app = await buildApp({ sql, signOn: fakeSignOn(), proofKey: TEST_PROOF_KEY, webRoot: new URL('../dist/web', import.meta.url).pathname, cookieSecure: false, speech });
+// Master data is core's (D-29). The browser tests' stand-in reads items and products from tables in the e2e schema,
+// which the specs fill (e2e/helpers.ts newEquipment).
+const setup = connect(TEST_DATABASE_URL, { searchPath: E2E_SCHEMA });
+await setup`create table e2e_master_items (item_id uuid primary key default gen_random_uuid(), code text, name text, kind text,
+  room text, active boolean default true, version int default 1, is_product boolean default false)`;
+await setup`insert into e2e_master_items (code, name, is_product) values ('P1', 'Paracetamol 500 mg', true)`;
+const master: Master = {
+  items: async () => (await setup<{ item_id: string; code: string; name: string; kind: 'equipment' | 'instrument' | 'area'; room: string | null; active: boolean; version: number }[]>`
+    select * from e2e_master_items where not is_product`).map((r) => ({ itemId: r.item_id, code: r.code, name: r.name, kind: r.kind, room: r.room,
+      active: r.active, version: r.version, make: null, model: null, serial: null, needsCalibration: r.kind === 'instrument' })),
+  products: async () => (await setup<{ item_id: string; code: string; name: string; active: boolean; version: number }[]>`
+    select * from e2e_master_items where is_product`).map((r) => ({ itemId: r.item_id, code: r.code, name: r.name, active: r.active, version: r.version })),
+};
+const app = await buildApp({ sql, signOn: fakeSignOn(), proofKey: TEST_PROOF_KEY, master, webRoot: new URL('../dist/web', import.meta.url).pathname, cookieSecure: false, speech });
 
 const admin = (await login(app, 'admin')).cookie;
 const qa = (await login(app, 'qa1')).cookie;
-await call(app, admin, 'POST', '/api/products', { code: 'P1', name: 'Paracetamol 500 mg' });
+
 for (const type of ['equipment_use', 'equipment_cleaning', 'maintenance', 'calibration', 'general_log']) {
   const settings = { enabled: true, sopRef: 'SOP-1', checklist: [], verificationRequired: false };
   const id = (await call(app, admin, 'POST', '/api/settings', { logbookType: type, settings, effectiveFrom: new Date().toISOString() })).json().id;

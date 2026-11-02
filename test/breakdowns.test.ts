@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
+import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem, addProduct, changeItem } from './helpers.js';
 import { breakdownStats, type Breakdown } from '../server/breakdowns.js';
 import { changeLines } from '../server/changes.js';
 import { runIntegrityCheck } from '../server/integrity.js';
@@ -24,7 +24,7 @@ async function approve(type: string) {
   await call(t.app, c.qa!, 'POST', `/api/settings/${id}/approve`, { ...sig('qa1'), contentHash: versions.find((v: { id: number }) => v.id === id).contentHash });
 }
 const newItem = async (body: object = {}) =>
-  (await call(t.app, c.admin!, 'POST', '/api/equipment', { code: `BD-${++n}`, name: `Machine ${n}`, kind: 'equipment', location: 'Block A', ...body })).json().id as number;
+  (await addItem(t, { code: `BD-${++n}`, name: `Machine ${n}`, kind: 'equipment', location: 'Block A', ...body })) as number;
 const entry = (who: string, id: number, body: object) => call(t.app, c[who]!, 'POST', `/api/equipment/${id}/entries`, body);
 const status = async (id: number) => (await call(t.app, c.qa!, 'GET', `/api/equipment/${id}/status`)).json();
 const latestOf = async (versionId: number) => (await call(t.app, c.qa!, 'GET', `/api/entries/${versionId}/versions`)).json().at(-1);
@@ -50,7 +50,7 @@ beforeAll(async () => {
   }
   for (const [key, u] of [['admin', 'admin'], ['qa', 'qa1'], ['op1', 'op1'], ['sup1', 'sup1'], ['eng1', 'eng1'], ['eng2', 'eng2']] as const) c[key] = (await login(t.app, u)).cookie;
   await call(t.app, c.admin!, 'PUT', '/api/site', { name: 'Plant One', code: 'P1', reason: 'setup' });
-  product = (await call(t.app, c.admin!, 'POST', '/api/products', { code: 'P1', name: 'Product 1' })).json().id;
+  product = await addProduct(t, 'P1', 'Product 1');
   for (const type of ['equipment_use', 'equipment_cleaning', 'maintenance', 'calibration']) await approve(type);
 });
 afterAll(() => t.close());
@@ -286,13 +286,13 @@ describe('equipment details (LB-18)', () => {
     expect((await put('admin', id, { details: { ...details(), cost: 100 }, reason: 'x', expectedVersion: 0 })).statusCode).toBe(400);
   });
 
-  it('LB-18: moves are recorded as location history', async () => {
+  it('PL-08: the history card shows the room and name master data has now; moves are recorded in core (D-29)', async () => {
     const id = await newItem({ location: 'Block A' });
-    await call(t.app, c.admin!, 'PATCH', `/api/equipment/${id}`, { location: 'Block C', reason: 'Moved for line 3' });
-    await call(t.app, c.admin!, 'PATCH', `/api/equipment/${id}`, { name: 'Renamed', reason: 'name' });
+    changeItem(t, `BD-${n}`, { room: 'Block C', name: 'Renamed' });
     const card = (await call(t.app, c.op1!, 'GET', `/api/equipment/${id}/details`)).json();
-    expect(card.locationHistory.map((l: { from: string | null; to: string; reason: string | null }) => [l.from, l.to, l.reason])).toEqual([
-      [null, 'Block A', null], ['Block A', 'Block C', 'Moved for line 3']]);
+    expect(card.equipment).toMatchObject({ location: 'Block C', name: 'Renamed' });
+    // Moves recorded in the Logbook before D-29 stay in its location history (audit trail); none were made here.
+    expect(card.locationHistory).toEqual([]);
   });
 
   it('LB-23: the integrity check covers details versions and their audit rows', async () => {

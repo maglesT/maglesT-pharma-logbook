@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
 import { parseId, requireRole } from '../auth.js';
+import { logbookItems, logbookProducts, type Master } from '../master.js';
 import { SignError, authenticateSigner, canonical, contentHash, sign, signBody } from '../signatures.js';
 import { ENTRY_COLS, hashOf, present, type EntryRow } from './entries.js';
 import { PLANT_TZ } from '../status.js';
@@ -74,14 +75,25 @@ export async function batchVersions(q: Sql | Tx, batch: string): Promise<EntryRo
   );
 }
 
+// Names in the subjects are master data, read live by code (D-29); the code never changes.
+async function named(q: Sql | Tx, master: Master, rows: AuditRow[]): Promise<AuditRow[]> {
+  if (!rows.some((r) => r.subject?.code)) return rows;
+  const [items, products] = await Promise.all([logbookItems(q, master), logbookProducts(q, master)]);
+  const items_ = new Map(items.map((i) => [i.code, i.name]));
+  const products_ = new Map(products.map((p) => [p.code, p.name]));
+  return rows.map((r) => r.subject?.code
+    ? { ...r, subject: { ...r.subject, name: (r.objectType === 'product' ? products_ : items_).get(r.subject.code) ?? r.subject.name } }
+    : r);
+}
+
 // Audit rows of the given entry versions and reviews.
-export async function auditFor(q: Sql | Tx, versions: EntryRow[], reviewIds: number[] = []): Promise<AuditRow[]> {
+export async function auditFor(q: Sql | Tx, master: Master, versions: EntryRow[], reviewIds: number[] = []): Promise<AuditRow[]> {
   const ids = versions.map((v) => String(v.id));
   const rids = reviewIds.map(String);
   if (!ids.length && !rids.length) return [];
-  return q<AuditRow[]>`${AUDIT_SELECT(q)}
+  return named(q, master, await q<AuditRow[]>`${AUDIT_SELECT(q)}
     where (a.object_type = 'entry' and a.object_id = any(${ids})) or (a.object_type = 'review' and a.object_id = any(${rids}))
-    order by a.at, a.id`;
+    order by a.at, a.id`);
 }
 
 const isLatest = (v: EntryRow, all: EntryRow[]) => !all.some((x) => x.supersedes === v.id);
@@ -133,7 +145,7 @@ export function reviewRoutes(app: FastifyInstance, sql: Sql) {
         corrected: versions.filter((v) => v.change === 'corrected').length,
         failedCalibrations: latest.filter((v) => v.logbook_type === 'calibration' && v.data.result === 'fail').length,
       },
-      audit: await auditFor(sql, versions, reviews.map((r) => r.id)),
+      audit: await auditFor(sql, app.master, versions, reviews.map((r) => r.id)),
       contentHash: contentHash('review', 0, content),
       reviews,
     };
@@ -186,7 +198,7 @@ export function reviewRoutes(app: FastifyInstance, sql: Sql) {
     return {
       batch: req.params.batch,
       entries: presented.map((p) => ({ ...p, equipmentCode: codes.find((c) => c.id === p.equipmentId)?.code, latest: isLatest(versions.find((v) => v.id === p.id)!, versions) })),
-      audit: await auditFor(sql, versions),
+      audit: await auditFor(sql, app.master, versions),
     };
   });
 
@@ -203,13 +215,13 @@ export function reviewRoutes(app: FastifyInstance, sql: Sql) {
       .safeParse(req.query);
     if (!f.success) return reply.code(400).send({ error: 'invalid_request' });
     const { objectType, objectId, user, from, to } = f.data;
-    return sql<AuditRow[]>`${AUDIT_SELECT(sql)}
+    return named(sql, app.master, await sql<AuditRow[]>`${AUDIT_SELECT(sql)}
       where ${objectType ? sql`a.object_type = ${objectType}` : sql`true`}
         and ${objectId ? sql`a.object_id = ${objectId}` : sql`true`}
         and ${user ? sql`a.actor_id = (select id from users where username = ${user.toLowerCase()})` : sql`true`}
         and ${from ? sql`a.at >= ${from}` : sql`true`}
         and ${to ? sql`a.at < ${to}` : sql`true`}
-      order by a.at desc, a.id desc limit 1000`;
+      order by a.at desc, a.id desc limit 1000`);
   });
 }
 

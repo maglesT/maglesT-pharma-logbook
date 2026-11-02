@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { Sql, Tx } from './db.js';
+import type { LogbookItem } from './master.js';
 import { FAILURE_CATEGORIES } from './entries.js';
 import { PLANT_TZ } from './status.js';
 
@@ -130,9 +131,11 @@ export type RegisterQuery = z.infer<typeof registerQuery>;
 // Latest version of every breakdown that occurred in [from, to), with its verification and release.
 // An entry made before S9 has no occurrence time: its repair start stands in (D-25). Status filter and
 // sort are applied by the caller, so statistics can use the whole list (review S9).
-export async function breakdowns(q: Sql | Tx, from: Date, to: Date, f: Partial<RegisterQuery> & { entryIds?: number[] } = {}, now = new Date()): Promise<Breakdown[]> {
-  const rows = await q<{ id: number; entry_id: number; equipment_id: number; code: string; name: string; location: string; activity_start: Date; activity_end: Date | null; data: Record<string, unknown>; occurred_at: Date; verified_at: Date | null; released_at: Date | null }[]>`
-    select e.id::int, e.entry_id::int, e.equipment_id::int, q.code, q.name, q.location, e.activity_start, e.activity_end, e.data,
+// Names and locations are master data, read live (D-29): `items` from logbookItems().
+export async function breakdowns(q: Sql | Tx, items: LogbookItem[], from: Date, to: Date, f: Partial<RegisterQuery> & { entryIds?: number[] } = {}, now = new Date()): Promise<Breakdown[]> {
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const rows = await q<{ id: number; entry_id: number; equipment_id: number; code: string; activity_start: Date; activity_end: Date | null; data: Record<string, unknown>; occurred_at: Date; verified_at: Date | null; released_at: Date | null }[]>`
+    select e.id::int, e.entry_id::int, e.equipment_id::int, q.code, e.activity_start, e.activity_end, e.data,
       coalesce((e.data->>'occurredAt')::timestamptz, e.activity_start) as occurred_at,
       (select g.signed_at from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'verified') as verified_at,
       (select g.signed_at from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'released') as released_at
@@ -142,11 +145,11 @@ export async function breakdowns(q: Sql | Tx, from: Date, to: Date, f: Partial<R
       and coalesce((e.data->>'occurredAt')::timestamptz, e.activity_start) >= ${from}
       and coalesce((e.data->>'occurredAt')::timestamptz, e.activity_start) < ${to}
       and ${f.equipmentId ? q`e.equipment_id = ${f.equipmentId}` : q`true`}
-      and ${f.location ? q`lower(q.location) = lower(${f.location})` : q`true`}
       and ${f.category ? q`e.data->>'failureCategory' = ${f.category}` : q`true`}
       and ${f.entryIds ? q`e.entry_id = any(${f.entryIds}::bigint[])` : q`true`}
     order by occurred_at desc, e.entry_id desc`;
-  const list = rows.map((r): Breakdown => {
+  const located = f.location ? rows.filter((r) => (byId.get(r.equipment_id)?.room ?? '').toLowerCase() === f.location!.toLowerCase()) : rows;
+  const list = located.map((r): Breakdown => {
     const status: BreakdownStatus = !r.activity_end ? 'open' : !r.verified_at ? 'awaiting_verification' : !r.released_at ? 'awaiting_release' : 'released';
     const end = r.released_at ?? now;
     return {
@@ -154,8 +157,8 @@ export async function breakdowns(q: Sql | Tx, from: Date, to: Date, f: Partial<R
       entryId: r.entry_id,
       equipmentId: r.equipment_id,
       code: r.code,
-      name: r.name,
-      location: r.location,
+      name: byId.get(r.equipment_id)?.name ?? r.code,
+      location: byId.get(r.equipment_id)?.room ?? '',
       occurredAt: r.occurred_at,
       repairStart: r.activity_start,
       repairEnd: r.activity_end,

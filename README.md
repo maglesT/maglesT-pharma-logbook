@@ -15,7 +15,8 @@ Needs Node 22 and PostgreSQL 16.
 ```sh
 npm install
 export DATABASE_URL=postgres://logbook_owner:dev@localhost:5432/logbook_dev DB_APP_ROLE=logbook_app
-# Sign-on through a Medhanta core (D-29): people, passwords and Logbook roles are managed there
+# Medhanta core (D-29): people, passwords and Logbook roles, and master data (items, products), are managed there
+export MASTER_DATA_DATABASE_URL=postgres://logbook_app:...@<core db>:5432/master_data   # read through its report views
 export OIDC_ISSUER=https://<core domain>/oidc OIDC_CLIENT_SECRET=... OIDC_REDIRECT_URI=http://localhost:3000/cb
 npm run migrate
 npm run dev        # API on :3000
@@ -44,6 +45,10 @@ First time only, create the admin account (prints a temporary password):
 restricted role `logbook_app`, which cannot update or delete entries, signatures or the audit trail (LB-18).
 Either give it its own login (`ALTER ROLE logbook_app LOGIN PASSWORD '...'`) and point `DATABASE_URL` at it,
 or, on a single box, let the owner login switch to it with `DB_APP_ROLE=logbook_app` (compose default).
+
+**Report views on the Medhanta platform (D-29).** Names and locations are master data now; `report.equipment_v1` keeps
+showing the name and location each item had when it was moved or first seen by the Logbook. Read current names from
+master_data's own views.
 
 **Read-only role for the Deviations system (D-28).** Migration 0013 creates the role `logbook_report` without a login. (On the Medhanta platform, D-29, it is not created: other products read the views through platform links.)
 It can read the four views in the schema `report` (`equipment_v1`, `entry_v1`, `calibration_v1`, `logbook_sop_v1`) and

@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { runIntegrityCheck } from '../server/integrity.js';
-import { call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
+import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem, type ItemBody } from './helpers.js';
 
 let t: TestApp;
 const c: Record<string, string> = {};
@@ -22,7 +22,7 @@ beforeAll(async () => {
   t = await freshApp();
   for (const [u, roles] of [['admin', ['admin']], ['qa1', ['qa']], ['op1', ['operator']], ['sup1', ['supervisor']], ['eng1', ['engineering']]] as const) await seedUser(t.owner, u, [...roles]);
   for (const [k, u] of [['admin', 'admin'], ['qa', 'qa1'], ['op1', 'op1'], ['sup1', 'sup1'], ['eng1', 'eng1']] as const) c[k] = (await login(t.app, u)).cookie;
-  const eq = async (body: object) => (await call(t.app, c.admin!, 'POST', '/api/equipment', body)).json().id as number;
+  const eq = async (body: ItemBody) => (await addItem(t, body)) as number;
   mixer = await eq({ code: 'MX-1', name: 'Mixer', kind: 'equipment' });
   room = await eq({ code: 'RM-1', name: 'Room', kind: 'area' });
   cleanRoom = await eq({ code: 'RM-B', name: 'Grade B room', kind: 'area', sterile: true, classified: true });
