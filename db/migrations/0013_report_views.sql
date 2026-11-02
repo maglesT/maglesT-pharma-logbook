@@ -17,12 +17,17 @@ declare
   rep text := case when current_schema() = 'public' then 'report' else current_schema() || '_report' end;
 begin
   -- Production: the site gives this role LOGIN and a password at install (README, "Database roles").
-  if not exists (select from pg_roles where rolname = 'logbook_report') then
+  -- On the Medhanta platform (D-29) the migration login may not create roles, and other products read the
+  -- views through platform links instead, so the role is then left out.
+  if not exists (select from pg_roles where rolname = 'logbook_report')
+     and (select rolsuper or rolcreaterole from pg_roles where rolname = current_user) then
     create role logbook_report nologin;
   end if;
   execute format('create schema if not exists %I', rep);
   execute format('revoke all on schema %I from public', rep);
-  execute format('grant usage on schema %I to logbook_report', rep);
+  if exists (select from pg_roles where rolname = 'logbook_report') then
+    execute format('grant usage on schema %I to logbook_report', rep);
+  end if;
   -- For the rest of this migration, new objects go to the report schema and table names resolve
   -- to this installation's tables (transaction-local; reset at the end).
   -- PUBLIC may create temporary objects by default; take that from everyone but the app role, so the
@@ -104,6 +109,10 @@ cross join lateral regexp_split_to_table(coalesce(f.settings->>'sopRef', ''), '[
 where coalesce((f.settings->>'enabled')::boolean, false) and btrim(r.ref) <> '';
 
 revoke all on equipment_v1, entry_v1, calibration_v1, logbook_sop_v1 from public;
-grant select on equipment_v1, entry_v1, calibration_v1, logbook_sop_v1 to logbook_report;
+do $$ begin
+  if exists (select from pg_roles where rolname = 'logbook_report') then
+    grant select on equipment_v1, entry_v1, calibration_v1, logbook_sop_v1 to logbook_report;
+  end if;
+end $$;
 
 reset search_path;
