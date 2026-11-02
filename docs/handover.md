@@ -1,6 +1,6 @@
 # Handover
 
-Updated: 2026-10-31, after S15 (read-only report views for the Deviations system; demo codes aligned with the Batchwright demo).
+Updated: 2026-11-02, Phase B1 (move onto the Medhanta platform, D-29): see the section "Phase B1" below first.
 
 ## State
 - Planning deliverables (a)–(d) are approved: decisions D-01 to D-05 in `decisions.md`.
@@ -126,6 +126,125 @@ Updated: 2026-10-31, after S15 (read-only report views for the Deviations system
 - **For the Deviations side:** type keys are the logbook type keys (`equipment_use`, `equipment_cleaning`, `maintenance` with `data.kind` preventive/breakdown/repair, `calibration`, …); equipment codes are exactly as entered (case kept); times are `timestamptz` (stored UTC; plant time is Asia/Kolkata); `next_due` is a plant-local date; `id` and `entry_id` are bigint. `calibration_v1` has no verification flag: a calibration counts for status only when verified, which `entry_v1` shows (`type = 'calibration'`, same equipment code and `coalesce(activity_end, activity_start)` = `performed_at`, `signed` contains `verified`).
 - **D-27:** was cited in code and in S12 but had no row in `decisions.md`; the row was added in S15 from the S12 description.
 - **Review fixes:** views are security barriers; TEMPORARY taken from PUBLIC on the database; `nextDue` must be a real date (app check, and the view reads a bad stored value as null); the seed refuses non-demo databases, approved settings and existing users; README `pg_hba.conf` steps corrected (SSL off in the image, `reject` line after the allow line); role tests tagged LB-21.
+
+## Phase B1: move onto the Medhanta platform (D-29), state on 2 Nov 2026
+Plan: `docs/06-platform-move-plan.md` (approved, D-29). Platform repo `maglesT/databsee` (its `docs/handover.md`,
+`docs/05-add-a-product.md`). Lead: session `session_01PybpFurhHU4ktqworXhVvF`; report there with the remote
+`send_message` tool after each merge and for owner decisions. Owner rules: rewire only, minimum compliance (cite the
+clause), no over-engineering, small slices (branch, tests named by rule ID, CI green, one review pass by a subagent,
+squash-merge), commit trailers without a model name. At most 2–3 agents. Hand over at about 400k context.
+
+**The live Logbook** (logbook.187-126-126-5.sslip.io) runs the code of branch `standalone` (commit 7787354; the git
+proxy refused a tag). main is not deployable standalone any more. Fixes for the live site before cutover go on
+`standalone`. The cutover happens on the owner's server and needs owner approval.
+
+| Slice | PR | What |
+|---|---|---|
+| plan | #19 | `docs/06-platform-move-plan.md`, D-29 |
+| B1-1 | #20 | migrations safe on a platform database: `0000_platform_defaults` takes back the platform init's default grants (else the app could UPDATE audit_log); 0013 leaves out `logbook_report` on the platform; `LOGBOOK_DATABASE_URL`; `test/platform.test.ts` with a copy of the platform's `database.sql` |
+| B1-2 | #21 | sign-on through core (OIDC + PKCE, `server/signon.ts`, `/login`, `/cb`); roles from the token only; sessions renew roles every 5 min (one request claims the renewal, core called outside transactions); sign-in state in a short Lax cookie; `users` = id map (`employee_id`, 0014); local login/users/passwords removed |
+| B1-4 | #22 | e-signatures re-authenticate at core: `/sign` window (prompt=login, max_age=0), `/cb` checks ID-token `auth_time` ≥ start, HMAC proof (sub, roles, meanings, time, nonce; key derived from the OIDC client secret), spent once in the signature's transaction (`signing_proofs`, 0016); local lockout/alerts removed (core's PL-04) |
+| B1-3 | #23 | master data live through master_data's views (`server/master.ts`, `MASTER_DATA_DATABASE_URL`), "connection off" 503, write-time check of item and product, `entry_master_values` (PL-07), `equipment`/`products` = id maps (`item_id`, 0015), Master data screen read-only plus the Logbook's own per-item settings |
+
+Platform side: branch `b1-logbook` in `maglesT/databsee` (not merged; waiting for the lead's OK): `apps/logbook/manifest.json`
+pinned to a Logbook commit (update the pin to the latest merged Logbook commit before merging), `bundle.sh` builds
+`medhanta/logbook:<commit>` from this repo and copies `db/migrations` to `db/logbook`, compose service, `productEnv()`,
+secrets `env.logbook` (Sarvam/Gemini keys). Owner action at go-live: Actions secret `PRODUCT_SOURCE_TOKEN` (read-only
+token for this repo).
+
+### Owner change: permissions instead of roles (platform A10, databsee PR #14, b7e0efd)
+Each product declares a permission list in its manifest (`permissions: [{ code: "logbook.…", label }]`, codes
+`^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$`, starting with `logbook.`); people get a ticked subset. OIDC scope `openid profile
+permissions`; the ID token and userinfo carry `permissions` (this product's codes only); core refuses sign-on without any.
+At e-signature check the fresh token's `sub` and that the required code is in its `permissions` (apps/hello/app.ts).
+Platform D-17: `<p>_app` gets only SELECT/INSERT on new tables by default; grant UPDATE/DELETE on state tables explicitly
+in a Logbook migration, never on audit or signature tables (tests named `PL-06 …`). The lead's message saying "B1-2 waits for
+A10" arrived after B1-2 and B1-4 were merged on roles, so they must be switched (B1-2b below).
+
+### Next
+0. **B1-2b permissions** (first): one code per action the app checks today (who may record each logbook type
+   (`mayRecord`), correct others' entries (`mayCorrect`, D-17), verify, release, sign reviews, draft and approve settings, read the
+   audit trail, see reviews/exports, edit item settings, site record, ask for advice); `asRoles()` → permission codes from
+   the claim; `requireRole(...)` → `requirePermission(code)`; the signing proof carries the fresh token's permissions and
+   `authenticateSigner` checks the code for the meaning; "Admin never signs" becomes "no signing code"; UI flags from
+   `/api/me` permissions. Keep a role → permissions table (docs + code for B1-5). Then rebase databsee `b1-logbook` on main
+   (A10), put the permission list in `apps/logbook/manifest.json` instead of `roles`, update the pin, PR, CI, review,
+   squash-merge (lead's OK given). Suggest sending the proposed permission list to the lead for the owner first.
+1. **B1-3b**: make, model and serial move from the details record to master data (D-29 3): drop them from
+   `detailsSchema` for new versions (old versions keep them), history card / PDF / advice read master `make/model/serial`
+   (`LogbookItem`), adjust `test/breakdowns.test.ts`, `test/advice.test.ts`, `e2e/breakdowns.spec.ts`.
+2. **B1-5 data move** (PL-13): script `db/move-to-platform.ts` + check SQL. pg_dump of the live DB (custom format) →
+   restore into the platform `logbook` database as `logbook_owner` (`--no-owner --role=logbook_owner`, after running
+   `0000_platform_defaults` so default grants don't widen the app's rights; then re-run the privilege comparison of
+   `test/platform.test.ts`) → record 0000–0016 in `platform.migration` with their sha256 → create core employees
+   (same scrypt hash, core's format is identical; login pattern `^[a-z][a-z0-9._-]{1,39}$`; identity-verification
+   text from the site, D-29 5), grants (`logbook` roles; admins also `identity_admin` + `master_data_editor`, D-29 6),
+   master items (area → room, free-text location → `located_in` link where it matches a room), products; fill
+   `users.employee_id`, `equipment.item_id`, `products.item_id` → checks: counts and checksums of every table before
+   and after, every user/item/product mapped, codes and names equal, `npm run integrity` passes; mapping report CSV
+   (local id → master id, unmatched locations, refused logins). Dry run on a copy of the live data first.
+   The demo seed (D-28) now uses in-process stand-ins for core; a platform demo = seed a demo DB, then move it.
+3. **B1-6 cutover runbook** (owner's server, owner approval): freeze, back up, move + checks, Caddy switch, rollback =
+   the old container, kept untouched until the owner signs off.
+
+### Things to know
+- Tests: `TEST_DATABASE_URL=postgres://logbook_owner:dev@127.0.0.1:5432/logbook_test npx vitest run`; local PostgreSQL 16
+  in this container: `su postgres -c "/usr/lib/postgresql/16/bin/initdb -D /var/lib/postgresql/lb -U postgres --auth=trust"`,
+  start with `pg_ctl -o '-p 5432 -k /tmp'`, then `create role logbook_owner superuser login password 'dev'` and
+  `create database logbook_test owner logbook_owner`. Browser tests: `npm run build && npx playwright test`.
+- Stand-ins: `test/helpers.ts` `fakeSignOn` (signs in whoever `login_hint` names), `proofFor`/`sig`, `fakeMaster`,
+  `addItem`, `changeItem`, `addProduct`. The e2e server's master stand-in reads table `e2e_master_items`.
+- Any new table needs `revoke all on <t> from logbook_app` before its grants (platform default grants; `0000`).
+- Signature content hashes must never change: PL-07 values live in their own table, not in `entries`.
+
+### Proposed Logbook permission list (B1-2b; for the owner, through the lead)
+One code per action the app checks today (`requireRole`, `RECORDERS`/`mayRecord`, `mayCorrect`, `VERIFIERS` and the
+"Admin never signs" rule in `server/signatures.ts`). Reading items, entries, statuses, the breakdown register and the
+history card needs any Logbook permission (sign-on itself needs one).
+
+| Code | Label | Today's check |
+|---|---|---|
+| `logbook.entry.record_use` | Record equipment use | RECORDERS equipment_use |
+| `logbook.entry.record_cleaning` | Record equipment and area cleaning | equipment_cleaning, area_cleaning |
+| `logbook.entry.record_general` | Record general log entries | general_log |
+| `logbook.entry.record_maintenance` | Record maintenance and breakdowns, complete repairs | maintenance |
+| `logbook.entry.record_calibration` | Record calibrations | calibration |
+| `logbook.entry.record_sterile` | Record steriliser cycles, glove tests and pressure readings | steriliser_cycle, glove_integrity, pressure_reading |
+| `logbook.entry.record_steriliser_test` | Record steriliser tests (leak, air removal) | steriliser_test |
+| `logbook.entry.correct_others` | Correct entries made by others (D-17) | mayCorrect: supervisor |
+| `logbook.entry.verify` | Verify entries (second person) | VERIFIERS |
+| `logbook.breakdown.release` | Release equipment after a breakdown | /release: qa |
+| `logbook.review.read` | See period reviews, the batch view and exports | review/exports: qa, supervisor |
+| `logbook.review.sign` | Sign period reviews | /reviews: qa |
+| `logbook.audit.read` | Read the audit trail and run the integrity check | /audit, /integrity: qa, admin |
+| `logbook.settings.draft` | Draft logbook settings | /settings POST/PATCH: admin |
+| `logbook.settings.approve` | Approve logbook settings | /approve: qa |
+| `logbook.site.manage` | Edit the site record, item settings and equipment details | /site, /equipment PATCH, /details: admin |
+| `logbook.voice_note.record` | Record voice notes | /voice-notes: operator, supervisor, engineering |
+| `logbook.advice.ask` | Ask for breakdown suggestions | /advice: operator, supervisor, engineering, qa |
+
+Old role → permissions (for the B1-5 data move; each moved user gets exactly these):
+
+| Role | Permissions |
+|---|---|
+| operator | record_use, record_cleaning, record_general, record_maintenance, record_sterile, record_steriliser_test, voice_note.record, advice.ask |
+| supervisor | the operator's, plus correct_others, verify, review.read |
+| engineering | record_general, record_maintenance, record_calibration, record_steriliser_test, voice_note.record, advice.ask |
+| qa | verify, breakdown.release, review.read, review.sign, audit.read, settings.approve, advice.ask |
+| admin | audit.read, settings.draft, site.manage |
+
+Open point for the owner: today the Admin role can never sign (DI segregation). With ticked permissions, a person could
+hold `site.manage` and a signing code. Options: (a) leave it to the site's access procedure (CP-02/CP-03) and the access
+review (PL-12), or (b) the Logbook refuses a signature from anyone holding `settings.draft` or `site.manage`. Proposal: (a),
+simpler; no binding clause requires the system to enforce it.
+
+### Known limits from the B1-3 review (accepted, for the next slices)
+- Items and products held locally before the move (`item_id` null) are not shown until the B1-5 move fills `item_id`.
+  The move must run before anyone uses the Logbook on the platform. A master code that clashes with an unmapped local
+  row, or two master codes differing only in case, are skipped at first sight: the move's mapping report must list them.
+- The local `kind` is read for type checks and status; master data never changes an item's kind (databsee `item`).
+- Each entry write reads master data two to three times (`logbookItem` in create and in `insertVersion`,
+  `logbookProducts`). That is fine for about 300 items; pass the item into `insertVersion` if it ever matters.
 
 ## Possible next steps (not planned; owner to decide)
 - Validation package for a first site: IQ/OQ protocol templates that use `docs/traceability.md` and the CI report.
