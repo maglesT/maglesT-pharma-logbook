@@ -31,5 +31,6 @@ const schema = z.object({
 export type Config = z.infer<typeof schema>;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  return schema.parse(env);
+  // On the Medhanta platform (D-29) apply names the product's own database LOGBOOK_DATABASE_URL.
+  return schema.parse({ ...env, DATABASE_URL: env.DATABASE_URL ?? env.LOGBOOK_DATABASE_URL });
 }
