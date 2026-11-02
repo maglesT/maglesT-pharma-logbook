@@ -1,5 +1,7 @@
 # Phase B1: Pharma Logbook onto the Medhanta platform. Plan, draft 1 (2 Nov 2026)
 
+Status: **approved by the owner on 2 Nov 2026, with every recommendation** (relayed by the lead; D-29). The platform is not yet installed on the owner's server, so B1-1 to B1-5 are built and tested now and the cutover timing is decided later.
+
 Scope (platform D-11): rewire only. The Logbook gets its own database on the shared server. It reads master data through
 `master_data.report.*_v1`, signs people on through core OIDC, and re-authenticates e-signatures through core. Its live
 data moves with PL-13 checks and a mapping from local items to shared master ids. No new features, no rewrites and no
