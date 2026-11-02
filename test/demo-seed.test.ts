@@ -31,9 +31,9 @@ describe('demo seed (D-28)', () => {
   it('creates the items, rooms and SOP references of the shared scenario', async () => {
     const items = await view('equipment_v1', 'true order by code');
     expect(items.map((r) => [r.code, r.kind, r.location, r.needs_calibration, r.sop_refs])).toEqual([
-      ['COMP-1', 'area', 'Block A, ground floor', false, []],
+      ['COMP-1', 'area', '', false, []],
       ['FBD-01', 'equipment', 'GRAN-1', false, ['SOP-PRD-014']],
-      ['GRAN-1', 'area', 'Block A, ground floor', false, []],
+      ['GRAN-1', 'area', '', false, []],
       ['HT-01', 'instrument', 'COMP-1', true, ['SOP-QC-005']],
       ['PRESS-01', 'equipment', 'COMP-1', false, ['SOP-PRD-021', 'SOP-ENG-010']],
     ]);

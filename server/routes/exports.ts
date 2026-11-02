@@ -7,6 +7,7 @@ import PdfPrinter from 'pdfmake';
 import type { Content, TDocumentDefinitions } from 'pdfmake/interfaces.js';
 import { z } from 'zod';
 import type { Sql } from '../db.js';
+import { logbookItem, type Master } from '../master.js';
 import { parseId, requireRole } from '../auth.js';
 import { recordLines } from '../changes.js';
 import { PLANT_TZ } from '../status.js';
@@ -192,7 +193,7 @@ async function pdf(r: Report, site: { name: string; code: string } | undefined, 
   ]);
 }
 
-async function build(sql: Sql, title: string, subtitle: string, versions: EntryRow[], reviews: Review[] = []): Promise<Report> {
+async function build(sql: Sql, master: Master, title: string, subtitle: string, versions: EntryRow[], reviews: Review[] = []): Promise<Report> {
   const codes = new Map(
     (await sql<{ id: number; code: string }[]>`
       select id::int, code from equipment where id = any(${[...new Set(versions.map((v) => v.equipment_id))]}::bigint[])`).map((c) => [c.id, c.code]),
@@ -202,7 +203,7 @@ async function build(sql: Sql, title: string, subtitle: string, versions: EntryR
     subtitle,
     versions,
     entries: await present(sql, versions),
-    audit: await auditFor(sql, versions, reviews.map((v) => v.id)),
+    audit: await auditFor(sql, master, versions, reviews.map((v) => v.id)),
     reviews,
     codes,
   };
@@ -226,12 +227,12 @@ export function exportRoutes(app: FastifyInstance, sql: Sql) {
     const id = parseId(req.query.equipmentId ?? '');
     const q = periodQuery.safeParse(req.query);
     if (!format.success || id === null || !q.success) return reply.code(400).send({ error: 'invalid_request' });
-    const [eq] = await sql<{ code: string; name: string }[]>`select code, name from equipment where id = ${id}`;
+    const eq = await logbookItem(sql, app.master, id);
     if (!eq) return reply.code(404).send({ error: 'not_found' });
     const { from, to } = await plantRange(sql, q.data.fromDay, q.data.toDay);
     const versions = await periodVersions(sql, id, from, to);
     if (versions.length > MAX_VERSIONS) return reply.code(413).send({ error: 'too_large', message: 'Choose a shorter period.' });
-    const report = await build(sql, `Logbook ${eq.code} · ${eq.name}`, `Period ${q.data.fromDay} to ${q.data.toDay} (plant time)`,
+    const report = await build(sql, app.master, `Logbook ${eq.code} · ${eq.name}`, `Period ${q.data.fromDay} to ${q.data.toDay} (plant time)`,
       versions, await reviewsFor(sql, id, from, to));
     return send(sql, reply, format.data, `logbook-${eq.code}-${q.data.fromDay}`, report, req.user!.fullName);
   });
@@ -242,7 +243,7 @@ export function exportRoutes(app: FastifyInstance, sql: Sql) {
     if (!format.success || !batch.success) return reply.code(400).send({ error: 'invalid_request' });
     const versions = await batchVersions(sql, batch.data);
     if (versions.length > MAX_VERSIONS) return reply.code(413).send({ error: 'too_large' });
-    const report = await build(sql, `Batch ${batch.data}`, 'All logbook entries referencing this batch', versions);
+    const report = await build(sql, app.master, `Batch ${batch.data}`, 'All logbook entries referencing this batch', versions);
     return send(sql, reply, format.data, `batch-${batch.data}`, report, req.user!.fullName);
   });
 }

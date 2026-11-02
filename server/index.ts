@@ -6,6 +6,7 @@ import { geminiTranslator, sarvamProvider } from './voice.js';
 import { geminiProvider } from './advice.js';
 import { oidcSignOn } from './signon.js';
 import { createHash } from 'node:crypto';
+import { sqlMaster } from './master.js';
 
 const config = loadConfig();
 const sql = connect(config.DATABASE_URL, { role: config.DB_APP_ROLE });
@@ -24,7 +25,8 @@ const signOn = oidcSignOn({ issuer: config.OIDC_ISSUER, clientId: config.OIDC_CL
   redirectUri: config.OIDC_REDIRECT_URI });
 // Signing proofs (B1-4) stay valid across a restart and between instances: the key is derived from the client secret.
 const proofKey = createHash('sha256').update(`logbook-signing-proof:${config.OIDC_CLIENT_SECRET}`).digest();
-const app = await buildApp({ sql, signOn, proofKey, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
+const md = connect(config.MASTER_DATA_DATABASE_URL);
+const app = await buildApp({ sql, signOn, proofKey, master: sqlMaster(md), logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
 
 await app.listen({ port: config.PORT, host: config.HOST });
 const stopIntegrity = scheduleIntegrityCheck(sql, (msg) => app.log.info(msg));
@@ -34,6 +36,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     stopIntegrity();
     await app.close();
     await sql.end();
+    await md.end();
     process.exit(0);
   });
 }

@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
+import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem, addProduct } from './helpers.js';
 import { runs } from '../server/routes/exports.js';
 
 let t: TestApp;
@@ -31,8 +31,8 @@ beforeAll(async () => {
   for (const [u, roles] of [['admin', ['admin']], ['qa1', ['qa']], ['op1', ['operator']], ['sup1', ['supervisor']]] as const) await seedUser(t.owner, u, [...roles]);
   for (const [k, u] of [['admin', 'admin'], ['qa', 'qa1'], ['op1', 'op1'], ['sup1', 'sup1']] as const) c[k] = (await login(t.app, u)).cookie;
   await call(t.app, c.admin!, 'PUT', '/api/site', { name: 'Plant One', code: 'P1', reason: 'setup' });
-  mixer = (await call(t.app, c.admin!, 'POST', '/api/equipment', { code: 'RMG-9', name: 'Mixer', kind: 'equipment' })).json().id;
-  product = (await call(t.app, c.admin!, 'POST', '/api/products', { code: 'PX', name: 'Product X' })).json().id;
+  mixer = (await addItem(t, { code: 'RMG-9', name: 'Mixer', kind: 'equipment' }));
+  product = await addProduct(t, 'PX', 'Product X');
   for (const type of ['equipment_use', 'equipment_cleaning', 'maintenance']) await approve(type);
   cleaningId = (await entry('op1', { logbookType: 'equipment_cleaning', activityStart: now(), data: { cleaningType: 'major', checklist: {} }, signature: sig('op1') })).json().id;
   const v = (await versionsOf(cleaningId))[0];

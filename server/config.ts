@@ -6,6 +6,8 @@ const schema = z.object({
   MIGRATION_DATABASE_URL: z.string().url().optional(),
   // Set only when DATABASE_URL logs in as the owner (local development): the app then switches role.
   DB_APP_ROLE: z.string().optional(),
+  // master_data's views, read with the Logbook's own login while the link is on (D-29).
+  MASTER_DATA_DATABASE_URL: z.string().url(),
   // Sign-on through Medhanta core (D-29), written by the platform's apply.
   OIDC_ISSUER: z.string().url(),
   OIDC_CLIENT_ID: z.string().default('logbook'),

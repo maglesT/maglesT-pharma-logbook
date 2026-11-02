@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, ApiError, type Equipment, type Me, type Product } from '../api.js';
+import { api, type Equipment, type Me, type Product } from '../api.js';
 
 const KIND_LABEL = { equipment: 'Equipment', instrument: 'Instrument', area: 'Area / room' } as const;
 const ask = (what: string) => window.prompt(`Reason for ${what}:`)?.trim();
@@ -16,74 +16,54 @@ export function MasterData({ me }: { me: Me }) {
         {isAdmin && <button className={tab === 'site' ? 'on' : ''} onClick={() => setTab('site')}>Site</button>}
       </div>
       {tab === 'equipment' && <EquipmentList isAdmin={isAdmin} />}
-      {tab === 'products' && <ProductList isAdmin={isAdmin} />}
+      {tab === 'products' && <ProductList />}
       {tab === 'site' && isAdmin && <SiteForm />}
     </>
   );
 }
 
+// Items and products are Medhanta master data (D-29): added, renamed, moved and retired in core, shown here live.
+// The Logbook keeps only its own settings per item.
 function EquipmentList({ isAdmin }: { isAdmin: boolean }) {
-  const empty = { code: '', name: '', kind: 'equipment' as Equipment['kind'], location: '', sterile: false, classified: false, needsCalibration: false, cleanHoldHours: '' };
   const [items, setItems] = useState<Equipment[]>([]);
-  const [form, setForm] = useState(empty);
   const [error, setError] = useState('');
-  const load = async () => setItems(await api<Equipment[]>('GET', '/api/equipment'));
+  const load = async () => {
+    try {
+      setItems(await api<Equipment[]>('GET', '/api/equipment'));
+      setError('');
+    } catch (err) {
+      setError((err as Error).message);
+    }
+  };
   useEffect(() => {
     void load();
   }, []);
 
-  const create = async (e: FormEvent) => {
-    e.preventDefault();
-    setError('');
+  const change = async (eq: Equipment, what: string, body: Partial<Equipment>) => {
+    const reason = ask(`${what} of ${eq.code}`);
+    if (!reason) return;
     try {
-      await api('POST', '/api/equipment', {
-        ...form,
-        needsCalibration: form.needsCalibration || form.kind === 'instrument',
-        cleanHoldHours: form.cleanHoldHours ? Number(form.cleanHoldHours) : null,
-      });
-      setForm(empty);
-      await load();
+      await api('PATCH', `/api/equipment/${eq.id}`, { ...body, reason });
     } catch (err) {
-      setError(err instanceof ApiError && err.code === 'code_taken' ? 'That ID exists already (IDs are never reused).' : 'Check the fields: the ID may use letters, digits and . _ / -');
+      setError((err as Error).message);
     }
-  };
-
-  const toggleActive = async (eq: Equipment) => {
-    const reason = ask(`${eq.active ? 'retiring' : 'reactivating'} ${eq.code}`);
-    if (!reason) return;
-    await api('PATCH', `/api/equipment/${eq.id}`, { active: !eq.active, reason });
     await load();
   };
-
-  const editHold = async (eq: Equipment) => {
+  const editHold = (eq: Equipment) => {
     const value = window.prompt(`Clean-hold limit for ${eq.code} in hours (empty for none):`, eq.cleanHoldHours?.toString() ?? '');
-    if (value === null) return;
-    const reason = ask(`changing the clean-hold limit of ${eq.code}`);
-    if (!reason) return;
-    await api('PATCH', `/api/equipment/${eq.id}`, { cleanHoldHours: value.trim() ? Number(value) : null, reason });
-    await load();
+    if (value !== null) void change(eq, 'changing the clean-hold limit', { cleanHoldHours: value.trim() ? Number(value) : null });
   };
+  const flag = (eq: Equipment, key: 'sterile' | 'classified' | 'needsCalibration', label: string) =>
+    isAdmin && !(key === 'needsCalibration' && eq.kind === 'area')
+      ? <label className="check"><input type="checkbox" checked={eq[key]} onChange={() => void change(eq, `${eq[key] ? 'switching off' : 'switching on'} "${label}"`, { [key]: !eq[key] })} />{label}</label>
+      : eq[key] ? label : '';
 
   return (
     <>
-      {isAdmin && (
-        <form className="card row" onSubmit={create}>
-          <input placeholder="ID (e.g. GRN-01)" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
-          <input placeholder="Name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <select value={form.kind} onChange={(e) => setForm({ ...form, kind: e.target.value as Equipment['kind'] })}>
-            {Object.entries(KIND_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-          </select>
-          <input placeholder="Location" value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} />
-          <input placeholder="Clean-hold hours" inputMode="numeric" value={form.cleanHoldHours} onChange={(e) => setForm({ ...form, cleanHoldHours: e.target.value })} />
-          <label className="check"><input type="checkbox" checked={form.sterile} onChange={(e) => setForm({ ...form, sterile: e.target.checked })} />Sterile</label>
-          <label className="check"><input type="checkbox" checked={form.classified} onChange={(e) => setForm({ ...form, classified: e.target.checked })} />Classified room</label>
-          <label className="check"><input type="checkbox" checked={form.needsCalibration || form.kind === 'instrument'} onChange={(e) => setForm({ ...form, needsCalibration: e.target.checked })} />Needs calibration</label>
-          <button className="primary" type="submit">Add</button>
-          {error && <p className="error">{error}</p>}
-        </form>
-      )}
+      <p className="muted">Equipment, instruments and rooms are kept in Medhanta master data; ask your master-data editor to add, rename, move or retire one. The Logbook settings below are this site's.</p>
+      {error && <p className="error">{error}</p>}
       <table>
-        <thead><tr><th>ID</th><th>Name</th><th>Kind</th><th>Location</th><th>Clean-hold</th><th>Flags</th><th>Status</th>{isAdmin && <th />}</tr></thead>
+        <thead><tr><th>ID</th><th>Name</th><th>Kind</th><th>Location</th><th>Clean-hold</th><th>Logbook settings</th><th>Status</th></tr></thead>
         <tbody>
           {items.map((eq) => (
             <tr key={eq.id}>
@@ -91,14 +71,9 @@ function EquipmentList({ isAdmin }: { isAdmin: boolean }) {
               <td>{eq.name}</td>
               <td>{KIND_LABEL[eq.kind]}</td>
               <td>{eq.location}</td>
-              <td>{eq.cleanHoldHours ? `${eq.cleanHoldHours} h` : '—'}</td>
-              <td>{[eq.sterile && 'Sterile', eq.classified && 'Classified', eq.needsCalibration && 'Calibrated'].filter(Boolean).join(', ')}</td>
+              <td>{eq.cleanHoldHours ? `${eq.cleanHoldHours} h` : '—'}{isAdmin && <> <button onClick={() => editHold(eq)}>Change</button></>}</td>
+              <td>{flag(eq, 'sterile', 'Sterile')} {flag(eq, 'classified', 'Classified')} {flag(eq, 'needsCalibration', 'Needs calibration')}</td>
               <td>{eq.active ? 'Active' : 'Retired'}</td>
-              {isAdmin && (
-                <td>
-                  <button onClick={() => editHold(eq)}>Clean-hold</button> <button onClick={() => toggleActive(eq)}>{eq.active ? 'Retire' : 'Reactivate'}</button>
-                </td>
-              )}
             </tr>
           ))}
         </tbody>
@@ -107,53 +82,20 @@ function EquipmentList({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
-function ProductList({ isAdmin }: { isAdmin: boolean }) {
+function ProductList() {
   const [items, setItems] = useState<Product[]>([]);
-  const [form, setForm] = useState({ code: '', name: '' });
   const [error, setError] = useState('');
-  const load = async () => setItems(await api<Product[]>('GET', '/api/products'));
   useEffect(() => {
-    void load();
+    api<Product[]>('GET', '/api/products').then(setItems, (err: Error) => setError(err.message));
   }, []);
-
-  const create = async (e: FormEvent) => {
-    e.preventDefault();
-    setError('');
-    try {
-      await api('POST', '/api/products', form);
-      setForm({ code: '', name: '' });
-      await load();
-    } catch {
-      setError('That product code exists already.');
-    }
-  };
-
-  const toggle = async (p: Product) => {
-    const reason = ask(`${p.active ? 'deactivating' : 'reactivating'} ${p.code}`);
-    if (!reason) return;
-    await api('PATCH', `/api/products/${p.id}`, { active: !p.active, reason });
-    await load();
-  };
-
   return (
     <>
-      {isAdmin && (
-        <form className="card row" onSubmit={create}>
-          <input placeholder="Product code" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} />
-          <input placeholder="Product name and strength" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          <button className="primary" type="submit">Add</button>
-          {error && <p className="error">{error}</p>}
-        </form>
-      )}
+      <p className="muted">Products are kept in Medhanta master data.</p>
+      {error && <p className="error">{error}</p>}
       <table>
-        <thead><tr><th>Code</th><th>Name</th><th>Status</th>{isAdmin && <th />}</tr></thead>
+        <thead><tr><th>Code</th><th>Name</th><th>Status</th></tr></thead>
         <tbody>
-          {items.map((p) => (
-            <tr key={p.id}>
-              <td>{p.code}</td><td>{p.name}</td><td>{p.active ? 'Active' : 'Inactive'}</td>
-              {isAdmin && <td><button onClick={() => toggle(p)}>{p.active ? 'Deactivate' : 'Reactivate'}</button></td>}
-            </tr>
-          ))}
+          {items.map((p) => <tr key={p.id}><td>{p.code}</td><td>{p.name}</td><td>{p.active ? 'Active' : 'Inactive'}</td></tr>)}
         </tbody>
       </table>
     </>

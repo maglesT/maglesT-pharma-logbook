@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
+import { logbookItem, logbookItems, type Master } from '../master.js';
 import { parseId, requireRole } from '../auth.js';
 import { changeLines } from '../changes.js';
 import { canonical } from '../signatures.js';
@@ -39,10 +40,10 @@ async function today(sql: Sql): Promise<string> {
   return r!.d;
 }
 
-async function register(sql: Sql, q: z.infer<typeof registerQuery>) {
+async function register(sql: Sql, master: Master, q: z.infer<typeof registerQuery>) {
   const { from, to } = await plantRange(sql, q.fromDay, q.toDay);
   const now = new Date();
-  const all = await breakdowns(sql, from, to, q, now);
+  const all = await breakdowns(sql, await logbookItems(sql, master), from, to, q, now);
   // Counts, MTTR and MTBF cover every breakdown of the period, whatever the status filter (review S9).
   const stats = breakdownStats(all, from, to, now, await inServiceSince(sql, [...new Set(all.map((b) => b.equipmentId))]));
   return { from, to, items: filterAndSort(all, q), stats };
@@ -54,14 +55,14 @@ type Event =
   | { kind: 'masterdata'; at: Date; actor: string | null; action: string; old: unknown; new: unknown; reason: string | null; lines: string[] };
 
 // The life history of one item: every entry version, QA reviews and master-data changes, oldest first.
-async function history(sql: Sql, id: number, fromDay: string, toDay: string, types: Set<string> | null) {
+async function history(sql: Sql, master: Master, id: number, fromDay: string, toDay: string, types: Set<string> | null) {
   const { from, to } = await plantRange(sql, fromDay, toDay);
   const versions: EntryRow[] = (await periodVersions(sql, id, from, to))
     // "breakdown" picks the breakdown entries out of the maintenance logbook (S12).
     .filter((v) => !types || types.has(v.logbook_type) || (types.has('breakdown') && v.logbook_type === 'maintenance' && v.data.kind === 'breakdown'));
   const latestIds = new Set(versions.filter((v) => !versions.some((x) => x.supersedes === v.id)).map((v) => v.id));
   const bdIds = [...new Set(versions.filter((v) => v.logbook_type === 'maintenance').map((v) => v.entry_id))];
-  const bds = new Map((bdIds.length ? await breakdowns(sql, new Date(0), new Date('9999-01-01'), { equipmentId: id, entryIds: bdIds }) : []).map((b) => [b.entryId, b]));
+  const bds = new Map((bdIds.length ? await breakdowns(sql, await logbookItems(sql, master), new Date(0), new Date('9999-01-01'), { equipmentId: id, entryIds: bdIds }) : []).map((b) => [b.entryId, b]));
   const events: Event[] = (await present(sql, versions)).map((e) => {
     const b = e.logbookType === 'maintenance' && e.data.kind === 'breakdown' ? bds.get(e.entryId) : undefined;
     return {
@@ -88,12 +89,15 @@ async function history(sql: Sql, id: number, fromDay: string, toDay: string, typ
   return { from, to, events };
 }
 
-async function card(sql: Sql, id: number) {
-  const [equipment] = await sql`
-    select id::int, code, name, kind, location, sterile, classified, clean_hold_hours as "cleanHoldHours",
-      needs_calibration as "needsCalibration", active, created_at as "createdAt"
-    from equipment where id = ${id}`;
-  if (!equipment) return null;
+async function card(sql: Sql, master: Master, id: number) {
+  const item = await logbookItem(sql, master, id);
+  if (!item) return null;
+  const [row] = await sql<{ created_at: Date }[]>`select created_at from equipment where id = ${id}`;
+  const createdAt = row!.created_at;
+  // Name, kind, room and active state are master data, read live (D-29).
+  const equipment = { id, code: item.code, name: item.name, kind: item.kind, location: item.room ?? '', sterile: item.sterile,
+    classified: item.classified, cleanHoldHours: item.cleanHoldHours, needsCalibration: item.needsCalibration, active: item.active,
+    make: item.make, model: item.model, serial: item.serial, createdAt };
   const versions = await detailsVersions(sql, id);
   return { equipment, details: versions.at(-1) ?? null, detailsVersions: versions, locationHistory: await locationHistory(sql, id), status: await statusOf(sql, id) };
 }
@@ -130,7 +134,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
   app.get<{ Params: { id: string } }>('/api/equipment/:id/details', anyUser, async (req, reply) => {
     const id = parseId(req.params.id);
     if (id === null) return reply.code(400).send({ error: 'invalid_request' });
-    return (await card(sql, id)) ?? reply.code(404).send({ error: 'not_found' });
+    return (await card(sql, app.master, id)) ?? reply.code(404).send({ error: 'not_found' });
   });
 
   // A new details version; the old one stays (D-25). expectedVersion guards against overwriting a
@@ -165,14 +169,14 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
   app.get<{ Querystring: Record<string, string> }>('/api/breakdowns', anyUser, async (req, reply) => {
     const q = registerPeriod.safeParse(req.query);
     if (!q.success) return reply.code(400).send({ error: 'invalid_request' });
-    return register(sql, q.data);
+    return register(sql, app.master, q.data);
   });
 
   app.get<{ Params: { format: string }; Querystring: Record<string, string> }>('/api/export/breakdowns.:format', anyUser, async (req, reply) => {
     const format = fmt.safeParse(req.params.format);
     const q = registerPeriod.safeParse(req.query);
     if (!format.success || !q.success) return reply.code(400).send({ error: 'invalid_request' });
-    const { items, stats } = await register(sql, q.data);
+    const { items, stats } = await register(sql, app.master, q.data);
     if (items.length > MAX_ROWS) return reply.code(413).send({ error: 'too_large', message: 'Choose a shorter period.' });
     const name = `breakdowns-${q.data.fromDay}-${q.data.toDay}`;
     if (format.data === 'csv') {
@@ -203,10 +207,10 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     const id = parseId(req.params.id);
     const q = historyQuery.safeParse(req.query);
     if (id === null || !q.success) return reply.code(400).send({ error: 'invalid_request' });
-    const head = await card(sql, id);
+    const head = await card(sql, app.master, id);
     if (!head) return reply.code(404).send({ error: 'not_found' });
     const types = q.data.types ? new Set(q.data.types.split(',').filter(Boolean)) : null;
-    return { ...head, ...(await history(sql, id, q.data.fromDay, q.data.toDay, types)) };
+    return { ...head, ...(await history(sql, app.master, id, q.data.fromDay, q.data.toDay, types)) };
   });
 
   app.get<{ Params: { format: string }; Querystring: Record<string, string> }>('/api/export/history.:format', anyUser, async (req, reply) => {
@@ -214,10 +218,10 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     const id = parseId(req.query.equipmentId ?? '');
     const q = historyQuery.safeParse(req.query);
     if (!format.success || id === null || !q.success) return reply.code(400).send({ error: 'invalid_request' });
-    const head = await card(sql, id);
+    const head = await card(sql, app.master, id);
     if (!head) return reply.code(404).send({ error: 'not_found' });
     const types = q.data.types ? new Set(q.data.types.split(',').filter(Boolean)) : null;
-    const { events } = await history(sql, id, q.data.fromDay, q.data.toDay, types);
+    const { events } = await history(sql, app.master, id, q.data.fromDay, q.data.toDay, types);
     if (events.length > MAX_ROWS) return reply.code(413).send({ error: 'too_large', message: 'Choose a shorter period.' });
     const rows = events.map(eventRow);
     const eq = head.equipment as { code: string; name: string; kind: string; location: string };

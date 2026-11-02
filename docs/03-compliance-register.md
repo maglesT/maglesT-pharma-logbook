@@ -33,7 +33,12 @@ signature as before (LB-19) and accepts core's answer only for the signed-in per
 with its urgent alert, and the record of access grants (parts of LB-20 and LB-21) are met by the platform's rules
 PL-01, PL-03, PL-04 and PL-05 (`maglesT/databsee`, `docs/03-compliance-register.md`), with the same clauses. The
 Logbook keeps the authority check per action (roles from core's token only), sessions with the idle timeout, the
-id of each person in its records, and its audit trail. Its tests: `test/accounts.test.ts` (PL-01, PL-05, LB-18, LB-20, LB-21) and `test/settings.test.ts` (PL-05).
+id of each person in its records, and its audit trail. From B1-3 equipment, instruments, rooms and products are Medhanta master data, read live through master_data's
+`report.*_v1` views with the Logbook's own login (platform PL-08; no local copy, D-02). A cut link shows "Connection to
+master data is off" and stops the feature. Before an entry refers to an item or product, the Logbook reads it and refuses
+an unknown or inactive one (A11 5). Each entry version keeps the master values it was made with (`entry_master_values`,
+platform PL-07). Its tests: `test/accounts.test.ts` (PL-01, PL-05, LB-18, LB-20, LB-21), `test/settings.test.ts`
+(PL-05, PL-08), `test/entries.test.ts` (PL-07, PL-08) and `test/platform.test.ts` (PL-08 with real database rights).
 
 ## A. Product rules
 

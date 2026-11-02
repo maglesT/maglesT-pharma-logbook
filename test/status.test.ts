@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
+import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem, addProduct } from './helpers.js';
 
 let t: TestApp;
 const c: Record<string, string> = {};
@@ -19,7 +19,7 @@ async function approve(type: string, settings: object = {}) {
   await call(t.app, c.qa!, 'POST', `/api/settings/${id}/approve`, { ...sig('qa1'), contentHash: hash });
 }
 const newItem = async (body: object = {}) =>
-  (await call(t.app, c.admin!, 'POST', '/api/equipment', { code: `ST-${++n}`, name: 'Item', kind: 'equipment', ...body })).json().id as number;
+  (await addItem(t, { code: `ST-${++n}`, name: 'Item', kind: 'equipment', ...body })) as number;
 const status = async (id: number) => (await call(t.app, c.qa!, 'GET', `/api/equipment/${id}/status`)).json();
 const entry = (who: string, id: number, body: object) => call(t.app, c[who]!, 'POST', `/api/equipment/${id}/entries`, body);
 const hashOf = async (versionId: number) =>
@@ -39,7 +39,7 @@ beforeAll(async () => {
     await seedUser(t.owner, u, [...roles]);
   }
   for (const [key, u] of [['admin', 'admin'], ['qa', 'qa1'], ['op1', 'op1'], ['sup1', 'sup1'], ['eng1', 'eng1']] as const) c[key] = (await login(t.app, u)).cookie;
-  product = (await call(t.app, c.admin!, 'POST', '/api/products', { code: 'P1', name: 'Product 1' })).json().id;
+  product = await addProduct(t, 'P1', 'Product 1');
   for (const type of ['equipment_use', 'equipment_cleaning', 'maintenance', 'calibration']) await approve(type);
 });
 afterAll(() => t.close());
@@ -266,7 +266,8 @@ describe('review fixes (S4)', () => {
   });
 
   it('LB-05: rooms cannot be set to need calibration', async () => {
-    const res = await call(t.app, c.admin!, 'POST', '/api/equipment', { code: `RM-${++n}`, name: 'Room', kind: 'area', needsCalibration: true });
+    const id = await addItem(t, { code: `RM-${++n}`, name: 'Room', kind: 'area' });
+    const res = await call(t.app, c.admin!, 'PATCH', `/api/equipment/${id}`, { needsCalibration: true, reason: 'test' });
     expect(res.statusCode).toBe(400);
   });
 

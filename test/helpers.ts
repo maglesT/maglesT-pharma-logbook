@@ -4,6 +4,7 @@ import { migrate } from '../db/migrate.js';
 import { buildApp, type AppOptions } from '../server/app.js';
 import type { Identity, SignOn } from '../server/signon.js';
 import { MEANINGS, makeProof } from '../server/signatures.js';
+import { ConnectionOff, logbookItems, logbookProducts, type Kind, type Master, type MasterItem, type MasterProduct } from '../server/master.js';
 import { randomUUID } from 'node:crypto';
 import type { Role } from '../server/auth.js';
 
@@ -42,6 +43,48 @@ export async function freshDb(): Promise<TestDb> {
 
 export interface TestApp extends TestDb {
   app: FastifyInstance;
+  master: FakeMaster;
+}
+
+// Stand-in for master_data's views (D-29): tests add, rename, retire items and cut the link.
+export interface FakeMaster extends Master {
+  items_: Map<string, MasterItem>;
+  products_: Map<string, MasterProduct>;
+  cut: boolean;
+}
+export function fakeMaster(): FakeMaster {
+  const m: FakeMaster = {
+    items_: new Map(), products_: new Map(), cut: false,
+    items: async () => { if (m.cut) throw new ConnectionOff(); return [...m.items_.values()].map((i) => ({ ...i })); },
+    products: async () => { if (m.cut) throw new ConnectionOff(); return [...m.products_.values()].map((p) => ({ ...p })); },
+  };
+  return m;
+}
+
+export interface ItemBody {
+  code: string; name?: string; kind?: Kind; location?: string; make?: string; model?: string; serial?: string;
+  sterile?: boolean; classified?: boolean; cleanHoldHours?: number | null; needsCalibration?: boolean;
+}
+// Adds an item to master data as core would, and gives it its Logbook settings; returns its local id.
+export async function addItem(t: TestApp, b: ItemBody): Promise<number> {
+  const kind = b.kind ?? 'equipment';
+  t.master.items_.set(b.code, { itemId: randomUUID(), code: b.code, name: b.name ?? `Item ${b.code}`, version: 1, active: true, kind,
+    room: kind === 'area' ? null : (b.location || null), make: b.make ?? null, model: b.model ?? null, serial: b.serial ?? null,
+    needsCalibration: kind === 'instrument' });
+  const item = (await logbookItems(t.sql, t.master)).find((i) => i.code === b.code)!;
+  await t.owner`update equipment set sterile = ${b.sterile ?? false}, classified = ${b.classified ?? false},
+    clean_hold_hours = ${b.cleanHoldHours ?? null}, needs_calibration = ${b.needsCalibration ?? kind === 'instrument'} where id = ${item.id}`;
+  return item.id;
+}
+// Changes an item in master data (a new version), e.g. a rename or retirement.
+export function changeItem(t: TestApp, code: string, change: Partial<Pick<MasterItem, 'name' | 'active' | 'room'>>) {
+  const i = t.master.items_.get(code)!;
+  t.master.items_.set(code, { ...i, ...change, version: i.version + 1 });
+}
+// Adds a product to master data; returns its local id.
+export async function addProduct(t: TestApp, code: string, name: string, active = true): Promise<number> {
+  t.master.products_.set(code, { itemId: randomUUID(), code, name, version: 1, active });
+  return (await logbookProducts(t.sql, t.master)).find((p) => p.code === code)!.id;
 }
 
 // Stand-in for Medhanta core (D-29): the people core knows, by login, with their Logbook roles. Tests change an
@@ -74,10 +117,12 @@ export const sig = (username: string) => ({ proof: proofFor(username) });
 
 export async function freshApp(opts: Pick<AppOptions, 'speech' | 'advisor'> = {}): Promise<TestApp> {
   const db = await freshDb();
-  const app = await buildApp({ sql: db.sql, signOn: fakeSignOn(), proofKey: TEST_PROOF_KEY, webRoot: '/nonexistent', ...opts });
+  const master = fakeMaster();
+  const app = await buildApp({ sql: db.sql, signOn: fakeSignOn(), proofKey: TEST_PROOF_KEY, master, webRoot: '/nonexistent', ...opts });
   return {
     ...db,
     app,
+    master,
     close: async () => {
       await app.close();
       await db.close();

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
+import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem } from './helpers.js';
 import { runIntegrityCheck } from '../server/integrity.js';
 import { SpeechError, rateLimiter, sarvamProvider, type SpeechProvider, type Translator } from '../server/voice.js';
 import { AdviceError } from '../server/advice.js';
@@ -33,7 +33,7 @@ async function approve(type: string, extra: object = {}) {
   const versions = (await call(t.app, c.qa!, 'GET', '/api/logbook-types')).json().flatMap((x: { versions: { id: number; contentHash: string }[] }) => x.versions);
   expect((await call(t.app, c.qa!, 'POST', `/api/settings/${id}/approve`, { ...sig('qa1'), contentHash: versions.find((v: { id: number }) => v.id === id).contentHash })).statusCode).toBe(200);
 }
-const newItem = async () => (await call(t.app, c.admin!, 'POST', '/api/equipment', { code: `VN-${++n}`, name: 'Item', kind: 'equipment' })).json().id as number;
+const newItem = async () => (await addItem(t, { code: `VN-${++n}`, name: 'Item', kind: 'equipment' })) as number;
 const record = (who: string, equipmentId: number, extra: object = {}) =>
   call(t.app, c[who]!, 'POST', '/api/voice-notes', { equipmentId, logbookType: 'general_log', field: 'notes', language: 'hi-IN', mimeType: 'audio/webm;codecs=opus', durationMs: 4000, audioBase64: AUDIO, ...extra });
 const logEntry = (who: string, equipmentId: number, notes: string, extra: object = {}) =>

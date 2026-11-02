@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
+import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem } from './helpers.js';
 import { AdviceError, advicePrompt, type AdviceProvider } from '../server/advice.js';
 
 // S12 breakdown suggestions (D-27). The language model is mocked: no real API calls in tests.
@@ -31,7 +31,7 @@ async function approve(type: string) {
   expect((await call(t.app, c.qa!, 'POST', `/api/settings/${id}/approve`, { ...sig('qa1'), contentHash: versions.find((v: { id: number }) => v.id === id).contentHash })).statusCode).toBe(200);
 }
 const newItem = async (name: string, model?: string) => {
-  const id = (await call(t.app, c.admin!, 'POST', '/api/equipment', { code: `AD-${++n}`, name, kind: 'equipment', location: 'Block A' })).json().id as number;
+  const id = (await addItem(t, { code: `AD-${++n}`, name, kind: 'equipment', location: 'Block A' })) as number;
   if (model) await call(t.app, c.admin!, 'PUT', `/api/equipment/${id}/details`, { details: { manufacturer: 'Acme', model }, reason: 'Initial record', expectedVersion: 0 });
   return id;
 };

@@ -60,10 +60,16 @@ export async function post(ctx: APIRequestContext, url: string, data: object) {
 
 let n = 0;
 export async function newEquipment(body: object = {}): Promise<{ id: number; code: string }> {
-  const admin = await apiAs('admin');
+  // Items are core's master data (D-29): added to the test server's stand-in, then given their Logbook settings.
+  const b = { name: 'Test item', kind: 'equipment', location: 'Block A', ...body } as { name: string; kind: string; location: string; sterile?: boolean; cleanHoldHours?: number };
   const code = `E2E-${Date.now().toString(36)}-${++n}`.toUpperCase();
-  const { id } = await post(admin, '/api/equipment', { code, name: 'Test item', kind: 'equipment', location: 'Block A', ...body });
+  const db = owner();
+  await db`insert into e2e_master_items (code, name, kind, room) values (${code}, ${b.name}, ${b.kind}, ${b.kind === 'area' ? null : b.location})`;
+  const admin = await apiAs('admin');
+  const id = ((await (await admin.get('/api/equipment')).json()) as { id: number; code: string }[]).find((e) => e.code === code)!.id;
   await admin.dispose();
+  await db`update equipment set sterile = ${b.sterile ?? false}, clean_hold_hours = ${b.cleanHoldHours ?? null} where id = ${id}`;
+  await db.end();
   return { id, code };
 }
 

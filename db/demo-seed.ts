@@ -14,6 +14,7 @@ import { buildApp } from '../server/app.js';
 import { connect, type Sql } from '../server/db.js';
 import { randomUUID } from 'node:crypto';
 import type { SignOn } from '../server/signon.js';
+import type { Kind, Master } from '../server/master.js';
 import { randomBytes } from 'node:crypto';
 import { MEANINGS, makeProof } from '../server/signatures.js';
 
@@ -84,7 +85,7 @@ export async function seedDemo(sql: Sql, opts: SeedOptions = {}): Promise<SeedRe
   const password = opts.password ?? DEFAULT_PASSWORD;
 
   const proofKey = randomBytes(32);
-  const app = await buildApp({ sql, signOn: demoSignOn(), proofKey, webRoot: '/nonexistent' });
+  const app = await buildApp({ sql, signOn: demoSignOn(), proofKey, master: demoMaster(), webRoot: '/nonexistent' });
   try {
     return await run(app, proofKey, password);
   } finally {
@@ -94,6 +95,23 @@ export async function seedDemo(sql: Sql, opts: SeedOptions = {}): Promise<SeedRe
 
 // The demo people as Medhanta core would sign them on (D-29), in this process only. On a platform installation the
 // same logins and roles must also exist in core for anyone to sign in to the demo.
+// The demo items and product as Medhanta core's master data would hold them (D-29), in this process only. On a
+// platform installation the same codes must exist in core.
+const DEMO_ITEMS: [code: string, name: string, kind: Kind, room: string | null, make: string | null, model: string | null][] = [
+  ['GRAN-1', 'Granulation room 1', 'area', null, null, null],
+  ['COMP-1', 'Compression room 1', 'area', null, null, null],
+  ['FBD-01', 'Fluid bed dryer', 'equipment', 'GRAN-1', 'Demo Process Equipment', 'FBD-120'],
+  ['PRESS-01', 'Rotary tablet press', 'equipment', 'COMP-1', 'Demo Press Works', 'RTP-37'],
+  ['HT-01', 'Tablet hardness tester', 'instrument', 'COMP-1', 'Demo Instruments', 'HT-500'],
+];
+const DEMO_PRODUCT = { code: 'RAB-GR-20', name: 'Rabeprazole sodium 20 mg gastro-resistant tablets (DEMO-ONLY)' };
+function demoMaster(): Master {
+  const items = DEMO_ITEMS.map(([code, name, kind, room, make, model]) => ({ itemId: randomUUID(), code, name, version: 1, active: true, kind, room,
+    make, model, serial: null, needsCalibration: kind === 'instrument' }));
+  const product = { itemId: randomUUID(), ...DEMO_PRODUCT, version: 1, active: true };
+  return { items: async () => items, products: async () => [product] };
+}
+
 const subs = new Map<string, string>();
 function demoSignOn(): SignOn {
   const who = async (login: string) => {
@@ -135,9 +153,10 @@ async function run(app: FastifyInstance, proofKey: Buffer, password: string): Pr
 
   // Master data.
   if (!(await api('admin', 'GET', '/api/site'))) await api('admin', 'PUT', '/api/site', { name: 'Demo Tablet Plant', code: 'DEMO', reason: DEMO_REASON });
-  const product = (await api('admin', 'POST', '/api/products', { code: 'RAB-GR-20', name: 'Rabeprazole sodium 20 mg gastro-resistant tablets (DEMO-ONLY)' })).id as number;
-  const item = async (code: string, name: string, kind: 'equipment' | 'instrument' | 'area', location: string, sopRefs = '', more: object = {}) => {
-    const id = (await api('admin', 'POST', '/api/equipment', { code, name, kind, location })).id as number;
+  const product = (await api('admin', 'GET', '/api/products') as { id: number; code: string }[]).find((p) => p.code === DEMO_PRODUCT.code)!.id;
+  const listed = await api('admin', 'GET', '/api/equipment') as { id: number; code: string }[];
+  const item = async (code: string, _name: string, _kind: Kind, _location: string, sopRefs = '', more: object = {}) => {
+    const id = listed.find((e) => e.code === code)!.id;
     if (sopRefs) {
       await api('admin', 'PUT', `/api/equipment/${id}/details`, { details: { sopRefs, ...more }, reason: DEMO_REASON, expectedVersion: 0 });
     }

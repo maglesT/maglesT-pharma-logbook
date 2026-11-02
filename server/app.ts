@@ -20,6 +20,7 @@ import { adviceRoutes } from './routes/advice.js';
 import type { SpeechProvider } from './voice.js';
 import type { AdviceProvider } from './advice.js';
 import type { SignOn } from './signon.js';
+import { ConnectionOff, type Master } from './master.js';
 
 export const VERSION = '0.5.0';
 
@@ -30,6 +31,8 @@ export interface AppOptions {
   signOn: SignOn;
   // Key for the short signing proofs made after core's re-authentication (B1-4); random per process by default.
   proofKey?: Buffer;
+  // Master data read live from master_data's views (D-29); tests pass a stand-in.
+  master: Master;
   logger?: boolean;
   webRoot?: string;
   // Secure flag on the session cookie; off only for plain-HTTP development.
@@ -40,10 +43,16 @@ export interface AppOptions {
   advisor?: AdviceProvider | null;
 }
 
-export async function buildApp({ sql, signOn, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ sql, signOn, master, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger, trustProxy: true });
   app.decorate('cookieSecure', cookieSecure);
   app.decorate('proofKey', proofKey);
+  app.decorate('master', master);
+  // A cut master-data link stops the feature with one message (platform D-02, PL-08).
+  app.setErrorHandler((err, _req, reply) => {
+    if (err instanceof ConnectionOff) return reply.code(503).send({ error: 'connection_off', message: err.message });
+    return reply.send(err);
+  });
   await app.register(fastifyCookie);
 
   app.addHook('onRequest', async (req, reply) => {
@@ -92,5 +101,6 @@ declare module 'fastify' {
   interface FastifyInstance {
     cookieSecure: boolean;
     proofKey: Buffer;
+    master: Master;
   }
 }

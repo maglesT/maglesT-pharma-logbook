@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { connect, type Sql } from '../server/db.js';
 import { MIGRATIONS_DIR } from '../db/migrate.js';
 import { loadConfig } from '../server/config.js';
+import { ConnectionOff, sqlMaster } from '../server/master.js';
 import { freshDb, TEST_DATABASE_URL, type TestDb } from './helpers.js';
 
 // D-29 (B1-1): the Logbook's migrations on a Medhanta platform database. test/platform/database.sql is a copy of the
@@ -101,8 +102,63 @@ describe('Logbook on a platform database (D-29)', () => {
 
   it('LB-18 on the platform the app reads its own database from LOGBOOK_DATABASE_URL, as the restricted login', () => {
     const url = 'postgres://logbook_app:pw@db:5432/logbook';
-    const env = { LOGBOOK_DATABASE_URL: url, OIDC_ISSUER: 'https://site.test/oidc', OIDC_CLIENT_SECRET: 'x', OIDC_REDIRECT_URI: 'https://logbook.site.test/cb' };
+    const env = { LOGBOOK_DATABASE_URL: url, MASTER_DATA_DATABASE_URL: 'postgres://logbook_app:pw@db:5432/master_data', OIDC_ISSUER: 'https://site.test/oidc', OIDC_CLIENT_SECRET: 'x', OIDC_REDIRECT_URI: 'https://logbook.site.test/cb' };
     expect(loadConfig(env).DATABASE_URL).toBe(url);
     expect(loadConfig(env).DB_APP_ROLE).toBeUndefined();
+  });
+});
+
+// PL-08 with real PostgreSQL rights: a master_data database whose report views have the columns the Logbook reads
+// (the platform's own view contract is tested in maglesT/databsee). The Logbook's login may read the views only.
+describe('master data through the platform views (D-29)', () => {
+  const MD = `mdplat_${process.pid}`;
+  let mdAdmin: Sql;
+  let md: Sql;
+  beforeAll(async () => {
+    await admin.unsafe(`drop database if exists ${MD}`);
+    await admin.unsafe(`create database ${MD}`);
+    await admin.unsafe(`revoke all on database ${MD} from public`);
+    await admin.unsafe(`grant connect on database ${MD} to logbook_app`);
+    mdAdmin = connect(TEST_DATABASE_URL.replace(/\/[^/]+$/, `/${MD}`));
+    await mdAdmin.unsafe(`
+      create table item (id uuid primary key default gen_random_uuid(), kind text, code text, name text, version int, active boolean, room_code text);
+      insert into item (kind, code, name, version, active, room_code) values
+        ('equipment', 'FBD-01', 'Fluid bed dryer', 1, true, 'GRAN-1'), ('room', 'GRAN-1', 'Granulation room 1', 1, true, null),
+        ('instrument', 'HT-01', 'Hardness tester', 2, false, 'GRAN-1'), ('product', 'P1', 'Product 1', 1, true, null);
+      create schema report;
+      create view report.equipment_v1 as select id, code, name, version, active, room_code, null::text as make, null::text as model, null::text as serial from item where kind = 'equipment';
+      create view report.instrument_v1 as select id, code, name, version, active, room_code, null::text as make, null::text as model, null::text as serial, true as needs_calibration from item where kind = 'instrument';
+      create view report.room_v1 as select id, code, name, version, active from item where kind = 'room';
+      create view report.product_v1 as select id, code, name, version, active from item where kind = 'product';
+      grant usage on schema report to logbook_app;
+      grant select on all tables in schema report to logbook_app;`);
+    md = connect(TEST_DATABASE_URL.replace(/\/[^/]+$/, `/${MD}`), { role: 'logbook_app' });
+  });
+  afterAll(async () => {
+    await md?.end();
+    await mdAdmin?.end();
+    await admin?.unsafe(`drop database if exists ${MD}`);
+  });
+
+  it('PL-08: the Logbook reads items and products through the views with its own login, never the raw table', async () => {
+    const m = sqlMaster(md);
+    expect((await m.items()).map((i) => [i.code, i.kind, i.room, i.active]).sort()).toEqual([
+      ['FBD-01', 'equipment', 'GRAN-1', true], ['GRAN-1', 'area', null, true], ['HT-01', 'instrument', 'GRAN-1', false]]);
+    expect((await m.products()).map((p) => p.code)).toEqual(['P1']);
+    await expect(md`select * from item`).rejects.toMatchObject({ code: '42501' });
+  });
+
+  it('PL-08: after the link is cut the next read says "connection off", even on an open connection', async () => {
+    await mdAdmin.unsafe('revoke select on all tables in schema report from logbook_app');
+    try {
+      await expect(sqlMaster(md).items()).rejects.toBeInstanceOf(ConnectionOff);
+      await expect(sqlMaster(md).products()).rejects.toThrow('Connection to master data is off. Ask your administrator.');
+    } finally {
+      await mdAdmin.unsafe('grant select on all tables in schema report to logbook_app');
+    }
+    // master_data unreachable (server down, network): the same message, not an error page.
+    const nowhere = connect('postgres://logbook_app:x@127.0.0.1:1/master_data');
+    await expect(sqlMaster(nowhere).items()).rejects.toBeInstanceOf(ConnectionOff);
+    await nowhere.end();
   });
 });

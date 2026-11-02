@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { asReport, call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
+import { asReport, call, freshApp, login, seedUser, type TestApp, proofFor, addItem, addProduct } from './helpers.js';
 
 // S15 (D-28): read-only report views for the Deviations & CAPA system, read through logbook_report.
 
@@ -28,7 +28,7 @@ async function approve(type: string, sopRef: string, approveIt = true) {
   expect(res.statusCode).toBe(200);
 }
 const newItem = async (code: string, kind: 'equipment' | 'instrument' = 'equipment') =>
-  (await call(t.app, c.admin!, 'POST', '/api/equipment', { code, name: `Item ${code}`, kind, location: 'Room 7' })).json().id as number;
+  (await addItem(t, { code, name: `Item ${code}`, kind, location: 'Room 7' })) as number;
 const entry = async (who: string, id: number, body: object) => {
   const res = await call(t.app, c[who]!, 'POST', `/api/equipment/${id}/entries`, body);
   expect(res.statusCode, res.body).toBe(201);
@@ -49,7 +49,7 @@ beforeAll(async () => {
     await seedUser(t.owner, u, [...roles]);
   }
   for (const u of ['admin', 'qa1', 'op1', 'sup1', 'eng1']) c[u === 'qa1' ? 'qa' : u] = (await login(t.app, u)).cookie;
-  product = (await call(t.app, c.admin!, 'POST', '/api/products', { code: 'PCM500', name: 'Paracetamol 500 mg Tablets' })).json().id;
+  product = await addProduct(t, 'PCM500', 'Paracetamol 500 mg Tablets');
   await approve('equipment_use', '');
   await approve('equipment_cleaning', '');
   await approve('maintenance', 'SOP-ENG-010');
