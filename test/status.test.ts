@@ -1,12 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PASSWORD, call, freshApp, login, seedUser, type TestApp } from './helpers.js';
+import { call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
 
 let t: TestApp;
 const c: Record<string, string> = {};
 let product: number;
 let n = 0;
 
-const sig = (username: string) => ({ username, password: PASSWORD });
+const sig = (username: string) => ({ proof: proofFor(username) });
 const now = () => new Date().toISOString();
 // A complete S9 breakdown record, repair ended (D-25).
 const breakdown = (description: string) => ({ kind: 'breakdown', description, occurredAt: new Date(Date.now() - 5 * 60_000).toISOString(), failureCategory: 'mechanical', partsNone: true, doneBy: 'in_house' });

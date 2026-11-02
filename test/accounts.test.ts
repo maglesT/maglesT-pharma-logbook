@@ -99,6 +99,21 @@ describe('sign-on through core', () => {
     expect(cookie).toBe('');
   });
 
+  it('PL-05: /sign asks core for the signed-in person\'s password again and hands the sign window a signing proof', async () => {
+    await seedUser(t.owner, uniq('op'), ['operator']);
+    const { cookie } = await login(t.app, `op${n}`);
+    expect((await t.app.inject({ method: 'GET', url: '/sign' })).statusCode).toBe(401);
+    const start = await t.app.inject({ method: 'GET', url: '/sign', headers: { cookie } });
+    expect(start.statusCode).toBe(302);
+    expect(new URL(String(start.headers.location), 'http://x').searchParams.get('code')).toBe(`op${n}`);   // login_hint: this person
+    const pending = start.cookies.find((c) => c.name === 'signon')!;
+    expect(pending.value).toMatch(/\.sign$/);
+    const page = await t.app.inject({ method: 'GET', url: String(start.headers.location), headers: { cookie: `signon=${pending.value}` } });
+    expect(page.body).toMatch(/"signProof":"[^"]+"/);
+    expect(page.body).toContain('location.origin');   // posted only to the Logbook's own window
+    expect(page.cookies.find((c) => c.name === 'sid')).toBeUndefined();   // a signature never opens a session
+  });
+
   it(`LB-21: session expires after ${POLICY.sessionIdleMinutes} idle minutes`, async () => {
     await seedUser(t.owner, uniq('op'), ['operator']);
     const { cookie } = await login(t.app, `op${n}`);
@@ -127,26 +142,14 @@ describe('sign-on through core', () => {
     expect(await t.owner`select 1 from sessions where id = ${sessionKey(raw)}`).toHaveLength(1);
   });
 
-  it('LB-21: background alert polling does not keep an idle session alive', async () => {
+  it('LB-21: background polling does not keep an idle session alive', async () => {
     await seedUser(t.owner, uniq('qa'), ['qa']);
     const { cookie } = await login(t.app, `qa${n}`);
     await t.owner`update sessions set last_seen_at = now() - interval '14 minutes' where id = ${sid(cookie)}`;
-    const bg = await t.app.inject({ method: 'GET', url: '/api/alerts', headers: { cookie, 'x-background-poll': '1' } });
+    const bg = await t.app.inject({ method: 'GET', url: '/api/me', headers: { cookie, 'x-background-poll': '1' } });
     expect(bg.statusCode).toBe(200);
     const [row] = await t.owner`select now() - last_seen_at > interval '13 minutes' as stale from sessions where id = ${sid(cookie)}`;
     expect(row!.stale).toBe(true);
-  });
-});
-
-describe('misuse alerts (signing lockouts until B1-4)', () => {
-  it('LB-21: operators cannot see misuse alerts; acknowledging one is audited', async () => {
-    const [a] = await t.owner<{ id: number }[]>`insert into alerts (kind, message) values ('lockout', 'test alert') returning id::int`;
-    await seedUser(t.owner, uniq('op'), ['operator']);
-    const op = await login(t.app, `op${n}`);
-    expect((await call(t.app, op.cookie, 'GET', '/api/alerts')).statusCode).toBe(403);
-    const qa = await login(t.app, 'qa1');
-    expect((await call(t.app, qa.cookie, 'POST', `/api/alerts/${a!.id}/ack`)).statusCode).toBe(200);
-    expect(await auditRows('alert.acknowledged', a!.id)).toHaveLength(1);
   });
 });
 

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PASSWORD, call, freshApp, login, seedUser, type TestApp } from './helpers.js';
+import { call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
 import { runIntegrityCheck } from '../server/integrity.js';
 import { SpeechError, rateLimiter, sarvamProvider, type SpeechProvider, type Translator } from '../server/voice.js';
 import { AdviceError } from '../server/advice.js';
@@ -23,7 +23,7 @@ const speech: SpeechProvider = {
   },
 };
 
-const sig = (username: string) => ({ username, password: PASSWORD });
+const sig = (username: string) => ({ proof: proofFor(username) });
 const now = () => new Date().toISOString();
 const AUDIO = Buffer.from('fake-webm-audio-bytes').toString('base64');
 
@@ -120,8 +120,8 @@ describe('confirmation (LB-19, LB-20)', () => {
     expect((await logEntry('op1', id, note.translation)).json().error).toBe('voice_confirmation_required');
     // Naming the voice note but without the confirmation signature.
     expect((await logEntry('op1', id, note.translation, { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation, shownHash: note.shownHash }] })).json().error).toBe('voice_signature_required');
-    // With a wrong password.
-    expect((await logEntry('op1', id, note.translation, { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation, shownHash: note.shownHash }], voiceSignature: { username: 'op1', password: 'nope' } })).statusCode).toBe(401);
+    // With another person's proof.
+    expect((await logEntry('op1', id, note.translation, { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation, shownHash: note.shownHash }], voiceSignature: sig('op2') })).statusCode).toBe(401);
     // The field text differs from the text being confirmed.
     expect((await logEntry('op1', id, 'Something else', { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation, shownHash: note.shownHash }], voiceSignature: sig('op1') })).json().error).toBe('voice_check_failed');
     expect((await t.owner`select count(*)::int as n from entries`)[0]!.n).toBe(before);

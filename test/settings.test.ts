@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { POLICY } from '../server/auth.js';
-import { PASSWORD, call, freshApp, login, seedUser, type TestApp } from './helpers.js';
+import { TEST_PROOF_KEY, call, directory, freshApp, login, proofFor, seedUser, type TestApp } from './helpers.js';
+import { PROOF_SECONDS, makeProof } from '../server/signatures.js';
 
 let t: TestApp;
 let admin: string;
@@ -14,8 +15,8 @@ const shownHash = async (id: number) => {
   for (const ty of types) for (const v of ty.versions) if (v.id === id) return v.contentHash as string;
   throw new Error('version not found');
 };
-const approve = async (cookie: string, id: number, username: string, password = PASSWORD) =>
-  call(t.app, cookie, 'POST', `/api/settings/${id}/approve`, { username, password, contentHash: await shownHash(id) });
+const approve = async (cookie: string, id: number, username: string, proof = proofFor(username)) =>
+  call(t.app, cookie, 'POST', `/api/settings/${id}/approve`, { proof, contentHash: await shownHash(id) });
 
 beforeAll(async () => {
   t = await freshApp();
@@ -131,23 +132,27 @@ describe('logbook settings (LB-24)', () => {
 });
 
 describe('e-signatures (LB-19, LB-20)', () => {
-  it('LB-20: signing needs the signer\'s own user ID and password; anything else is refused and audited', async () => {
+  it('PL-05: a signature needs core\'s fresh re-authentication of the signed-in person; anything else is refused and audited', async () => {
     const id = await draft('glove_integrity');
-    expect((await approve(qa, id, 'qa1', 'wrong-pass-1')).statusCode).toBe(401);
-    expect((await approve(qa, id, 'op1')).statusCode).toBe(401);
-    const fails = await t.owner`select 1 from audit_log where action = 'signature.failed' and object_id = ${String(id)}`;
-    expect(fails).toHaveLength(2);
+    expect((await approve(qa, id, 'op1')).statusCode).toBe(401);                              // another person
+    expect((await approve(qa, id, 'qa1', 'made-up.proof')).statusCode).toBe(401);             // not made by /cb
+    const forged = makeProof(Buffer.alloc(32, 9), { sub: directory.get('qa1')!.sub, roles: ['qa'] });
+    expect((await approve(qa, id, 'qa1', forged)).statusCode).toBe(401);                       // wrong key
+    expect((await approve(qa, id, 'qa1', proofFor('qa1', Date.now() - (PROOF_SECONDS + 1) * 1000))).statusCode).toBe(401); // too old
+    const fails = await t.owner`select reason from audit_log where action = 'signature.failed' and object_id = ${String(id)} order by id`;
+    expect(fails.map((f) => f.reason)).toEqual(['meaning approved: signed by another person', 'meaning approved: invalid proof',
+      'meaning approved: invalid proof', 'meaning approved: proof expired']);
     expect(await t.owner`select 1 from signatures where object_id = ${id}`).toHaveLength(0);
   });
 
-  it(`LB-20: ${POLICY.maxFailedAttempts} wrong signing passwords lock the account like failed logins`, async () => {
-    const qaId = await seedUser(t.owner, `qa_lock${++n}`, ['qa']);
-    const cookie = (await login(t.app, `qa_lock${n}`)).cookie;
+  it('PL-05: a signing proof is used once, and refused if the signer\'s rights changed at core', async () => {
     const id = await draft('steriliser_test');
-    for (let i = 0; i < POLICY.maxFailedAttempts; i++) {
-      await approve(cookie, id, `qa_lock${n}`, 'wrong-pass-1');
-    }
-    expect(await t.owner`select 1 from users where id = ${qaId} and locked_at is not null`).toHaveLength(1);
+    const proof = proofFor('qa1');
+    expect((await approve(qa, id, 'qa1', proof)).statusCode).toBe(200);
+    const again = await draft('general_log');
+    expect((await approve(qa, again, 'qa1', proof)).statusCode).toBe(401);
+    const changed = makeProof(TEST_PROOF_KEY, { sub: directory.get('qa1')!.sub, roles: ['qa', 'supervisor'] });
+    expect((await approve(qa, again, 'qa1', changed)).statusCode).toBe(401);
   });
 
   it('LB-19: a signature shows printed name, meaning and server time, and is linked to the content by hash', async () => {
@@ -196,7 +201,7 @@ describe('review fixes (S2)', () => {
       effectiveFrom: new Date().toISOString(),
       reason: 'late edit',
     });
-    const res = await call(t.app, qa, 'POST', `/api/settings/${id}/approve`, { username: 'qa1', password: PASSWORD, contentHash: hash });
+    const res = await call(t.app, qa, 'POST', `/api/settings/${id}/approve`, { proof: proofFor('qa1'), contentHash: hash });
     expect(res.statusCode).toBe(409);
     expect(res.json().error).toBe('content_changed');
   });
@@ -215,14 +220,4 @@ describe('review fixes (S2)', () => {
     await expect(t.sql`insert into equipment (code, name, kind) values ('tab-77', 'Other', 'equipment')`).rejects.toThrow(/duplicate key/);
   });
 
-  it('LB-20: a locked account cannot sign even with the right password', async () => {
-    const qaId = await seedUser(t.owner, `qa_locked${++n}`, ['qa']);
-    const cookie = (await login(t.app, `qa_locked${n}`)).cookie;
-    const id = await draft('general_log');
-    const hash = await shownHash(id);
-    await t.owner`update users set locked_at = now() where id = ${qaId}`;
-    // The session itself ends when the account is locked.
-    const res = await call(t.app, cookie, 'POST', `/api/settings/${id}/approve`, { username: `qa_locked${n}`, password: PASSWORD, contentHash: hash });
-    expect(res.statusCode).toBe(401);
-  });
 });

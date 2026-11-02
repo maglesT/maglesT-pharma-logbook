@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { PASSWORD, approveSettings, logIn, newEquipment, openLogbook } from './helpers.js';
+import { approveSettings, logIn, newEquipment, openLogbook } from './helpers.js';
 
 // The speech service is mocked by e2e/server.ts; no real API calls (D-26).
 test.beforeAll(async () => {
@@ -23,13 +23,9 @@ test('LB-20: a voice note becomes entry text only after the speaker signs the En
   await expect(form.locator('.voice-draft')).toContainText('You said: मोटर अचानक बंद हो गई');
   await form.getByLabel(/^Notes/).fill('The motor stopped suddenly during mixing.');
 
-  // Not saved without the confirmation signature.
-  await form.getByRole('button', { name: 'Save' }).click();
-  await expect(form.locator('.error')).toContainText('Sign to confirm the voice-note text');
+  // Saved only with the speaker's confirmation signature (password again at core, PL-05).
   await expect(form.locator('.signbox')).toContainText('I confirm this English text is a true record of what I said.');
-  await form.getByLabel('Voice note user ID').fill('op1');
-  await form.getByLabel('Voice note password').fill(PASSWORD);
-  await form.getByRole('button', { name: 'Save' }).click();
+  await form.getByRole('button', { name: 'Sign and save' }).click();
   await expect(form).toHaveCount(0);
 
   const row = page.getByRole('row').filter({ hasText: 'during mixing' });

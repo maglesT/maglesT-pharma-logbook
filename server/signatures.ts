@@ -1,22 +1,43 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import type { Sql, Tx } from './db.js';
 import { audit } from './audit.js';
-import type { SessionUser } from './auth.js';
-import { recordFailure } from './lockout.js';
-import { verifyPassword } from './passwords.js';
+import { asRoles, type SessionUser } from './auth.js';
+import type { Identity } from './signon.js';
 
 export const MEANINGS = ['performed', 'verified', 'released', 'reviewed', 'approved', 'corrected', 'voice_confirmed'] as const;
 export type Meaning = (typeof MEANINGS)[number];
 
-// What the signer types: both components, every time (P11 11.200(a)(1); LB-20).
-export const signBody = z.object({
-  username: z.string().min(1).max(40),
-  password: z.string().min(1).max(200),
+// B1-4 (D-29, platform PL-05): at every signature the signer enters their password again at Medhanta core
+// (prompt=login, max_age=0). Core's answer becomes a short signing proof, which the request then carries. Core counts
+// wrong passwords towards its lockout and alerts (PL-04); the Logbook never sees a password.
+export const proofOnly = z.object({ proof: z.string().min(1).max(2000) });
+export const signBody = proofOnly.extend({
   // Hash of the content the signer was shown; signing is refused if the content changed since.
   contentHash: z.string().regex(/^[0-9a-f]{64}$/),
 });
 export type SignInput = z.infer<typeof signBody>;
+
+// A proof is good for this long after the password was entered, and only once.
+export const PROOF_SECONDS = 120;
+
+interface ProofBody { sub: string; roles: string[]; at: number; nonce: string }
+const mac = (key: Buffer, body: string) => createHmac('sha256', key).update(body).digest('base64url');
+
+/** Made by /cb right after core re-authenticated the person. */
+export function makeProof(key: Buffer, who: Pick<Identity, 'sub' | 'roles'>, at = Date.now()): string {
+  const body = Buffer.from(JSON.stringify({ sub: who.sub, roles: who.roles, at, nonce: randomBytes(16).toString('base64url') } satisfies ProofBody)).toString('base64url');
+  return `${body}.${mac(key, body)}`;
+}
+
+function readProof(key: Buffer, proof: string): ProofBody | null {
+  const [body, tag] = proof.split('.');
+  if (!body || !tag) return null;
+  const want = Buffer.from(mac(key, body));
+  const got = Buffer.from(tag);
+  if (want.length !== got.length || !timingSafeEqual(want, got)) return null;
+  try { return JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as ProofBody; } catch { return null; }
+}
 
 // Stable JSON (sorted keys) so the same content always gives the same hash.
 export function canonical(value: unknown): string {
@@ -40,40 +61,40 @@ export class SignError extends Error {
   }
 }
 
-// Proof that the signer re-entered both components just now; only authenticateSigner creates one.
+// Proof that the signer re-entered their password just now; only authenticateSigner creates one.
 const AUTHENTICATED: unique symbol = Symbol('authenticated');
 export interface AuthenticatedSigner {
   [AUTHENTICATED]: true;
   user: SessionUser;
+  nonce: string;      // spent by sign(), in the transaction that stores the signature
 }
 
-// LB-20: checks user ID + password in its own transaction, so a failed attempt is always
-// recorded and counts towards lockout even though the signing itself is refused.
+// PL-05 / LB-20: the signing proof must be core's fresh re-authentication of the signed-in person, with the same
+// Logbook roles, and unused. A refused proof is audited.
 export async function authenticateSigner(
   sql: Sql,
+  key: Buffer,
   user: SessionUser,
-  input: SignInput,
+  input: { proof: string },
   context: { objectType: string; objectId: number; meaning: Meaning },
 ): Promise<AuthenticatedSigner> {
   // The Admin role administers the system and never signs GMP records (DI Q4 segregation).
   if (user.roles.includes('admin')) throw new SignError('not_allowed');
+  const p = readProof(key, input.proof);
   const ok = await sql.begin(async (tx) => {
-    const [row] = await tx<{ password_hash: string; failed: number; usable: boolean }[]>`
-      select password_hash, failed_attempts as failed, (active and locked_at is null) as usable
-      from users where id = ${user.id} for update`;
-    if (row && !row.usable) return false;
-    const idMatches = input.username.trim().toLowerCase() === user.username;
-    if (row && idMatches && (await verifyPassword(input.password, row.password_hash))) {
-      await tx`update users set failed_attempts = 0 where id = ${user.id}`;
-      return true;
-    }
+    const [u] = await tx<{ employee_id: string | null }[]>`select employee_id::text from users where id = ${user.id}`;
+    const why = !p ? 'invalid proof'
+      : Date.now() - p.at > PROOF_SECONDS * 1000 || p.at > Date.now() + 5_000 ? 'proof expired'
+      : !u?.employee_id || p.sub !== u.employee_id ? 'signed by another person'
+      : asRoles(p.roles).join() !== user.roles.join() ? 'rights changed'
+      : null;
+    if (!why && !(await tx`select 1 from signing_proofs where nonce = ${p!.nonce}`).length) return true;
     await audit(tx, { actorId: user.id, action: 'signature.failed', objectType: context.objectType,
-      objectId: context.objectId, reason: `meaning ${context.meaning}` });
-    if (row) await recordFailure(tx, user.id, user.username, row.failed);
+      objectId: context.objectId, reason: `meaning ${context.meaning}: ${why ?? 'proof already used'}` });
     return false;
   });
   if (!ok) throw new SignError('wrong_credentials');
-  return { [AUTHENTICATED]: true, user };
+  return { [AUTHENTICATED]: true, user, nonce: p!.nonce };
 }
 
 export interface SignRequest {
@@ -96,6 +117,10 @@ export async function sign(tx: Tx, req: SignRequest): Promise<{ id: number; sign
   if (hash !== shownHash) throw new SignError('content_changed');
   const [existing] = await tx`select 1 from signatures where object_type = ${objectType} and object_id = ${objectId} and meaning = ${meaning}`;
   if (existing) throw new SignError('already_signed');
+  // The proof is spent here: once, by this save only (PL-05).
+  const [spent] = await tx`insert into signing_proofs (nonce, user_id) values (${signer.nonce}, ${user.id})
+    on conflict (nonce) do update set used_at = excluded.used_at where signing_proofs.tx = txid_current() returning 1`;
+  if (!spent) throw new SignError('wrong_credentials');
 
   const [sig] = await tx<{ id: number; signed_at: Date }[]>`
     insert into signatures (object_type, object_id, user_id, printed_name, meaning, content_hash)

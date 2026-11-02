@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PASSWORD, call, freshApp, login, seedUser, type TestApp } from './helpers.js';
+import { call, freshApp, login, proofFor, seedUser, type TestApp } from './helpers.js';
 
 let t: TestApp;
 const cookies: Record<string, string> = {};
@@ -9,7 +9,7 @@ let cleanRoom: number;
 let balance: number;
 let product: number;
 
-const sig = (username: string, password = PASSWORD) => ({ username, password });
+const sig = (username: string) => ({ proof: proofFor(username) });
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 const now = () => new Date().toISOString();
 

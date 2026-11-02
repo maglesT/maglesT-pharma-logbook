@@ -4,7 +4,7 @@ import { connect } from '../server/db.js';
 import { migrate } from '../db/migrate.js';
 import { buildApp } from '../server/app.js';
 import globalSetup from '../test/global-setup.js';
-import { PASSWORD, TEST_DATABASE_URL, fakeSignOn, login, seedUser, call } from '../test/helpers.js';
+import { TEST_DATABASE_URL, TEST_PROOF_KEY, fakeSignOn, login, proofFor, seedUser, call } from '../test/helpers.js';
 import { E2E_PORT, E2E_SCHEMA, USERS } from './config.js';
 import type { SpeechProvider } from '../server/voice.js';
 
@@ -29,7 +29,7 @@ for (const [username, roles] of Object.entries(USERS)) await seedUser(schemaOwne
 await schemaOwner.end();
 
 const sql = connect(TEST_DATABASE_URL, { role: 'logbook_app', searchPath: E2E_SCHEMA });
-const app = await buildApp({ sql, signOn: fakeSignOn(), webRoot: new URL('../dist/web', import.meta.url).pathname, cookieSecure: false, speech });
+const app = await buildApp({ sql, signOn: fakeSignOn(), proofKey: TEST_PROOF_KEY, webRoot: new URL('../dist/web', import.meta.url).pathname, cookieSecure: false, speech });
 
 const admin = (await login(app, 'admin')).cookie;
 const qa = (await login(app, 'qa1')).cookie;
@@ -39,7 +39,7 @@ for (const type of ['equipment_use', 'equipment_cleaning', 'maintenance', 'calib
   const id = (await call(app, admin, 'POST', '/api/settings', { logbookType: type, settings, effectiveFrom: new Date().toISOString() })).json().id;
   const versions = (await call(app, qa, 'GET', '/api/logbook-types')).json().flatMap((t: { versions: { id: number; contentHash: string }[] }) => t.versions);
   const hash = versions.find((v: { id: number }) => v.id === id).contentHash;
-  await call(app, qa, 'POST', `/api/settings/${id}/approve`, { username: 'qa1', password: PASSWORD, contentHash: hash });
+  await call(app, qa, 'POST', `/api/settings/${id}/approve`, { proof: proofFor('qa1'), contentHash: hash });
 }
 await call(app, admin, 'POST', '/api/logout');
 await call(app, qa, 'POST', '/api/logout');

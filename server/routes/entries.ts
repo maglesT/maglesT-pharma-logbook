@@ -5,7 +5,7 @@ import { audit } from '../audit.js';
 import { parseId, requireRole, type SessionUser } from '../auth.js';
 import { LOGBOOK_TYPES, typeByKey, type LogbookSettings } from '../logbook-types.js';
 import { DATA_SCHEMAS, REPORTED_FIELDS, VERIFIERS, checkData, mayCorrect, mayRecord, performerSigns, verificationNeeded, type EntryContext, type EquipmentInfo } from '../entries.js';
-import { SignError, authenticateSigner, contentHash, sign, signBody, type SignInput } from '../signatures.js';
+import { SignError, authenticateSigner, contentHash, proofOnly, sign, signBody, type AuthenticatedSigner } from '../signatures.js';
 import { settingsInForce } from './settings.js';
 import { allStatuses, statusOf } from '../status.js';
 import { VoiceError, confirmVoiceNotes, unsignedDrafts, voiceNotesFor, type VoiceUse } from '../voice.js';
@@ -13,7 +13,8 @@ import { VoiceError, confirmVoiceNotes, unsignedDrafts, voiceNotesFor, type Voic
 // Product default (LB-04): an activity time older than this makes the entry a late entry.
 export const LATE_MINUTES = 30;
 
-const credentials = z.object({ username: z.string().min(1).max(40), password: z.string().min(1).max(200) });
+// A signing proof from core's re-authentication (B1-4, PL-05).
+const credentials = proofOnly;
 // D-26: voice notes confirmed with this save, and the speaker's separate confirmation signature.
 const voiceFields = {
   voiceNotes: z.array(z.object({ id: z.number().int().positive(), field: z.string().max(40), finalText: z.string().max(2000), shownHash: z.string().regex(/^[0-9a-f]{64}$/) })).max(10).default([]),
@@ -183,12 +184,14 @@ async function dbNow(tx: Tx): Promise<Date> {
   return r!.now;
 }
 
-// D-26: the speaker re-enters user ID and password to confirm voice-note text; checked before the
-// transaction so a wrong password always counts.
-async function voiceSigner(sql: Sql, user: SessionUser, b: { voiceNotes: VoiceUse[]; voiceSignature?: { username: string; password: string } }) {
+// D-26: the speaker confirms voice-note text with a signature of its own. One re-authentication at core may serve
+// both signatures of one save (same proof): the signer entered both components for this save (11.200(a)(1)).
+async function voiceSigner(sql: Sql, key: Buffer, user: SessionUser, b: { voiceNotes: VoiceUse[]; voiceSignature?: { proof: string }; signature?: { proof: string } },
+  main: AuthenticatedSigner | null) {
   if (!b.voiceNotes.length) return null;
   if (!b.voiceSignature) throw new EntryError(400, 'voice_signature_required', ['Sign to confirm the voice-note text.']);
-  return authenticateSigner(sql, user, { ...b.voiceSignature, contentHash: '0'.repeat(64) }, { objectType: 'voice_note', objectId: 0, meaning: 'voice_confirmed' });
+  if (main && b.signature?.proof === b.voiceSignature.proof) return main;
+  return authenticateSigner(sql, key, user, b.voiceSignature, { objectType: 'voice_note', objectId: 0, meaning: 'voice_confirmed' });
 }
 
 // Refuses a voice translation that is not being confirmed now; links and signs those that are.
@@ -272,10 +275,10 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
       if (!mayRecord(b.logbookType, user.roles)) throw new EntryError(403, 'forbidden');
       const signs = performerSigns(b.logbookType);
       if (signs && !b.signature) throw new EntryError(400, 'signature_required');
-      // Authenticate first, in its own transaction, so a wrong password always counts (LB-20).
-      const signer = signs ? await authenticateSigner(sql, user, { ...b.signature!, contentHash: '0'.repeat(64) } as SignInput,
+      // Check the signing proofs first, in their own transaction, so a refused one is always audited (LB-20).
+      const signer = signs ? await authenticateSigner(sql, app.proofKey, user, b.signature!,
         { objectType: 'entry', objectId: 0, meaning: 'performed' }) : null;
-      const voice = await voiceSigner(sql, user, b);
+      const voice = await voiceSigner(sql, app.proofKey, user, b, signer);
 
       const created = await sql.begin(async (tx) => {
         const eq = await loadEquipment(tx, equipmentId);
@@ -343,9 +346,9 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
       const repair = peek.logbook_type === 'maintenance';
       if (repair && (!b.signature || !b.data)) throw new EntryError(400, 'signature_required');
       if (!repair && b.voiceNotes.length) throw new EntryError(400, 'check_failed', ['Ending a use takes no voice note.']);
-      const signer = repair ? await authenticateSigner(sql, user, { ...b.signature!, contentHash: '0'.repeat(64) } as SignInput,
+      const signer = repair ? await authenticateSigner(sql, app.proofKey, user, b.signature!,
         { objectType: 'entry', objectId: id, meaning: 'performed' }) : null;
-      const voice = await voiceSigner(sql, user, b);
+      const voice = await voiceSigner(sql, app.proofKey, user, b, signer);
       const row = await sql.begin(async (tx) => {
         const prev = await latestVersion(tx, id);
         if (!isOpenable(prev.logbook_type, prev.data) || prev.activity_end || prev.logbook_type !== peek!.logbook_type) throw new EntryError(409, 'not_open');
@@ -387,8 +390,8 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
     const b = body.data;
     const user = req.user!;
     try {
-      const signer = await authenticateSigner(sql, user, { ...b.signature, contentHash: '0'.repeat(64) }, { objectType: 'entry', objectId: id, meaning: 'corrected' });
-      const voice = await voiceSigner(sql, user, b);
+      const signer = await authenticateSigner(sql, app.proofKey, user, b.signature, { objectType: 'entry', objectId: id, meaning: 'corrected' });
+      const voice = await voiceSigner(sql, app.proofKey, user, b, signer);
       const row = await sql.begin(async (tx) => {
         const prev = await latestVersion(tx, id);
         const [first] = await tx<{ entered_by: number; entered_at: Date }[]>`
@@ -454,7 +457,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
     if (id === null || !body.success) return invalid(reply, body.error?.issues);
     const user = req.user!;
     try {
-      const signer = await authenticateSigner(sql, user, body.data, { objectType: 'entry', objectId: id, meaning: 'verified' });
+      const signer = await authenticateSigner(sql, app.proofKey, user, body.data, { objectType: 'entry', objectId: id, meaning: 'verified' });
       await sql.begin(async (tx) => {
         const row = await latestVersion(tx, id);
         const [s] = await tx<{ settings: LogbookSettings }[]>`select settings from logbook_settings where id = ${row.settings_id}`;
@@ -483,7 +486,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
     const body = signBody.safeParse(req.body);
     if (id === null || !body.success) return invalid(reply, body.error?.issues);
     try {
-      const signer = await authenticateSigner(sql, req.user!, body.data, { objectType: 'entry', objectId: id, meaning: 'released' });
+      const signer = await authenticateSigner(sql, app.proofKey, req.user!, body.data, { objectType: 'entry', objectId: id, meaning: 'released' });
       await sql.begin(async (tx) => {
         const row = await latestVersion(tx, id);
         if (row.logbook_type !== 'maintenance' || row.data.kind !== 'breakdown') throw new EntryError(409, 'not_a_breakdown');

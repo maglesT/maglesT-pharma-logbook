@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { PASSWORD, call, freshApp, login, seedUser, type TestApp } from './helpers.js';
+import { call, freshApp, login, seedUser, type TestApp, proofFor } from './helpers.js';
 import { AdviceError, advicePrompt, type AdviceProvider } from '../server/advice.js';
 
 // S12 breakdown suggestions (D-27). The language model is mocked: no real API calls in tests.
@@ -20,7 +20,7 @@ const advisor: AdviceProvider = {
   },
 };
 
-const sig = (username: string) => ({ username, password: PASSWORD });
+const sig = (username: string) => ({ proof: proofFor(username) });
 const now = () => new Date().toISOString();
 const ago = (min: number) => new Date(Date.now() - min * 60_000).toISOString();
 

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { PASSWORD, apiAs, cleanVerified, localTime, logIn, logOut, newEquipment, openLogbook, post, sign, statusBar } from './helpers.js';
+import { apiAs, proofOf, cleanVerified, localTime, logIn, logOut, newEquipment, openLogbook, post, sign, statusBar } from './helpers.js';
 
 test('LB-06: a breakdown with parts is verified and released, then shows in the register with its downtime and on the history card', async ({ page }) => {
   const { id, code } = await newEquipment({ name: 'Fluid bed dryer', location: 'Granulation' });
@@ -133,7 +133,7 @@ test('LB-17: completing a repair keeps the reported occurrence time exactly as s
   const op = await apiAs('op1');
   const occurredAt = new Date(Date.now() - 7 * 60_000 - 27_512).toISOString();
   await post(op, `/api/equipment/${id}/entries`, { logbookType: 'maintenance', activityStart: new Date().toISOString(),
-    data: { kind: 'breakdown', description: 'Spray gun blocked', occurredAt, failureCategory: 'mechanical' }, signature: { username: 'op1', password: PASSWORD } });
+    data: { kind: 'breakdown', description: 'Spray gun blocked', occurredAt, failureCategory: 'mechanical' }, signature: { proof: await proofOf(op) } });
   await op.dispose();
 
   await logIn(page, 'eng1');

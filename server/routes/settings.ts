@@ -131,7 +131,7 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
     const body = signBody.safeParse(req.body);
     if (id === null || !body.success) return reply.code(400).send({ error: 'invalid_request' });
     try {
-      const signer = await authenticateSigner(sql, req.user!, body.data, { objectType: 'settings', objectId: id, meaning: 'approved' });
+      const signer = await authenticateSigner(sql, app.proofKey, req.user!, body.data, { objectType: 'settings', objectId: id, meaning: 'approved' });
       const result = await sql.begin(async (tx) => {
         const [row] = await tx<SettingsRow[]>`
           select id::int, logbook_type, version, settings, effective_from, created_by::int, created_at
