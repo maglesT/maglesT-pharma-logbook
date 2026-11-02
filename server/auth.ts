@@ -54,33 +54,29 @@ export const asRoles = (roles: string[]): Role[] => ROLES.filter((r) => roles.in
 // POLICY.roleCheckMinutes are renewed from core first; if core refuses, the session ends (PL-01).
 export async function loadSession(sql: Sql, signOn: SignOn, sessionId: string, touch = true): Promise<SessionUser | null> {
   const key = sessionKey(sessionId);
-  const fresh = await sql.begin(async (tx) => {
-    const [s] = await tx<{ stale: boolean; refresh_token: string | null }[]>`
-      select checked_at < now() - make_interval(mins => ${POLICY.roleCheckMinutes}) as stale, refresh_token
-      from sessions where id = ${key} and last_seen_at > now() - make_interval(mins => ${POLICY.sessionIdleMinutes})
-      for update`;
-    if (!s) return false;
-    if (!s.stale) return true;
+  const end = async () => { await sql`delete from sessions where id = ${key}`; return null; };
+  // One request claims a due renewal (others go on with the current roles); core is called outside any transaction.
+  const [due] = await sql<{ refresh_token: string | null }[]>`
+    update sessions set checked_at = now()
+    where id = ${key} and checked_at < now() - make_interval(mins => ${POLICY.roleCheckMinutes})
+      and last_seen_at > now() - make_interval(mins => ${POLICY.sessionIdleMinutes})
+    returning refresh_token`;
+  if (due) {
     try {
-      const id = await signOn.refresh(s.refresh_token ?? '');
-      await tx`update sessions set roles = ${asRoles(id.roles)}, refresh_token = ${id.refreshToken ?? null},
-                 id_token = coalesce(${id.idToken ?? null}, id_token), checked_at = now()
-               where id = ${key}`;
-      return true;
+      const id = await signOn.refresh(due.refresh_token ?? '');
+      await sql`update sessions set roles = ${asRoles(id.roles)}, refresh_token = ${id.refreshToken ?? null},
+                  id_token = coalesce(${id.idToken ?? null}, id_token)
+                where id = ${key}`;
     } catch {
-      return false;
+      return end();
     }
-  });
-  const [row] = fresh
-    ? await sql<{ id: number; username: string; full_name: string; roles: Role[] }[]>`
-        update sessions s set last_seen_at = case when ${touch} then now() else s.last_seen_at end
-        from users u where s.id = ${key} and u.id = s.user_id
-        returning u.id::int as id, u.username, u.full_name, s.roles`
-    : [];
-  if (!row || !row.roles.length) {
-    await sql`delete from sessions where id = ${key}`;
-    return null;
   }
+  const [row] = await sql<{ id: number; username: string; full_name: string; roles: Role[] }[]>`
+    update sessions s set last_seen_at = case when ${touch} then now() else s.last_seen_at end
+    from users u
+    where s.id = ${key} and u.id = s.user_id and s.last_seen_at > now() - make_interval(mins => ${POLICY.sessionIdleMinutes})
+    returning u.id::int as id, u.username, u.full_name, s.roles`;
+  if (!row || !row.roles.length) return end();
   return { id: row.id, username: row.username, fullName: row.full_name, roles: row.roles, sessionId };
 }
 

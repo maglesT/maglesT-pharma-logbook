@@ -119,7 +119,8 @@ async function run(app: FastifyInstance, sql: Sql, password: string): Promise<Se
   const sig = (who: Who) => ({ username: WHO[who], password });
   const signIn = async (who: Who) => {
     const go = await app.inject({ method: 'GET', url: `/login?login_hint=${WHO[who]}` });
-    const res = await app.inject({ method: 'GET', url: String(go.headers.location) });
+    const pending = go.cookies.find((c) => c.name === 'signon');
+    const res = await app.inject({ method: 'GET', url: String(go.headers.location), headers: { cookie: `signon=${pending?.value ?? ''}` } });
     const sid = res.cookies.find((c) => c.name === 'sid');
     if (!sid) throw new SeedError(`sign-on of ${WHO[who]} failed`);
     cookies[who] = `sid=${sid.value}`;

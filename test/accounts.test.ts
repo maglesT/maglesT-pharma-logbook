@@ -66,10 +66,14 @@ describe('sign-on through core', () => {
     expect((await call(t.app, cookie, 'GET', '/api/me')).json().roles).toEqual(['operator']);
   });
 
-  it('PL-01: an unknown or expired sign-in state is refused', async () => {
-    const res = await t.app.inject({ method: 'GET', url: '/cb?code=admin1&state=made-up' });
+  it('PL-01: a sign-in this browser did not start is refused (no login CSRF)', async () => {
+    const made = await t.app.inject({ method: 'GET', url: '/cb?code=admin1&state=made-up' });
+    expect(made.statusCode).toBe(400);
+    // Someone else's started sign-in, sent to this browser (which holds no matching sign-in cookie).
+    const theirs = await t.app.inject({ method: 'GET', url: '/login?login_hint=admin1' });
+    const res = await t.app.inject({ method: 'GET', url: String(theirs.headers.location) });
     expect(res.statusCode).toBe(400);
-    expect(res.cookies).toHaveLength(0);
+    expect(res.cookies.find((c) => c.name === 'sid')).toBeUndefined();
   });
 
   it(`PL-01: a revoked role or a deactivated person is out within ${POLICY.roleCheckMinutes} minutes (renewal through core)`, async () => {

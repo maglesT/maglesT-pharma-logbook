@@ -94,7 +94,8 @@ export async function seedUser(owner: Sql, username: string, roles: Role[], pass
 // Signs on through the stand-in for core: /login, then /cb.
 export async function login(app: FastifyInstance, username: string) {
   const start = await app.inject({ method: 'GET', url: `/login?login_hint=${encodeURIComponent(username)}` });
-  const res = await app.inject({ method: 'GET', url: String(start.headers.location) });
+  const pending = start.cookies.find((c) => c.name === 'signon');
+  const res = await app.inject({ method: 'GET', url: String(start.headers.location), headers: { cookie: `signon=${pending?.value ?? ''}` } });
   const cookie = res.cookies.find((c) => c.name === 'sid');
   return { res, cookie: cookie ? `sid=${cookie.value}` : '' };
 }
