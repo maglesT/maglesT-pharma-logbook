@@ -180,7 +180,7 @@ A10" arrived after B1-2 and B1-4 were merged on roles, so they must be switched 
 2. ~~**B1-5 data move**~~ done (see Slices). Changed from the plan above: the schema is not restored from a dump. The
    platform's migrate builds it (0013 was edited after the live site applied it, and a restored schema would bring the
    standalone grants), and the script copies the data only, checked per table in the same transaction.
-3. ~~**B1-6 cutover runbook**~~ written: `docs/07-cutover-runbook.md` (draft for the owner). The cutover itself waits
+3. ~~**B1-6 cutover runbook**~~ written: `docs/07-cutover-runbook.md` (draft for the owner). **D-31: no Logbook go-live now**; all products go live on the platform together after every product is moved, and the open points below wait until then. Phase B1 work in this repo is complete. The cutover itself waits
    for the owner's approval and window. Open with the owner: how the public address reaches the platform's Caddy while
    the old site runs; what people with logins starting with a digit get; how to continue after a rollback (core keeps
    moved people, so a second move refuses their logins).
