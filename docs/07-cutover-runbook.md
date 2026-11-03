@@ -15,8 +15,9 @@ standalone Logbook…").
 1. **Platform installed** on the owner's server (databsee README "Server setup"), with the first core administrator.
    Address (D-31 1): the platform Logbook is tested at a temporary address (for example `logbook-new.<domain>`) through
    the existing Caddy; `logbook.<domain>` keeps pointing at the old site until step 9.
-   **To do before go-live (D-31 2):** the move script gives a login that starts with a digit a `u` prefix
-   (`1ravi` → `u1ravi`) instead of refusing it, and lists the change in its report. Today it refuses such logins.
+   Logins (D-31 2): the move gives a login that starts with a digit a `u` prefix in core (`1ravi` → `u1ravi`) and
+   lists it in its report as "renamed"; the Logbook's own records keep the old login. A login that cannot take the
+   prefix (40 characters already) or would clash with another person's is reported and stops or is refused.
 2. **Platform release with the Logbook pin** at the latest Logbook merge (`apps/logbook/manifest.json` in databsee),
    and the Actions secret `PRODUCT_SOURCE_TOKEN` (read-only token for this repo).
 3. **Customer config ready, not yet applied**: `licences` gains `logbook`, `links.logbook: { master_data:
