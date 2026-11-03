@@ -1,11 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, type Equipment, type Me, type Product } from '../api.js';
+import { api, can, type Equipment, type Me, type Product } from '../api.js';
 
 const KIND_LABEL = { equipment: 'Equipment', instrument: 'Instrument', area: 'Area / room' } as const;
 const ask = (what: string) => window.prompt(`Reason for ${what}:`)?.trim();
 
 export function MasterData({ me }: { me: Me }) {
-  const isAdmin = me.roles.includes('admin');
+  const isAdmin = can(me, 'site.manage');
   const [tab, setTab] = useState<'equipment' | 'products' | 'site'>('equipment');
   return (
     <>

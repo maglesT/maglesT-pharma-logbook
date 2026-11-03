@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { POLICY, sessionKey } from '../server/auth.js';
+import { POLICY, ROLE_PERMISSIONS, sessionKey } from '../server/auth.js';
 import { call, directory, freshApp, login, seedUser, type TestApp } from './helpers.js';
 
 // B1-2 (D-29): people, passwords, lockout and the permission register are Medhanta core's; the Logbook signs people
@@ -28,7 +28,7 @@ describe('sign-on through core', () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it('PL-01: /login sends the browser to core with PKCE; sign-on opens a session with the roles from core and is audited', async () => {
+  it('PL-01: /login sends the browser to core with PKCE; sign-on opens a session with the permissions from core and is audited', async () => {
     const id = await seedUser(t.owner, uniq('op'), ['operator']);
     const username = `op${n}`;
     const start = await t.app.inject({ method: 'GET', url: `/login?login_hint=${username}` });
@@ -36,7 +36,7 @@ describe('sign-on through core', () => {
     const { res, cookie } = await login(t.app, username);
     expect(res.statusCode).toBe(302);
     expect(res.headers.location).toBe('/');
-    expect((await call(t.app, cookie, 'GET', '/api/me')).json()).toEqual({ id, username, fullName: username.toUpperCase(), roles: ['operator'] });
+    expect((await call(t.app, cookie, 'GET', '/api/me')).json()).toEqual({ id, username, fullName: username.toUpperCase(), permissions: ROLE_PERMISSIONS.operator });
     expect(await auditRows('login', id)).toHaveLength(1);
   });
 
@@ -50,7 +50,7 @@ describe('sign-on through core', () => {
     expect(new URL(s.authUrl({ state: 'st', challenge: 'ch', prompt: 'login' })).searchParams.get('max_age')).toBe('0');
   });
 
-  it('PL-01: a person without a Logbook role is refused and the refusal is audited', async () => {
+  it('PL-01: a person without a Logbook permission is refused and the refusal is audited', async () => {
     const id = await seedUser(t.owner, uniq('nobody'), []);
     const { res, cookie } = await login(t.app, `nobody${n}`);
     expect(res.statusCode).toBe(403);
@@ -59,11 +59,29 @@ describe('sign-on through core', () => {
     expect(await auditRows('login.failed', id)).toHaveLength(1);
   });
 
-  it('PL-01: roles come from core only; a role stored in the old local table gives no right', async () => {
+  it('PL-01: permissions come from core only; a role in the old local table or a code of another product gives no right', async () => {
     const id = await seedUser(t.owner, uniq('op'), ['operator']);
     await t.owner`insert into user_roles (user_id, role) values (${id}, 'admin')`;
+    directory.get(`op${n}`)!.permissions.push('deviations.record', 'logbook.unknown');
     const { cookie } = await login(t.app, `op${n}`);
-    expect((await call(t.app, cookie, 'GET', '/api/me')).json().roles).toEqual(['operator']);
+    expect((await call(t.app, cookie, 'GET', '/api/me')).json().permissions).toEqual(ROLE_PERMISSIONS.operator);
+    expect((await call(t.app, cookie, 'GET', '/api/audit')).statusCode).toBe(403);
+  });
+
+  it('LB-21 (D-30): each action checks its own permission code, whatever else the person holds', async () => {
+    await seedUser(t.owner, uniq('aud'), []);
+    directory.get(`aud${n}`)!.permissions = ['logbook.audit.read'];
+    const { cookie } = await login(t.app, `aud${n}`);
+    expect((await call(t.app, cookie, 'GET', '/api/audit')).statusCode).toBe(200);
+    expect((await call(t.app, cookie, 'GET', '/api/equipment')).statusCode).toBe(200);   // reading needs any code
+    expect((await call(t.app, cookie, 'POST', '/api/settings', {})).statusCode).toBe(403);
+    expect((await call(t.app, cookie, 'PUT', '/api/site', { name: 'x', code: 'x', reason: 'x' })).statusCode).toBe(403);
+  });
+
+  it('PL-01: the oidc client asks core for this product\'s permission codes (scope permissions, A10)', async () => {
+    const { oidcSignOn } = await import('../server/signon.js');
+    const s = oidcSignOn({ issuer: 'https://site.test/oidc', clientId: 'logbook', clientSecret: 'x', redirectUri: 'https://logbook.site.test/cb' });
+    expect(new URL(s.authUrl({ state: 'st', challenge: 'ch' })).searchParams.get('scope')).toBe('openid profile permissions');
   });
 
   it('PL-01: a sign-in this browser did not start is refused (no login CSRF)', async () => {
@@ -76,14 +94,14 @@ describe('sign-on through core', () => {
     expect(res.cookies.find((c) => c.name === 'sid')).toBeUndefined();
   });
 
-  it(`PL-01: a revoked role or a deactivated person is out within ${POLICY.roleCheckMinutes} minutes (renewal through core)`, async () => {
+  it(`PL-01: a revoked permission or a deactivated person is out within ${POLICY.roleCheckMinutes} minutes (renewal through core)`, async () => {
     await seedUser(t.owner, uniq('sup'), ['supervisor', 'operator']);
     const username = `sup${n}`;
     const { cookie } = await login(t.app, username);
-    directory.get(username)!.roles = ['operator'];
-    expect((await call(t.app, cookie, 'GET', '/api/me')).json().roles).toEqual(['operator', 'supervisor']);
+    directory.get(username)!.permissions = [...ROLE_PERMISSIONS.operator];
+    expect((await call(t.app, cookie, 'GET', '/api/me')).json().permissions).toContain('logbook.entry.verify');
     await t.owner`update sessions set checked_at = now() - interval '6 minutes' where id = ${sid(cookie)}`;
-    expect((await call(t.app, cookie, 'GET', '/api/me')).json().roles).toEqual(['operator']);
+    expect((await call(t.app, cookie, 'GET', '/api/me')).json().permissions).toEqual(ROLE_PERMISSIONS.operator);
 
     directory.get(username)!.active = false;
     await t.owner`update sessions set checked_at = now() - interval '6 minutes' where id = ${sid(cookie)}`;
@@ -93,7 +111,7 @@ describe('sign-on through core', () => {
 
   it('PL-01: a login that cannot be mapped to the Logbook (taken by a local account not yet moved) is refused', async () => {
     await t.owner`insert into users (username, full_name, password_hash) values ('oldie', 'Old Local', '-')`;
-    directory.set('oldie', { sub: crypto.randomUUID(), name: 'Old Local', roles: ['operator'], active: true });
+    directory.set('oldie', { sub: crypto.randomUUID(), name: 'Old Local', permissions: [...ROLE_PERMISSIONS.operator], active: true });
     const { res, cookie } = await login(t.app, 'oldie');
     expect(res.statusCode).toBe(403);
     expect(cookie).toBe('');

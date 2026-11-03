@@ -4,7 +4,7 @@ import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
 import { logbookItem } from '../master.js';
-import { parseId, requireRole } from '../auth.js';
+import { parseId, requirePermission } from '../auth.js';
 import { mayRecord } from '../entries.js';
 import { VOICE_LANGUAGES, typeByKey, type LogbookSettings } from '../logbook-types.js';
 import { settingsInForce } from './settings.js';
@@ -33,14 +33,15 @@ const FIELD_LABEL: Record<string, string> = { remarks: 'Remarks', notes: 'Notes'
 const limit = rateLimiter(20, 3_600_000);
 
 export function voiceRoutes(app: FastifyInstance, sql: Sql, speech: SpeechProvider | null) {
-  const anyUser = { preHandler: requireRole() };
+  const anyUser = { preHandler: requirePermission() };
 
   // What the screens need to offer voice notes: on/off, languages, fields, limits.
-  app.get('/api/voice-notes/config', anyUser, async () => {
+  app.get('/api/voice-notes/config', anyUser, async (req) => {
     const s = await settingsInForce(sql, 'voice_notes');
     const settings = s?.settings as LogbookSettings | undefined;
     return {
-      enabled: Boolean(settings?.enabled && settings.voiceLanguages.length && speech),
+      // Offered only to people holding the voice-note code, as POST /api/voice-notes checks.
+      enabled: Boolean(settings?.enabled && settings.voiceLanguages.length && speech && req.user!.permissions.includes('logbook.voice_note.record')),
       switchedOn: Boolean(settings?.enabled),
       configured: Boolean(speech),
       languages: settings?.voiceLanguages ?? [],
@@ -50,7 +51,7 @@ export function voiceRoutes(app: FastifyInstance, sql: Sql, speech: SpeechProvid
     };
   });
 
-  app.post('/api/voice-notes', { preHandler: requireRole('operator', 'supervisor', 'engineering'), bodyLimit: 3_000_000 }, async (req, reply) => {
+  app.post('/api/voice-notes', { preHandler: requirePermission('logbook.voice_note.record'), bodyLimit: 3_000_000 }, async (req, reply) => {
     const body = noteBody.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ error: 'invalid_request', problems: body.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`) });
     const b = body.data;
@@ -62,7 +63,7 @@ export function voiceRoutes(app: FastifyInstance, sql: Sql, speech: SpeechProvid
     if (!speech) return refuse(503, 'voice_not_configured', 'Voice notes are not set up on this server. Type the text instead.');
     if (b.language !== 'unknown' && !settings.voiceLanguages.includes(b.language)) return refuse(400, 'language_not_enabled', 'This language is not enabled for voice notes at this site.');
     if (!(VOICE_FIELDS[b.logbookType] ?? []).includes(b.field)) return refuse(400, 'field_not_supported', 'This field does not take voice notes.');
-    if (!mayRecord(b.logbookType, user.roles)) return reply.code(403).send({ error: 'forbidden' });
+    if (!mayRecord(b.logbookType, user.permissions)) return reply.code(403).send({ error: 'forbidden' });
     const mime = b.mimeType.split(';')[0]!.trim().toLowerCase();
     if (!AUDIO_TYPES.includes(mime)) return refuse(400, 'audio_type', 'This audio format is not supported.');
     const audio = Buffer.from(b.audioBase64, 'base64');

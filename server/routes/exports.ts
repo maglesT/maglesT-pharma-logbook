@@ -8,7 +8,7 @@ import type { Content, TDocumentDefinitions } from 'pdfmake/interfaces.js';
 import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { logbookItem, type Master } from '../master.js';
-import { parseId, requireRole } from '../auth.js';
+import { parseId, requirePermission } from '../auth.js';
 import { recordLines } from '../changes.js';
 import { PLANT_TZ } from '../status.js';
 import { present, type EntryRow } from './entries.js';
@@ -219,7 +219,7 @@ async function send(sql: Sql, reply: FastifyReply, format: 'csv' | 'pdf', name: 
 }
 
 export function exportRoutes(app: FastifyInstance, sql: Sql) {
-  const readers = { preHandler: requireRole('qa', 'supervisor') };
+  const readers = { preHandler: requirePermission('logbook.review.read') };
   const fmt = z.enum(['csv', 'pdf']);
 
   app.get<{ Params: { format: string }; Querystring: Record<string, string> }>('/api/export/period.:format', readers, async (req, reply) => {

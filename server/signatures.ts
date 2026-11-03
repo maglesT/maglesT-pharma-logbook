@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypt
 import { z } from 'zod';
 import type { Sql, Tx } from './db.js';
 import { audit } from './audit.js';
-import { asRoles, type SessionUser } from './auth.js';
+import type { Permission, SessionUser } from './auth.js';
 import type { Identity } from './signon.js';
 
 export const MEANINGS = ['performed', 'verified', 'released', 'reviewed', 'approved', 'corrected', 'voice_confirmed'] as const;
@@ -21,12 +21,12 @@ export type SignInput = z.infer<typeof signBody>;
 // A proof is good for this long after the password was entered, and only once.
 export const PROOF_SECONDS = 120;
 
-interface ProofBody { sub: string; roles: string[]; meanings: string[]; at: number; nonce: string }
+interface ProofBody { sub: string; permissions: string[]; meanings: string[]; at: number; nonce: string }
 const mac = (key: Buffer, body: string) => createHmac('sha256', key).update(body).digest('base64url');
 
 /** Made by /cb right after core re-authenticated the person. */
-export function makeProof(key: Buffer, who: Pick<Identity, 'sub' | 'roles'>, meanings: string[], at = Date.now()): string {
-  const body = Buffer.from(JSON.stringify({ sub: who.sub, roles: who.roles, meanings, at, nonce: randomBytes(16).toString('base64url') } satisfies ProofBody)).toString('base64url');
+export function makeProof(key: Buffer, who: Pick<Identity, 'sub' | 'permissions'>, meanings: string[], at = Date.now()): string {
+  const body = Buffer.from(JSON.stringify({ sub: who.sub, permissions: who.permissions, meanings, at, nonce: randomBytes(16).toString('base64url') } satisfies ProofBody)).toString('base64url');
   return `${body}.${mac(key, body)}`;
 }
 
@@ -69,24 +69,23 @@ export interface AuthenticatedSigner {
   nonce: string;      // spent by sign(), in the transaction that stores the signature
 }
 
-// PL-05 / LB-20: the signing proof must be core's fresh re-authentication of the signed-in person, with the same
-// Logbook roles, and unused. A refused proof is audited.
+// PL-05 / LB-20: the signing proof must be core's fresh re-authentication of the signed-in person, its token must
+// hold the permission codes this signature needs (A10; D-30: nothing else blocks a signer), and it must be unused.
+// A refused proof is audited.
 export async function authenticateSigner(
   sql: Sql,
   key: Buffer,
   user: SessionUser,
   input: { proof: string },
-  context: { objectType: string; objectId: number; meaning: Meaning },
+  context: { objectType: string; objectId: number; meaning: Meaning; needs: Permission[] },
 ): Promise<AuthenticatedSigner> {
-  // The Admin role administers the system and never signs GMP records (DI Q4 segregation).
-  if (user.roles.includes('admin')) throw new SignError('not_allowed');
   const p = readProof(key, input.proof);
   const ok = await sql.begin(async (tx) => {
     const [u] = await tx<{ employee_id: string | null }[]>`select employee_id::text from users where id = ${user.id}`;
     const why = !p ? 'invalid proof'
       : Date.now() - p.at > PROOF_SECONDS * 1000 || p.at > Date.now() + 5_000 ? 'proof expired'
       : !u?.employee_id || p.sub !== u.employee_id ? 'signed by another person'
-      : asRoles(p.roles).join() !== user.roles.join() ? 'rights changed'
+      : !context.needs.every((c) => p.permissions?.includes(c)) ? `no ${context.needs.join(' + ')} at core`
       : !p.meanings?.includes(context.meaning) ? 'proof for another meaning'
       : null;
     if (!why && !(await tx`select 1 from signing_proofs where nonce = ${p!.nonce}`).length) return true;

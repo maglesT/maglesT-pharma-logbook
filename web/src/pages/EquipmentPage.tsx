@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
+import { api, can, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
@@ -96,11 +96,11 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
     return m;
   }, [types]);
   const switchedOn = CORE_TYPES.filter((k) => APPLIES[k]!.includes(equipment.kind) && inForce.has(k) && (!STERILE_TYPES.has(k) || equipment.sterile));
-  // Only what the server accepts from this user: QA and Admin record nothing (S11).
+  // Only what the server accepts from this user: only the types this person's codes record (S11).
   const mayRecord = (k: string) => types.find((t) => t.key === k)?.mayRecord ?? false;
   const available = switchedOn.filter(mayRecord);
   const productName = (id: number | null) => products.find((p) => p.id === id)?.code ?? '';
-  const isVerifier = me.roles.includes('supervisor') || me.roles.includes('qa');
+  const isVerifier = can(me, 'entry.verify');
 
   const endUse = async (e: Entry) => {
     setError('');
@@ -178,11 +178,11 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
                 {e.inProgress && e.logbookType === 'maintenance' && mayRecord('maintenance') && (
                   <button onClick={() => setForm({ type: 'maintenance', completing: e })}>Complete repair</button>
                 )}
-                {e.logbookType === 'maintenance' && e.data.kind === 'breakdown' && !me.roles.every((r) => r === 'admin') && (
+                {e.logbookType === 'maintenance' && e.data.kind === 'breakdown' && can(me, 'advice.ask') && (
                   <button onClick={() => setAdvising(e.id)}>💡 Suggest from history</button>
                 )}
                 {e.awaitingVerification && isVerifier && !e.inProgress && <button onClick={() => setVerifying(e)}>Verify</button>}
-                {e.logbookType === 'maintenance' && e.data.kind === 'breakdown' && me.roles.includes('qa') &&
+                {e.logbookType === 'maintenance' && e.data.kind === 'breakdown' && can(me, 'breakdown.release') &&
                   e.signatures.some((g) => g.meaning === 'verified') && !e.signatures.some((g) => g.meaning === 'released') && (
                     <button onClick={() => setReleasing(e)}>Release to service</button>
                   )}

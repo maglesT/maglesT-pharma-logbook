@@ -6,7 +6,7 @@ import type { Identity, SignOn } from '../server/signon.js';
 import { MEANINGS, makeProof } from '../server/signatures.js';
 import { ConnectionOff, logbookItems, logbookProducts, type Kind, type Master, type MasterItem, type MasterProduct } from '../server/master.js';
 import { randomUUID } from 'node:crypto';
-import type { Role } from '../server/auth.js';
+import { permissionsOf, type Role } from '../server/auth.js';
 
 export const TEST_DATABASE_URL =
   process.env.TEST_DATABASE_URL ?? 'postgres://logbook_owner:dev@localhost:5432/logbook_test';
@@ -87,15 +87,15 @@ export async function addProduct(t: TestApp, code: string, name: string, active 
   return (await logbookProducts(t.sql, t.master)).find((p) => p.code === code)!.id;
 }
 
-// Stand-in for Medhanta core (D-29): the people core knows, by login, with their Logbook roles. Tests change an
-// entry to revoke a role or deactivate someone (`active: false`); renewals then see it, as core's would.
+// Stand-in for Medhanta core (D-29): the people core knows, by login, with their Logbook permissions. Tests change an
+// entry to revoke a permission or deactivate someone (`active: false`); renewals then see it, as core's would.
 export const directory = new Map<string, Omit<Identity, 'login' | 'refreshToken' | 'idToken'> & { active: boolean }>();
 
 export function fakeSignOn(people = directory): SignOn {
   const who = (login: string): Identity => {
     const p = people.get(login);
     if (!p?.active) throw new Error('sign-on refused');
-    return { ...p, login, roles: [...p.roles], refreshToken: login, idToken: `id-${login}`, authTime: Math.floor(Date.now() / 1000) };
+    return { ...p, login, permissions: [...p.permissions], refreshToken: login, idToken: `id-${login}`, authTime: Math.floor(Date.now() / 1000) };
   };
   return {
     // Core would ask for the password; the stand-in signs in whoever login_hint names.
@@ -111,7 +111,7 @@ export function fakeSignOn(people = directory): SignOn {
 export const TEST_PROOF_KEY = Buffer.alloc(32, 7);
 export function proofFor(username: string, at?: number, meanings: string[] = [...MEANINGS]): string {
   const p = directory.get(username);
-  return makeProof(TEST_PROOF_KEY, { sub: p?.sub ?? '00000000-0000-0000-0000-000000000000', roles: p?.roles ?? [] }, meanings, at);
+  return makeProof(TEST_PROOF_KEY, { sub: p?.sub ?? '00000000-0000-0000-0000-000000000000', permissions: p?.permissions ?? [] }, meanings, at);
 }
 export const sig = (username: string) => ({ proof: proofFor(username) });
 
@@ -131,10 +131,11 @@ export async function freshApp(opts: Pick<AppOptions, 'speech' | 'advisor'> = {}
 }
 
 
-// Seeds a person as core knows them (directory) and their id-map row (D-29: no local password).
+// Seeds a person as core knows them (directory), with the permissions of the old roles (D-30), and their id-map row
+// (D-29: no local password).
 export async function seedUser(owner: Sql, username: string, roles: Role[]): Promise<number> {
   const sub = randomUUID();
-  directory.set(username, { sub, name: username.toUpperCase(), roles: [...roles], active: true });
+  directory.set(username, { sub, name: username.toUpperCase(), permissions: permissionsOf(roles), active: true });
   const [u] = await owner<{ id: number }[]>`
     insert into users (employee_id, username, full_name, password_hash, must_change_password)
     values (${sub}, ${username}, ${username.toUpperCase()}, '-', false) returning id::int`;

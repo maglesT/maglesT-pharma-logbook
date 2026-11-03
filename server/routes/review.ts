@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
-import { parseId, requireRole } from '../auth.js';
+import { parseId, requirePermission } from '../auth.js';
 import { ConnectionOff, logbookItems, logbookProducts, type Master } from '../master.js';
 import { SignError, authenticateSigner, canonical, contentHash, sign, signBody } from '../signatures.js';
 import { ENTRY_COLS, hashOf, present, type EntryRow } from './entries.js';
@@ -116,7 +116,7 @@ function reviewContent(equipmentId: number, from: Date, to: Date, versions: Entr
 }
 
 export function reviewRoutes(app: FastifyInstance, sql: Sql) {
-  const reviewers = { preHandler: requireRole('qa', 'supervisor') };
+  const reviewers = { preHandler: requirePermission('logbook.review.read') };
 
   // A logbook period as QA reviews it: entries with history, open items, audit trail, earlier reviews.
   app.get<{ Params: { id: string }; Querystring: Record<string, string> }>('/api/equipment/:id/period', reviewers, async (req, reply) => {
@@ -159,14 +159,14 @@ export function reviewRoutes(app: FastifyInstance, sql: Sql) {
   });
 
   // LB-25: QA signs "Reviewed" for exactly the versions shown.
-  app.post<{ Params: { id: string } }>('/api/equipment/:id/reviews', { preHandler: requireRole('qa') }, async (req, reply) => {
+  app.post<{ Params: { id: string } }>('/api/equipment/:id/reviews', { preHandler: requirePermission('logbook.review.sign') }, async (req, reply) => {
     const id = parseId(req.params.id);
     const body = signBody.and(periodQuery).safeParse(req.body);
     if (id === null || !body.success) return reply.code(400).send({ error: 'invalid_request' });
     const { from, to } = await plantRange(sql, body.data.fromDay, body.data.toDay);
     try {
       // A failed attempt is logged against the logbook being reviewed (review S5-5).
-      const signer = await authenticateSigner(sql, app.proofKey, req.user!, body.data, { objectType: 'equipment', objectId: id, meaning: 'reviewed' });
+      const signer = await authenticateSigner(sql, app.proofKey, req.user!, body.data, { objectType: 'equipment', objectId: id, meaning: 'reviewed', needs: ['logbook.review.sign'] });
       const reviewId = await sql.begin(async (tx) => {
         // Lock the logbook so no entry lands between reading and signing.
         const [eq] = await tx`select 1 from equipment where id = ${id} for update`;
@@ -210,7 +210,7 @@ export function reviewRoutes(app: FastifyInstance, sql: Sql) {
   });
 
   // Audit-trail viewer (LB-18, A11 9): filter by object, user and time.
-  app.get<{ Querystring: Record<string, string> }>('/api/audit', { preHandler: requireRole('qa', 'admin') }, async (req, reply) => {
+  app.get<{ Querystring: Record<string, string> }>('/api/audit', { preHandler: requirePermission('logbook.audit.read') }, async (req, reply) => {
     const f = z
       .object({
         objectType: z.string().max(40).optional(),

@@ -20,7 +20,7 @@ Updated: 2026-11-02, Phase B1 (move onto the Medhanta platform, D-29): see the s
 
 ## Done: S2, master data, e-signatures and logbook settings (LB-19, LB-20, LB-24)
 - **Database (migration 0004):** `site` (single row), `equipment` (equipment/instrument/area; code unique and never changeable; clean-hold hours), `products`, `logbook_settings` (versioned per type), `signatures` (insert-only, with the time set by the database).
-- **Signing (`server/signatures.ts`):** `authenticateSigner()` runs in its own transaction, so failures count towards lockout. It returns a proof object that `sign()` requires. `sign()` stores the printed name, meaning and a SHA-256 of the canonical content, and Admin can never sign.
+- **Signing (`server/signatures.ts`):** `authenticateSigner()` runs in its own transaction, so failures count towards lockout. It returns a proof object that `sign()` requires. `sign()` stores the printed name, meaning and a SHA-256 of the canonical content, and Admin can never sign (until B1-2b: since D-30 a signature needs only its permission code).
 - **Logbook types are code (`server/logbook-types.ts`):** 10 types. Settings are drafted by Admin and approved by QA with an e-signature. A version is in force once approved and its effective date has passed; an effective date already past at approval becomes the approval time.
 - **UI:** Master data (equipment, products, site), Logbook settings, and the reusable SignDialog.
 
@@ -145,6 +145,7 @@ proxy refused a tag). main is not deployable standalone any more. Fixes for the 
 | B1-2 | #21 | sign-on through core (OIDC + PKCE, `server/signon.ts`, `/login`, `/cb`); roles from the token only; sessions renew roles every 5 min (one request claims the renewal, core called outside transactions); sign-in state in a short Lax cookie; `users` = id map (`employee_id`, 0014); local login/users/passwords removed |
 | B1-4 | #22 | e-signatures re-authenticate at core: `/sign` window (prompt=login, max_age=0), `/cb` checks ID-token `auth_time` ≥ start, HMAC proof (sub, roles, meanings, time, nonce; key derived from the OIDC client secret), spent once in the signature's transaction (`signing_proofs`, 0016); local lockout/alerts removed (core's PL-04) |
 | B1-3 | #23 | master data live through master_data's views (`server/master.ts`, `MASTER_DATA_DATABASE_URL`), "connection off" 503, write-time check of item and product, `entry_master_values` (PL-07), `equipment`/`products` = id maps (`item_id`, 0015), Master data screen read-only plus the Logbook's own per-item settings |
+| B1-2b | #26 | permissions instead of roles (A10, D-30): `PERMISSIONS` (18 codes) and `ROLE_PERMISSIONS` (old role → codes, for B1-5) in `server/auth.ts`; scope `openid profile permissions`, claim `permissions` (unknown codes ignored); `requirePermission(code)`; sessions keep codes (0017 renames the column and ends open sessions); the signing proof carries the fresh token's codes and `authenticateSigner` needs the signature's own code(s) (`needs`), no admin block; UI flags via `can(me, code)`. databsee `b1-logbook` rebased on A10, manifest lists the 18 codes |
 
 Platform side: branch `b1-logbook` in `maglesT/databsee` (not merged; waiting for the lead's OK): `apps/logbook/manifest.json`
 pinned to a Logbook commit (update the pin to the latest merged Logbook commit before merging), `bundle.sh` builds
@@ -162,7 +163,7 @@ in a Logbook migration, never on audit or signature tables (tests named `PL-06 �
 A10" arrived after B1-2 and B1-4 were merged on roles, so they must be switched (B1-2b below).
 
 ### Next
-0. **B1-2b permissions** (first): one code per action the app checks today (who may record each logbook type
+0. ~~**B1-2b permissions**~~ done (see the table below; PR in "Slices"). Was: one code per action the app checks today (who may record each logbook type
    (`mayRecord`), correct others' entries (`mayCorrect`, D-17), verify, release, sign reviews, draft and approve settings, read the
    audit trail, see reviews/exports, edit item settings, site record, ask for advice); `asRoles()` → permission codes from
    the claim; `requireRole(...)` → `requirePermission(code)`; the signing proof carries the fresh token's permissions and

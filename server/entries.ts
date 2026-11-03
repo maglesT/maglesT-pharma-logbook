@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import type { Role } from './auth.js';
+import type { Permission } from './auth.js';
 import { typeByKey, type LogbookSettings } from './logbook-types.js';
 
 // Entry data per built-in logbook type (D-07). Sterile types arrive in S6.
@@ -114,23 +114,26 @@ export const performerSigns = (type: string) => PERFORMER_SIGNS.has(type);
 export const verificationNeeded = (type: string, settings: LogbookSettings) =>
   Boolean(typeByKey(type)?.alwaysVerified || settings.verificationRequired);
 
-// Who may record each type (LB-21). Admin records nothing.
-const RECORDERS: Record<string, Role[]> = {
-  equipment_use: ['operator', 'supervisor'],
-  equipment_cleaning: ['operator', 'supervisor'],
-  area_cleaning: ['operator', 'supervisor'],
-  general_log: ['operator', 'supervisor', 'engineering'],
-  maintenance: ['operator', 'supervisor', 'engineering'],
-  calibration: ['engineering'],
-  steriliser_cycle: ['operator', 'supervisor'],
-  steriliser_test: ['operator', 'supervisor', 'engineering'],
-  glove_integrity: ['operator', 'supervisor'],
-  pressure_reading: ['operator', 'supervisor'],
+// The permission that records each type (LB-21, D-30).
+const RECORD_CODE: Record<string, Permission> = {
+  equipment_use: 'logbook.entry.record_use',
+  equipment_cleaning: 'logbook.entry.record_cleaning',
+  area_cleaning: 'logbook.entry.record_cleaning',
+  general_log: 'logbook.entry.record_general',
+  maintenance: 'logbook.entry.record_maintenance',
+  calibration: 'logbook.entry.record_calibration',
+  steriliser_cycle: 'logbook.entry.record_sterile',
+  steriliser_test: 'logbook.entry.record_steriliser_test',
+  glove_integrity: 'logbook.entry.record_sterile',
+  pressure_reading: 'logbook.entry.record_sterile',
 };
-export const mayRecord = (type: string, roles: Role[]) => (RECORDERS[type] ?? []).some((r) => roles.includes(r));
-// D-17: a correction needs the right to record the type, and being the author or a supervisor.
-export const mayCorrect = (type: string, roles: Role[], own: boolean) => mayRecord(type, roles) && (own || roles.includes('supervisor'));
-export const VERIFIERS: Role[] = ['supervisor', 'qa'];
+export const recordCode = (type: string): Permission | undefined => RECORD_CODE[type];
+export const mayRecord = (type: string, held: Permission[]) => { const c = RECORD_CODE[type]; return !!c && held.includes(c); };
+// D-17: a correction needs the right to record the type, and being the author or holding correct_others.
+export const correctCodes = (type: string, own: boolean): Permission[] =>
+  [RECORD_CODE[type] ?? 'logbook.entry.record_use', ...(own ? [] : ['logbook.entry.correct_others' as const])];
+export const mayCorrect = (type: string, held: Permission[], own: boolean) =>
+  !!RECORD_CODE[type] && correctCodes(type, own).every((c) => held.includes(c));
 
 export interface EquipmentInfo {
   kind: 'equipment' | 'instrument' | 'area';

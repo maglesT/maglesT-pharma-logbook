@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
 import { logbookItem, logbookItems, type Master } from '../master.js';
-import { parseId, requireRole } from '../auth.js';
+import { parseId, requirePermission } from '../auth.js';
 import { changeLines } from '../changes.js';
 import { canonical } from '../signatures.js';
 import { PLANT_TZ, statusOf } from '../status.js';
@@ -129,7 +129,7 @@ function eventRow(ev: Event): { at: Date; kind: string; what: string; detail: st
 }
 
 export function historyRoutes(app: FastifyInstance, sql: Sql) {
-  const anyUser = { preHandler: requireRole() };
+  const anyUser = { preHandler: requirePermission() };
 
   app.get<{ Params: { id: string } }>('/api/equipment/:id/details', anyUser, async (req, reply) => {
     const id = parseId(req.params.id);
@@ -139,7 +139,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
 
   // A new details version; the old one stays (D-25). expectedVersion guards against overwriting a
   // change made meanwhile.
-  app.put<{ Params: { id: string } }>('/api/equipment/:id/details', { preHandler: requireRole('admin') }, async (req, reply) => {
+  app.put<{ Params: { id: string } }>('/api/equipment/:id/details', { preHandler: requirePermission('logbook.site.manage') }, async (req, reply) => {
     const id = parseId(req.params.id);
     const body = detailsBody.safeParse(req.body);
     if (id === null || !body.success) {

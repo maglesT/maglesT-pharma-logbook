@@ -2,12 +2,12 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
-import { SESSION_COOKIE, asRoles, loadSession, newSessionId, requireRole, sessionKey } from '../auth.js';
+import { SESSION_COOKIE, asPermissions, loadSession, newSessionId, requirePermission, sessionKey } from '../auth.js';
 import { challengeOf, newVerifier, type SignOn } from '../signon.js';
 import { MEANINGS, makeProof } from '../signatures.js';
 
 // B1-2 (D-29): sign-on through Medhanta core (platform PL-01). /login sends the browser to core, /cb comes back
-// with a code; the Logbook roles come from core's token only. A person without a Logbook role is refused.
+// with a code; the Logbook permissions come from core's token only. A person without a Logbook permission is refused.
 
 // A started sign-on lives in a short cookie on this browser only (state + PKCE verifier): /cb accepts only the
 // state this browser started (no login CSRF), and nothing is kept on the server.
@@ -66,7 +66,7 @@ export function authRoutes(app: FastifyInstance, sql: Sql, signOn: SignOn) {
       if (mode === 'sign') return reply.header('cache-control', 'no-store').type('text/html').send(signPage({ signError: 'Your password was not confirmed.' }));
       return reply.code(401).type('text/html').send(page('Sign-in failed', 'The sign-in service did not confirm who you are.'));
     }
-    // The signature itself checks that this is the signed-in person, with the same rights (authenticateSigner).
+    // The signature itself checks that this is the signed-in person, holding the code it needs (authenticateSigner).
     if (mode === 'sign') {
       // PL-05: core must have asked for the password after this signature started (prompt=login, max_age=0 are only
       // a request; the ID token's auth_time shows what core did). One second's leeway: auth_time has whole seconds.
@@ -75,7 +75,7 @@ export function authRoutes(app: FastifyInstance, sql: Sql, signOn: SignOn) {
       }
       return reply.header('cache-control', 'no-store').type('text/html').send(signPage({ signProof: makeProof(app.proofKey, who, (meanings ?? '').split(',')) }));
     }
-    const roles = asRoles(who.roles);
+    const permissions = asPermissions(who.permissions);
     const name = who.name.trim() || who.login;
     const outcome = await sql.begin(async (tx) => {
       // The id map: one users row per core employee, made at first sign-on (D-29). The login never changes in core.
@@ -88,15 +88,15 @@ export function authRoutes(app: FastifyInstance, sql: Sql, signOn: SignOn) {
         on conflict (employee_id) do update set full_name = excluded.full_name
         returning id::int`;
       if (!u) return { refused: 'login' as const };
-      if (!roles.length) {
-        await audit(tx, { actorId: u.id, action: 'login.failed', objectType: 'user', objectId: u.id, reason: 'no Logbook role' });
+      if (!permissions.length) {
+        await audit(tx, { actorId: u.id, action: 'login.failed', objectType: 'user', objectId: u.id, reason: 'no Logbook permission' });
         return { refused: 'role' as const };
       }
       const sessionId = newSessionId();
-      await tx`insert into sessions (id, user_id, roles, refresh_token, id_token)
-               values (${sessionKey(sessionId)}, ${u.id}, ${roles}, ${who.refreshToken ?? null}, ${who.idToken ?? null})`;
+      await tx`insert into sessions (id, user_id, permissions, refresh_token, id_token)
+               values (${sessionKey(sessionId)}, ${u.id}, ${permissions}, ${who.refreshToken ?? null}, ${who.idToken ?? null})`;
       await tx`update users set last_login_at = now() where id = ${u.id}`;
-      await audit(tx, { actorId: u.id, action: 'login', objectType: 'user', objectId: u.id, new: { roles } });
+      await audit(tx, { actorId: u.id, action: 'login', objectType: 'user', objectId: u.id, new: { permissions } });
       return { sessionId };
     }).catch((e: { code?: string }) => {
       // Two people signing on with one login at once, or a value the id map refuses.
@@ -126,8 +126,8 @@ export function authRoutes(app: FastifyInstance, sql: Sql, signOn: SignOn) {
     return { ok: true, logoutUrl: signOn.logoutUrl(idToken) };
   });
 
-  app.get('/api/me', { preHandler: requireRole() }, async (req) => {
+  app.get('/api/me', { preHandler: requirePermission() }, async (req) => {
     const u = req.user!;
-    return { id: u.id, username: u.username, fullName: u.fullName, roles: u.roles };
+    return { id: u.id, username: u.username, fullName: u.fullName, permissions: u.permissions };
   });
 }

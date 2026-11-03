@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, ApiError, type Me } from './api.js';
+import { api, can, ApiError, type Me } from './api.js';
 import { Login } from './pages/Login.js';
 import { Home } from './pages/Home.js';
 import { MasterData } from './pages/MasterData.js';
@@ -46,11 +46,11 @@ export function App() {
           <button className={page === 'home' ? 'tab on' : 'tab'} onClick={() => setPage('home')}>Home</button>
           <button className={page === 'equipment' ? 'tab on' : 'tab'} onClick={() => { setOpenId(undefined); setPage('equipment'); }}>Logbooks</button>
           <button className={page === 'breakdowns' ? 'tab on' : 'tab'} onClick={() => setPage('breakdowns')}>Breakdowns</button>
-          {me.roles.some((r) => r === 'qa' || r === 'supervisor' || r === 'admin') && (
-            <button className={page === 'review' ? 'tab on' : 'tab'} onClick={() => setPage('review')}>{me.roles.some((r) => r === 'qa' || r === 'supervisor') ? 'Review' : 'Audit trail'}</button>
+          {(can(me, 'review.read') || can(me, 'audit.read')) && (
+            <button className={page === 'review' ? 'tab on' : 'tab'} onClick={() => setPage('review')}>{can(me, 'review.read') ? 'Review' : 'Audit trail'}</button>
           )}
           <button className={page === 'masterdata' ? 'tab on' : 'tab'} onClick={() => setPage('masterdata')}>Master data</button>
-          {(me.roles.includes('admin') || me.roles.includes('qa')) && (
+          {(can(me, 'settings.draft') || can(me, 'settings.approve')) && (
             <button className={page === 'settings' ? 'tab on' : 'tab'} onClick={() => setPage('settings')}>Logbook settings</button>
           )}
         </nav>

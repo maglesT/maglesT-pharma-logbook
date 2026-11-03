@@ -15,7 +15,7 @@ Needs Node 22 and PostgreSQL 16.
 ```sh
 npm install
 export DATABASE_URL=postgres://logbook_owner:dev@localhost:5432/logbook_dev DB_APP_ROLE=logbook_app
-# Medhanta core (D-29): people, passwords and Logbook roles, and master data (items, products), are managed there
+# Medhanta core (D-29): people, passwords and Logbook permissions (D-30), and master data (items, products), are managed there
 export MASTER_DATA_DATABASE_URL=postgres://logbook_app:...@<core db>:5432/master_data   # read through its report views
 export OIDC_ISSUER=https://<core domain>/oidc OIDC_CLIENT_SECRET=... OIDC_REDIRECT_URI=http://localhost:3000/cb
 npm run migrate
