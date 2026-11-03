@@ -147,6 +147,7 @@ proxy refused a tag). main is not deployable standalone any more. Fixes for the 
 | B1-3 | #23 | master data live through master_data's views (`server/master.ts`, `MASTER_DATA_DATABASE_URL`), "connection off" 503, write-time check of item and product, `entry_master_values` (PL-07), `equipment`/`products` = id maps (`item_id`, 0015), Master data screen read-only plus the Logbook's own per-item settings |
 | B1-2b | #26 | permissions instead of roles (A10, D-30): `PERMISSIONS` (18 codes) and `ROLE_PERMISSIONS` (old role → codes, for B1-5) in `server/auth.ts`; scope `openid profile permissions`, claim `permissions` (unknown codes ignored); `requirePermission(code)`; sessions keep codes (0017 renames the column and ends open sessions); the signing proof carries the fresh token's codes and `authenticateSigner` needs the signature's own code(s) (`needs`), no admin block; UI flags via `can(me, code)`. databsee `b1-logbook` rebased on A10, manifest lists the 18 codes |
 | B1-3b | #27 | make, model and serial are master data (D-29 3): `detailsSchema` no longer takes them (strict: a new version with them is refused; older versions keep theirs); history card, PDF and the details form show/read master `make/model/serial`; advice compares and prompts with master make and model |
+| B1-5 | #28 | data move (PL-13), `db/move-to-platform.ts`: dry run first (`--dry-run`, writes nothing). The platform's migrate builds the `logbook` schema (it must be empty); rows are copied data only (common columns; `sessions` and `schema_migrations` not moved), with triggers off (`session_replication_role = replica`), every table's count and checksum compared in the same transaction, and sequences continued. Core: employees with the same login and scrypt hash, the site's identity verification (`--verified-by/--verified-how`, D-29 5), permissions from old roles (D-30) plus `core.people.manage` and `core.masterdata.edit` for admins (D-29 6). Master data: areas → rooms, items with make/model/serial from the last details version, `located_in` where the location names a room, products. Then the id maps and checks: checksums again, every item/product/user mapped (refused logins listed: core needs a letter first), codes and names equal, permissions as planned, integrity check. Report CSV (`--report`). Demo: seed a demo database, then move it with `--demo-password` (roles from the demo's list, must change at first use). Tests `test/move.test.ts` with core's migrations copied to `test/platform/identity`, `test/platform/master_data` (databsee 539eae6) |
 
 Platform side: branch `b1-logbook` in `maglesT/databsee` (not merged; waiting for the lead's OK): `apps/logbook/manifest.json`
 pinned to a Logbook commit (update the pin to the latest merged Logbook commit before merging), `bundle.sh` builds
@@ -175,19 +176,16 @@ A10" arrived after B1-2 and B1-4 were merged on roles, so they must be switched 
 1. ~~**B1-3b**~~ done (see Slices). Was: make, model and serial move from the details record to master data (D-29 3): drop them from
    `detailsSchema` for new versions (old versions keep them), history card / PDF / advice read master `make/model/serial`
    (`LogbookItem`), adjust `test/breakdowns.test.ts`, `test/advice.test.ts`, `e2e/breakdowns.spec.ts`.
-2. **B1-5 data move** (PL-13): script `db/move-to-platform.ts` + check SQL. pg_dump of the live DB (custom format) →
-   restore into the platform `logbook` database as `logbook_owner` (`--no-owner --role=logbook_owner`, after running
-   `0000_platform_defaults` so default grants don't widen the app's rights; then re-run the privilege comparison of
-   `test/platform.test.ts`) → record 0000–0016 in `platform.migration` with their sha256 → create core employees
-   (same scrypt hash, core's format is identical; login pattern `^[a-z][a-z0-9._-]{1,39}$`; identity-verification
-   text from the site, D-29 5), grants (`logbook` roles; admins also `identity_admin` + `master_data_editor`, D-29 6),
-   master items (area → room, free-text location → `located_in` link where it matches a room), products; fill
-   `users.employee_id`, `equipment.item_id`, `products.item_id` → checks: counts and checksums of every table before
-   and after, every user/item/product mapped, codes and names equal, `npm run integrity` passes; mapping report CSV
-   (local id → master id, unmatched locations, refused logins). Dry run on a copy of the live data first.
-   The demo seed (D-28) now uses in-process stand-ins for core; a platform demo = seed a demo DB, then move it.
+2. ~~**B1-5 data move**~~ done (see Slices). Changed from the plan above: the schema is not restored from a dump. The
+   platform's migrate builds it (0013 was edited after the live site applied it, and a restored schema would bring the
+   standalone grants), and the script copies the data only, checked per table in the same transaction.
 3. **B1-6 cutover runbook** (owner's server, owner approval): freeze, back up, move + checks, Caddy switch, rollback =
-   the old container, kept untouched until the owner signs off.
+   the old container, kept untouched until the owner signs off. Order matters: the move needs an empty, migrated
+   `logbook` database, so nobody may sign in to the platform Logbook between apply (licence on, migrations run) and the
+   move (keep Caddy pointing at the old site until the move's checks pass). Run the script inside the Logbook image on
+   the platform's network: `docker compose run --rm --no-deps -e SOURCE_DATABASE_URL -e PLATFORM_DATABASE_URL logbook
+   node dist/db/move-to-platform.js ...`. The live database must be reachable from there (or restored from its backup
+   into a scratch database on the platform server first). Update the databsee pin to the latest Logbook merge.
 
 ### Things to know
 - Tests: `TEST_DATABASE_URL=postgres://logbook_owner:dev@127.0.0.1:5432/logbook_test npx vitest run`; local PostgreSQL 16
