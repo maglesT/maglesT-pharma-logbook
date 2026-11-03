@@ -127,9 +127,12 @@ export async function moveToPlatform(o: MoveOptions): Promise<MoveResult> {
       if (login !== u.username) rows.push({ type: 'user', localId: String(u.id), code: u.username, masterId: '', note: `renamed: login ${u.username} becomes ${login} in core` });
       // A demo database signed its people on through a stand-in (no local roles): their roles are the demo's own list.
       if (o.demoPassword && !u.roles.length) u.roles = DEMO_USERS.filter(([l]) => l === u.username).map(([, , r]) => r);
-      const want = [...new Set(u.roles.flatMap((r) => [...ROLE_PERMISSIONS[r], ...(r === 'admin' ? ADMIN_CORE : [])]))].sort();
+      // PL-13: someone deactivated or locked in the Logbook is created inactive in core and gets no permissions, so no
+      // later reactivation or unlock in core quietly gives back what the Logbook had taken away.
+      const off = !u.active || u.locked_at !== null;
+      const want = off ? [] : [...new Set(u.roles.flatMap((r) => [...ROLE_PERMISSIONS[r], ...(r === 'admin' ? ADMIN_CORE : [])]))].sort();
       for (const c of want) if (!codes.has(c)) problems.push(`permission ${c} is not in core's catalogue (is the Logbook licensed?)`);
-      movers.push({ ...u, codes: want, login });
+      movers.push({ ...u, active: !off, codes: want, login });
     }
 
     const items = await src<Item[]>`
@@ -195,7 +198,7 @@ export async function moveToPlatform(o: MoveOptions): Promise<MoveResult> {
                 values (${e!.id}, ${code.split('.')[0]!}, ${code}, true, ${me!.id}, ${me!.full_name}, ${`${REASON}: roles ${u.roles.join(', ')}`})`;
             employee.set(u.id, e!.id);
             rows.push({ type: 'user', localId: String(u.id), code: u.username, masterId: e!.id,
-              note: u.codes.join(' ') + (expired ? ' (temporary password had expired: reset it in core)' : usable ? '' : ' (demo password)') });
+              note: (u.active ? u.codes.join(' ') : 'inactive (deactivated or locked in the Logbook): no permissions') + (expired ? ' (temporary password had expired: reset it in core)' : usable ? '' : ' (demo password)') });
           }
 
           // --- 3. Items and products in master data ---

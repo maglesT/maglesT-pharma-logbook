@@ -115,6 +115,8 @@ describe('the move of a standalone Logbook (B1-5)', () => {
     await user('qa.old', ['qa'], { active: false });
     await user('9shift', ['operator']);   // core logins start with a letter: moved as u9shift (D-31 2)
     await user('1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', ['operator']);   // 40 characters: no room for the prefix
+    const locked = await user('op.locked', ['operator']);   // locked after failed passwords
+    await source`update users set locked_at = now() - interval '2 days', failed_attempts = 5 where id = ${locked}`;
     const late = await user('new.op', ['operator']);   // never used the temporary password before it expired
     await source`update users set must_change_password = true, temp_password_expires_at = now() - interval '1 day' where id = ${late}`;
     const item = async (code: string, name: string, kind: string, location = '') =>
@@ -196,6 +198,15 @@ describe('the move of a standalone Logbook (B1-5)', () => {
     expect((await target.identity`select c.password_hash, c.must_change from credential c join employee e on e.id = c.employee_id where e.login = 'new.op'`)[0])
       .toEqual({ password_hash: 'expired-temporary-password', must_change: true });
     expect((await target.logbook`select u.employee_id::text = e from users u, (values (${(await target.identity`select id::text from employee where login = 'op1'`)[0]!.id})) v(e) where u.username = 'op1'`)[0]).toBeTruthy();
+  });
+
+  it('PL-13: someone deactivated or locked in the Logbook is created inactive in core, with no permissions', async () => {
+    for (const login of ['qa.old', 'op.locked']) {
+      const [e] = await target.identity<{ id: string; active: boolean }[]>`select id, active from employee_current where login = ${login}`;
+      expect(e!.active).toBe(false);
+      expect(await target.identity`select 1 from permission_grant where employee_id = ${e!.id}`).toEqual([]);
+    }
+    expect((await target.identity`select c.locked_at is not null as l from credential c join employee e on e.id = c.employee_id where e.login = 'op.locked'`)[0]!.l).toBe(true);
   });
 
   it('D-30 / D-29 6: each person gets the permissions of their old roles; admins also manage people and master data in core', async () => {
