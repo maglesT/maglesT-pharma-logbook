@@ -180,10 +180,8 @@ A10" arrived after B1-2 and B1-4 were merged on roles, so they must be switched 
 2. ~~**B1-5 data move**~~ done (see Slices). Changed from the plan above: the schema is not restored from a dump. The
    platform's migrate builds it (0013 was edited after the live site applied it, and a restored schema would bring the
    standalone grants), and the script copies the data only, checked per table in the same transaction.
-3. ~~**B1-6 cutover runbook**~~ written: `docs/07-cutover-runbook.md` (draft for the owner). **D-31: no Logbook go-live now**; all products go live on the platform together after every product is moved, and the open points below wait until then. Phase B1 work in this repo is complete. The cutover itself waits
-   for the owner's approval and window. Open with the owner: how the public address reaches the platform's Caddy while
-   the old site runs; what people with logins starting with a digit get; how to continue after a rollback (core keeps
-   moved people, so a second move refuses their logins).
+3. ~~**B1-6 cutover runbook**~~ written: `docs/07-cutover-runbook.md` (draft for the owner). **D-31: no Logbook go-live now**; all products go live on the platform together after every product is moved. The four open points are approved (D-31) and written into the runbook: temporary address `logbook-new.<domain>`, `u` prefix for digit-first logins (**to do before go-live**: change `db/move-to-platform.ts` from refusing to prefixing, report the change, test it), snapshot of the platform databases before the move as rollback, rehearsal on the owner's server. Phase B1 work in this repo is otherwise complete. The cutover itself waits
+   for the owner's approval and window. Open points: decided in D-31 (see above).
 
 ### Things to know
 - Tests: `TEST_DATABASE_URL=postgres://logbook_owner:dev@127.0.0.1:5432/logbook_test npx vitest run`; local PostgreSQL 16
