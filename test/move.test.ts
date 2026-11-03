@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, copyFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, copyFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { randomBytes, scryptSync } from 'node:crypto';
@@ -9,6 +9,7 @@ import { audit } from '../server/audit.js';
 import { PERMISSIONS, ROLE_PERMISSIONS } from '../server/auth.js';
 import { moveToPlatform, reportCsv, type MoveOptions } from '../db/move-to-platform.js';
 import { seedDemo } from '../db/demo-seed.js';
+import { scheduleIntegrityCheck } from '../server/integrity.js';
 import { TEST_DATABASE_URL } from './helpers.js';
 
 // B1-5 (D-29, platform PL-13): the move of a standalone Logbook onto the platform. The platform side is built as on a
@@ -21,6 +22,7 @@ const url = (db: string) => TEST_DATABASE_URL.replace(/\/[^/]+$/, `/${db}`);
 let admin: Sql;
 const open: Sql[] = [];
 const dbs: string[] = [];
+const temps: string[] = [];
 const conn = (db: string, opts = {}) => { const s = connect(url(db), opts); open.push(s); return s; };
 
 const hash = (pw: string, salt = randomBytes(16)) =>
@@ -81,8 +83,8 @@ afterAll(async () => {
   for (const s of [`mvsrc_${process.pid}`, `mvdemo_${process.pid}`]) await test.unsafe(`drop schema if exists ${s} cascade; drop schema if exists ${s}_report cascade`);
   await test.end();
   for (const d of dbs.reverse()) await admin.unsafe(`drop database if exists ${d}`);
-  await admin.unsafe(`drop role if exists lbmv_${process.pid}_live_owner`);
-  await admin.unsafe(`drop role if exists lbmv_${process.pid}_demo_owner`);
+  for (const tag of ['live', 'demo', 'rollback']) await admin.unsafe(`drop role if exists lbmv_${process.pid}_${tag}_owner`);
+  for (const d of temps) rmSync(d, { recursive: true, force: true });
   await admin.end();
 });
 
@@ -98,6 +100,7 @@ describe('the move of a standalone Logbook (B1-5)', () => {
     await owner.end();
     source = conn('logbook_test', { searchPath: schema });
     const dir = mkdtempSync(path.join(tmpdir(), 'lb-0013-'));
+    temps.push(dir);
     for (const f of readdirSync(MIGRATIONS_DIR).filter((x) => x <= '0013_~')) copyFileSync(path.join(MIGRATIONS_DIR, f), path.join(dir, f));
     await migrate(source, dir);
     const user = async (login: string, roles: string[], extra: { active?: boolean; pw?: string } = {}) => {
@@ -111,6 +114,8 @@ describe('the move of a standalone Logbook (B1-5)', () => {
     await user('sup1', ['supervisor', 'operator']);
     await user('qa.old', ['qa'], { active: false });
     await user('9shift', ['operator']);   // core logins start with a letter
+    const late = await user('new.op', ['operator']);   // never used the temporary password before it expired
+    await source`update users set must_change_password = true, temp_password_expires_at = now() - interval '1 day' where id = ${late}`;
     const item = async (code: string, name: string, kind: string, location = '') =>
       (await source<{ id: number }[]>`insert into equipment (code, name, kind, location) values (${code}, ${name}, ${kind}, ${location}) returning id::int`)[0]!.id;
     await item('GRAN-1', 'Granulation room 1', 'area');
@@ -124,6 +129,35 @@ describe('the move of a standalone Logbook (B1-5)', () => {
     await source`insert into products (code, name) values ('RAB-20', 'Rabeprazole 20 mg')`;
     await audit(source, { actorId: adminId, action: 'site.created', objectType: 'site', objectId: 1, new: { name: 'Plant 1' } });
     target = await platform('live');
+  }, 120_000);
+
+  it('LB-23 / B1-5: the scheduled integrity check leaves an unused platform database empty, so the move can run', async () => {
+    const stop = scheduleIntegrityCheck(target.logbook, () => {});
+    await new Promise((r) => setTimeout(r, 500));
+    stop();
+    expect(await target.logbook`select 1 from audit_log`).toEqual([]);
+  });
+
+  it('PL-13: a failed check rolls back all three databases; a login core already has is never linked silently', async () => {
+    const other = await platform('rollback');
+    // Master data already holds the item's code under another name: the name check fails after everything was written.
+    const [me] = await other.identity<{ id: string }[]>`select id from employee where login = 'platform.admin'`;
+    const [i] = await other.masterData<{ id: string }[]>`insert into item (kind, code) values ('equipment', 'FBD-01') returning id`;
+    await other.masterData`insert into item_version (item_id, version, name, active, changed_by, changed_by_name, reason)
+      values (${i!.id}, 1, 'Dryer (other)', true, ${me!.id}, 'Platform Admin', 'entered by hand')`;
+    const counts = async () => [(await other.identity`select count(*)::int as n from employee`)[0]!.n,
+      (await other.masterData`select count(*)::int as n from item`)[0]!.n, (await other.logbook`select count(*)::int as n from audit_log`)[0]!.n];
+    const was = await counts();
+    const r = await moveToPlatform({ source, ...other, ...opts });
+    expect(r.moved).toBe(false);
+    expect(r.problems).toEqual(['item FBD-01: master data has equipment FBD-01 "Dryer (other)"']);
+    expect(await counts()).toEqual(was);
+    expect(r.rows.every((x) => x.note.startsWith('refused'))).toBe(true);
+
+    await other.identity`insert into employee (login, identity_verified_by, identity_verified_how) values ('op1', 'x', 'y')`;
+    expect((await moveToPlatform({ source, ...other, ...opts, dryRun: true })).problems).toContain('login op1 already exists in core');
+    expect((await moveToPlatform({ source, ...other, ...opts, demoPassword: 'x', dryRun: true })).problems)
+      .not.toContain('--demo-password is only for a demo or test database');   // logbook_test is a test database
   }, 120_000);
 
   it('PL-13: a dry run checks everything and writes nothing', async () => {
@@ -151,6 +185,9 @@ describe('the move of a standalone Logbook (B1-5)', () => {
     expect(verify('Op1-Secret-pass', op!.password_hash)).toBe(true);
     expect(op!.identity_verified_how).toBe(opts.verifiedHow);
     expect((await target.identity`select active from employee_current where login = 'qa.old'`)[0]!.active).toBe(false);
+    // A temporary password that had expired does not come back: core's administrator resets it.
+    expect((await target.identity`select c.password_hash, c.must_change from credential c join employee e on e.id = c.employee_id where e.login = 'new.op'`)[0])
+      .toEqual({ password_hash: 'expired-temporary-password', must_change: true });
     expect((await target.logbook`select u.employee_id::text = e from users u, (values (${(await target.identity`select id::text from employee where login = 'op1'`)[0]!.id})) v(e) where u.username = 'op1'`)[0]).toBeTruthy();
   });
 
@@ -197,6 +234,10 @@ describe('the platform demo (D-28, B1-5)', () => {
     const r = await moveToPlatform({ source: ownerSql, ...target, ...opts, demoPassword: 'Demo-Logbook-2026' });
     expect(r.problems).toEqual([]);
     expect((await target.logbook`select count(*)::int as n from signatures`)[0]!.n).toBeGreaterThan(5);
+    // PL-07 values made with the demo's stand-in master ids now name the moved items and products.
+    expect((await target.logbook`select count(*)::int as n from entry_master_values`)[0]!.n).toBeGreaterThan(5);
+    expect(await target.logbook`select entry_version_id from entry_master_values v where not exists (select from equipment e where e.item_id = v.item_id)
+      or (product_item_id is not null and not exists (select from products p where p.item_id = v.product_item_id))`).toEqual([]);
     // New entry numbers and ids continue after the moved ones.
     const seq = async (q: Sql) => q`select (select last_value from entry_ids) as e, (select last_value from entries_id_seq) as i`;
     expect(await seq(target.logbook)).toEqual(await seq(ownerSql));
