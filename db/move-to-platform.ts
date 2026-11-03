@@ -111,19 +111,25 @@ export async function moveToPlatform(o: MoveOptions): Promise<MoveResult> {
       from users u left join user_roles r on r.user_id = u.id group by u.id order by u.id`;
     const known = new Set((await o.identity<{ login: string }[]>`select login from employee`).map((r) => r.login));
     const codes = new Set((await o.identity<{ code: string }[]>`select code from current_permission`).map((r) => r.code));
-    const movers: (User & { codes: string[] })[] = [];
+    const local = new Set(users.map((u) => u.username));
+    const movers: (User & { codes: string[]; login: string })[] = [];
     for (const u of users) {
+      // Core logins start with a letter: a login that starts otherwise gets a "u" in front in core (D-31 2:
+      // 1ravi -> u1ravi). The Logbook's own records keep the old login; the report lists the change.
+      const login = CORE_LOGIN.test(u.username) ? u.username : `u${u.username}`;
+      if (login !== u.username && local.has(login)) problems.push(`login ${u.username} would become ${login}, which another person already has`);
       // A login core already has is someone else's or an earlier, half-finished move: never linked silently.
-      if (known.has(u.username)) problems.push(`login ${u.username} already exists in core`);
-      const refuse = !CORE_LOGIN.test(u.username) ? 'login does not fit core\'s rule (a letter first, 2 to 40 characters)'
+      if (known.has(login)) problems.push(`login ${login} already exists in core`);
+      const refuse = !CORE_LOGIN.test(login) ? 'login does not fit core\'s rule (a letter first, 2 to 40 characters)'
         : !u.password_hash.startsWith('scrypt$') && !o.demoPassword ? 'no password hash'
         : null;
       if (refuse) { rows.push({ type: 'user', localId: String(u.id), code: u.username, masterId: '', note: `refused: ${refuse}` }); continue; }
+      if (login !== u.username) rows.push({ type: 'user', localId: String(u.id), code: u.username, masterId: '', note: `renamed: login ${u.username} becomes ${login} in core` });
       // A demo database signed its people on through a stand-in (no local roles): their roles are the demo's own list.
       if (o.demoPassword && !u.roles.length) u.roles = DEMO_USERS.filter(([l]) => l === u.username).map(([, , r]) => r);
       const want = [...new Set(u.roles.flatMap((r) => [...ROLE_PERMISSIONS[r], ...(r === 'admin' ? ADMIN_CORE : [])]))].sort();
       for (const c of want) if (!codes.has(c)) problems.push(`permission ${c} is not in core's catalogue (is the Logbook licensed?)`);
-      movers.push({ ...u, codes: want });
+      movers.push({ ...u, codes: want, login });
     }
 
     const items = await src<Item[]>`
@@ -174,7 +180,7 @@ export async function moveToPlatform(o: MoveOptions): Promise<MoveResult> {
           const temp = o.demoPassword ? scryptHash(o.demoPassword) : null;
           for (const u of movers) {
             const [e] = await id<{ id: string }[]>`insert into employee (login, identity_verified_by, identity_verified_how)
-              values (${u.username}, ${o.verifiedBy}, ${o.verifiedHow}) returning id`;
+              values (${u.login}, ${o.verifiedBy}, ${o.verifiedHow}) returning id`;
             await id`insert into employee_version (employee_id, version, full_name, email, active, changed_by, changed_by_name, reason)
               values (${e!.id}, 1, ${u.full_name}, null, ${u.active}, ${me!.id}, ${me!.full_name}, ${REASON})`;
             // A temporary password that had expired stays unusable: core's administrator gives a new one.
@@ -274,7 +280,7 @@ export async function moveToPlatform(o: MoveOptions): Promise<MoveResult> {
       });
     }).catch((e) => { if (!(e instanceof Rollback)) throw e; });
     // Rolled back: only the planned refusals are true.
-    return problems.length ? { rows: rows.filter((r) => r.note.startsWith('refused')), problems, moved: false } : { rows, problems, moved: true };
+    return problems.length ? { rows: rows.filter((r) => /^(refused|renamed):/.test(r.note)), problems, moved: false } : { rows, problems, moved: true };
   });
 }
 

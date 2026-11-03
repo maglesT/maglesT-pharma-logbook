@@ -113,7 +113,8 @@ describe('the move of a standalone Logbook (B1-5)', () => {
     await user('op1', ['operator'], { pw: 'Op1-Secret-pass' });
     await user('sup1', ['supervisor', 'operator']);
     await user('qa.old', ['qa'], { active: false });
-    await user('9shift', ['operator']);   // core logins start with a letter
+    await user('9shift', ['operator']);   // core logins start with a letter: moved as u9shift (D-31 2)
+    await user('1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', ['operator']);   // 40 characters: no room for the prefix
     const late = await user('new.op', ['operator']);   // never used the temporary password before it expired
     await source`update users set must_change_password = true, temp_password_expires_at = now() - interval '1 day' where id = ${late}`;
     const item = async (code: string, name: string, kind: string, location = '') =>
@@ -152,7 +153,7 @@ describe('the move of a standalone Logbook (B1-5)', () => {
     expect(r.moved).toBe(false);
     expect(r.problems).toEqual(['item FBD-01: master data has equipment FBD-01 "Dryer (other)"']);
     expect(await counts()).toEqual(was);
-    expect(r.rows.every((x) => x.note.startsWith('refused'))).toBe(true);
+    expect(r.rows.every((x) => /^(refused|renamed):/.test(x.note))).toBe(true);
 
     await other.identity`insert into employee (login, identity_verified_by, identity_verified_how) values ('op1', 'x', 'y')`;
     expect((await moveToPlatform({ source, ...other, ...opts, dryRun: true })).problems).toContain('login op1 already exists in core');
@@ -163,7 +164,10 @@ describe('the move of a standalone Logbook (B1-5)', () => {
   it('PL-13: a dry run checks everything and writes nothing', async () => {
     const r = await moveToPlatform({ source, ...target, ...opts, dryRun: true });
     expect(r).toMatchObject({ moved: false, problems: [] });
-    expect(r.rows).toEqual([expect.objectContaining({ type: 'user', code: '9shift', note: expect.stringMatching(/^refused: login does not fit/) })]);
+    expect(r.rows).toEqual([
+      expect.objectContaining({ type: 'user', code: '9shift', note: 'renamed: login 9shift becomes u9shift in core' }),
+      expect.objectContaining({ type: 'user', code: '1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', note: expect.stringMatching(/^refused: login does not fit/) }),
+    ]);
     expect((await target.identity`select 1 from employee`).length).toBe(1);
     expect((await target.logbook`select 1 from users`).length).toBe(0);
   });
@@ -174,9 +178,12 @@ describe('the move of a standalone Logbook (B1-5)', () => {
     expect(r.moved).toBe(true);
     expect(r.rows.filter((x) => x.type === 'table').map((x) => x.localId)).toEqual(expect.arrayContaining(['users', 'equipment', 'audit_log', 'equipment_details']));
     expect((await target.logbook`select count(*)::int as n from audit_log where action = 'site.created'`)[0]!.n).toBe(1);
-    expect(await target.logbook`select username from users where employee_id is null`).toEqual([{ username: '9shift' }]);
+    expect(await target.logbook`select username from users where employee_id is null`).toEqual([{ username: '1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }]);
+    // D-31 2: core has u9shift; the Logbook's own records keep 9shift, linked by the employee id.
+    const [shift] = await target.identity<{ id: string }[]>`select id::text from employee where login = 'u9shift'`;
+    expect((await target.logbook`select employee_id::text as e from users where username = '9shift'`)[0]!.e).toBe(shift!.id);
     expect(await target.logbook`select code from equipment where item_id is null union all select code from products where item_id is null`).toEqual([]);
-    expect(reportCsv(r)).toContain('"user","5","9shift","","refused: login does not fit');
+    expect(reportCsv(r)).toContain('"user","5","9shift","","renamed: login 9shift becomes u9shift in core"');
   });
 
   it('PL-03 / D-29 5: each person keeps their login and password, with the site\'s identity verification; inactive stays inactive', async () => {
