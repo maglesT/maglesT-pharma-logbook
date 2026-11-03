@@ -40,15 +40,16 @@ export function HistoryCard({ me, equipment }: { me: Me; equipment: Equipment })
   }, [equipment.id]);
 
   const d = data?.details?.details;
+  const m = data?.equipment ?? equipment;   // make, model and serial: master data (D-29 3)
   return (
     <>
       <div className="card">
         <h2>Equipment details {data && <StatusChip status={data.status} />}</h2>
-        {d ? (
-          <dl className="details">
+        <dl className="details">
+          <dt>Make / model</dt><dd>{`${m.make ?? ''} ${m.model ?? ''}`.trim() || '—'}</dd>
+          <dt>Serial number</dt><dd>{m.serial || '—'}</dd>
+          {d && <>
             <dt>Asset number</dt><dd>{d.assetNumber || '—'}</dd>
-            <dt>Make / model</dt><dd>{`${d.manufacturer} ${d.model}`.trim() || '—'}</dd>
-            <dt>Serial number</dt><dd>{d.serialNumber || '—'}</dd>
             <dt>Capacity / size</dt><dd>{d.capacity || '—'}</dd>
             <dt>Installed</dt><dd>{d.installationDate ?? '—'}{d.supplier && ` · supplier ${d.supplier}`}</dd>
             <dt>Qualification</dt>
@@ -59,8 +60,9 @@ export function HistoryCard({ me, equipment }: { me: Me; equipment: Equipment })
             <dt>Product contact / MOC</dt><dd>{d.productContactMoc || '—'}</dd>
             <dt>SOPs</dt><dd>{d.sopRefs || '—'}</dd>
             <dt>Record</dt><dd className="muted">Version {data!.details!.version}, {data!.details!.changedBy}, {plantTime(data!.details!.changedAt)}: {data!.details!.reason}</dd>
-          </dl>
-        ) : <p className="muted">No equipment details recorded yet.</p>}
+          </>}
+        </dl>
+        {!d && <p className="muted">No equipment details recorded yet.</p>}
         {can(me, 'site.manage') && <button onClick={() => setEditing(true)}>Edit details</button>}
         {data && data.locationHistory.length > 0 && (
           <>
@@ -172,11 +174,12 @@ function DetailsDialog({ equipmentId, current, onCancel, onDone }: {
   onCancel: () => void;
   onDone: () => void;
 }) {
-  const [d, setD] = useState<Details>({ ...EMPTY_DETAILS, ...current?.details });
+  // Only today's fields: make, model and serial of older versions stay in those versions (D-29 3).
+  const [d, setD] = useState<Details>(Object.fromEntries(Object.entries(EMPTY_DETAILS).map(([k, v]) => [k, current?.details[k as keyof Details] ?? v])) as unknown as Details);
   const [reason, setReason] = useState('');
   const [problems, setProblems] = useState<string[]>([]);
   const set = <K extends keyof Details>(k: K, v: Details[K]) => setD({ ...d, [k]: v });
-  const text = (k: 'assetNumber' | 'manufacturer' | 'model' | 'serialNumber' | 'capacity' | 'supplier' | 'sopRefs', label: string) => (
+  const text = (k: 'assetNumber' | 'capacity' | 'supplier' | 'sopRefs', label: string) => (
     <label>{label}<input value={d[k]} onChange={(e) => set(k, e.target.value)} /></label>
   );
   const step = (k: 'iq' | 'oq' | 'pq', label: string) => (
@@ -201,9 +204,6 @@ function DetailsDialog({ equipmentId, current, onCancel, onDone }: {
       <form className="card dialog wide" onSubmit={submit}>
         <h2>Equipment details</h2>
         {text('assetNumber', 'Asset number')}
-        {text('manufacturer', 'Make / manufacturer')}
-        {text('model', 'Model')}
-        {text('serialNumber', 'Serial number')}
         {text('capacity', 'Capacity / size')}
         <label>Installation date<input type="date" value={d.installationDate ?? ''} onChange={(e) => set('installationDate', e.target.value || null)} /></label>
         {text('supplier', 'Supplier')}

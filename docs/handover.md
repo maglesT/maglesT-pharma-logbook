@@ -146,6 +146,7 @@ proxy refused a tag). main is not deployable standalone any more. Fixes for the 
 | B1-4 | #22 | e-signatures re-authenticate at core: `/sign` window (prompt=login, max_age=0), `/cb` checks ID-token `auth_time` ≥ start, HMAC proof (sub, roles, meanings, time, nonce; key derived from the OIDC client secret), spent once in the signature's transaction (`signing_proofs`, 0016); local lockout/alerts removed (core's PL-04) |
 | B1-3 | #23 | master data live through master_data's views (`server/master.ts`, `MASTER_DATA_DATABASE_URL`), "connection off" 503, write-time check of item and product, `entry_master_values` (PL-07), `equipment`/`products` = id maps (`item_id`, 0015), Master data screen read-only plus the Logbook's own per-item settings |
 | B1-2b | #26 | permissions instead of roles (A10, D-30): `PERMISSIONS` (18 codes) and `ROLE_PERMISSIONS` (old role → codes, for B1-5) in `server/auth.ts`; scope `openid profile permissions`, claim `permissions` (unknown codes ignored); `requirePermission(code)`; sessions keep codes (0017 renames the column and ends open sessions); the signing proof carries the fresh token's codes and `authenticateSigner` needs the signature's own code(s) (`needs`), no admin block; UI flags via `can(me, code)`. databsee `b1-logbook` rebased on A10, manifest lists the 18 codes |
+| B1-3b | #27 | make, model and serial are master data (D-29 3): `detailsSchema` no longer takes them (strict: a new version with them is refused; older versions keep theirs); history card, PDF and the details form show/read master `make/model/serial`; advice compares and prompts with master make and model |
 
 Platform side: branch `b1-logbook` in `maglesT/databsee` (not merged; waiting for the lead's OK): `apps/logbook/manifest.json`
 pinned to a Logbook commit (update the pin to the latest merged Logbook commit before merging), `bundle.sh` builds
@@ -171,7 +172,7 @@ A10" arrived after B1-2 and B1-4 were merged on roles, so they must be switched 
    `/api/me` permissions. Keep a role → permissions table (docs + code for B1-5). Then rebase databsee `b1-logbook` on main
    (A10), put the permission list in `apps/logbook/manifest.json` instead of `roles`, update the pin, PR, CI, review,
    squash-merge (lead's OK given). Suggest sending the proposed permission list to the lead for the owner first.
-1. **B1-3b**: make, model and serial move from the details record to master data (D-29 3): drop them from
+1. ~~**B1-3b**~~ done (see Slices). Was: make, model and serial move from the details record to master data (D-29 3): drop them from
    `detailsSchema` for new versions (old versions keep them), history card / PDF / advice read master `make/model/serial`
    (`LogbookItem`), adjust `test/breakdowns.test.ts`, `test/advice.test.ts`, `e2e/breakdowns.spec.ts`.
 2. **B1-5 data move** (PL-13): script `db/move-to-platform.ts` + check SQL. pg_dump of the live DB (custom format) →

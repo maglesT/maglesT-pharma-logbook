@@ -42,32 +42,24 @@ const MAX_SAME_FAILURE_TYPE = 12;
 
 // "Rotary tablet compression machine (standby)" and "Rotary tablet compression machine" are one type.
 const machineType = (name: string) => name.toLowerCase().replace(/\([^)]*\)/g, '').replace(/\s+\d+\s*$/, '').replace(/\s+/g, ' ').trim();
-const makeModel = (d: Record<string, unknown> | undefined) => {
-  const m = `${String(d?.manufacturer ?? '').trim()} ${String(d?.model ?? '').trim()}`.trim().toLowerCase();
+// Make and model are master data (D-29 3).
+const makeModel = (i: Pick<LogbookItem, 'make' | 'model'> | undefined) => {
+  const m = `${(i?.make ?? '').trim()} ${(i?.model ?? '').trim()}`.trim().toLowerCase();
   return m || null;
 };
-
-async function latestDetails(sql: Sql) {
-  const rows = await sql<{ equipment_id: number; details: Record<string, unknown> }[]>`
-    select distinct on (equipment_id) equipment_id::int, details from equipment_details order by equipment_id, version desc`;
-  return new Map(rows.map((r) => [r.equipment_id, r.details]));
-}
 
 // Past breakdowns related to this one, closest relation first, newest first within a relation.
 export async function similarBreakdowns(sql: Sql, items: LogbookItem[], entryId: number, equipmentId: number, failureCategory: string | null, now = new Date()): Promise<Similar[]> {
   const eq = items.find((i) => i.id === equipmentId);
   if (!eq) return [];
-  const [details, recent] = await Promise.all([
-    latestDetails(sql),
-    breakdowns(sql, items, new Date(now.getTime() - YEARS_BACK * 365 * 864e5), now, {}, now),
-  ]);
-  const names = new Map(items.map((i) => [i.id, i.name]));
-  const ownModel = makeModel(details.get(equipmentId));
+  const recent = await breakdowns(sql, items, new Date(now.getTime() - YEARS_BACK * 365 * 864e5), now, {}, now);
+  const byId = new Map(items.map((i) => [i.id, i]));
+  const ownModel = makeModel(eq);
   const ownType = machineType(eq.name);
   const relationOf = (b: Breakdown): Relation | null => {
     if (b.equipmentId === equipmentId) return 'same_machine';
-    if (ownModel && makeModel(details.get(b.equipmentId)) === ownModel) return 'same_model';
-    if (machineType(names.get(b.equipmentId) ?? '') === ownType) return 'same_type';
+    if (ownModel && makeModel(byId.get(b.equipmentId)) === ownModel) return 'same_model';
+    if (machineType(byId.get(b.equipmentId)?.name ?? '') === ownType) return 'same_type';
     if (failureCategory && b.failureCategory === failureCategory) return 'same_failure_type';
     return null;
   };
@@ -126,11 +118,10 @@ This is advice only: the engineer decides, and the repair is recorded and signed
 const line = (label: string, v: string | null | undefined) => (v ? `${label}: ${v}\n` : '');
 
 // No people's names leave the plant: only machines, failures and repairs.
-export function advicePrompt(current: { code: string; name: string; location: string; details?: Record<string, unknown>; data: Record<string, unknown> }, similar: Similar[]) {
-  const d = current.details ?? {};
+export function advicePrompt(current: { code: string; name: string; location: string; make?: string | null; model?: string | null; data: Record<string, unknown> }, similar: Similar[]) {
   let text = 'NEW BREAKDOWN\n'
     + `Machine: ${current.code} · ${current.name} · ${current.location}\n`
-    + line('Make / model', `${String(d.manufacturer ?? '')} ${String(d.model ?? '')}`.trim())
+    + line('Make / model', `${current.make ?? ''} ${current.model ?? ''}`.trim())
     + line('Failure category', String(current.data.failureCategory ?? ''))
     + line('What failed', String(current.data.description ?? ''))
     + line('Root cause so far', String(current.data.rootCause ?? ''))

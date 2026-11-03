@@ -156,18 +156,18 @@ async function run(app: FastifyInstance, proofKey: Buffer, password: string): Pr
   if (!(await api('admin', 'GET', '/api/site'))) await api('admin', 'PUT', '/api/site', { name: 'Demo Tablet Plant', code: 'DEMO', reason: DEMO_REASON });
   const product = (await api('admin', 'GET', '/api/products') as { id: number; code: string }[]).find((p) => p.code === DEMO_PRODUCT.code)!.id;
   const listed = await api('admin', 'GET', '/api/equipment') as { id: number; code: string }[];
-  const item = async (code: string, _name: string, _kind: Kind, _location: string, sopRefs = '', more: object = {}) => {
+  const item = async (code: string, _name: string, _kind: Kind, _location: string, sopRefs = '') => {
     const id = listed.find((e) => e.code === code)!.id;
     if (sopRefs) {
-      await api('admin', 'PUT', `/api/equipment/${id}/details`, { details: { sopRefs, ...more }, reason: DEMO_REASON, expectedVersion: 0 });
+      await api('admin', 'PUT', `/api/equipment/${id}/details`, { details: { sopRefs }, reason: DEMO_REASON, expectedVersion: 0 });
     }
     return id;
   };
   await item('GRAN-1', 'Granulation room 1', 'area', 'Block A, ground floor');
   await item('COMP-1', 'Compression room 1', 'area', 'Block A, ground floor');
-  const fbd = await item('FBD-01', 'Fluid bed dryer', 'equipment', 'GRAN-1', 'SOP-PRD-014', { manufacturer: 'Demo Process Equipment', model: 'FBD-120' });
-  const press = await item('PRESS-01', 'Rotary tablet press', 'equipment', 'COMP-1', 'SOP-PRD-021, SOP-ENG-010', { manufacturer: 'Demo Press Works', model: 'RTP-37' });
-  const ht = await item('HT-01', 'Tablet hardness tester', 'instrument', 'COMP-1', 'SOP-QC-005', { manufacturer: 'Demo Instruments', model: 'HT-500' });
+  const fbd = await item('FBD-01', 'Fluid bed dryer', 'equipment', 'GRAN-1', 'SOP-PRD-014');
+  const press = await item('PRESS-01', 'Rotary tablet press', 'equipment', 'COMP-1', 'SOP-PRD-021, SOP-ENG-010');
+  const ht = await item('HT-01', 'Tablet hardness tester', 'instrument', 'COMP-1', 'SOP-QC-005');
 
   // Logbook settings: drafted by Admin, approved by QA with an e-signature (LB-24). Approval makes
   // them effective now; the back-dated entries below are recorded under these settings.

@@ -31,9 +31,8 @@ async function approve(type: string) {
   expect((await call(t.app, c.qa!, 'POST', `/api/settings/${id}/approve`, { ...sig('qa1'), contentHash: versions.find((v: { id: number }) => v.id === id).contentHash })).statusCode).toBe(200);
 }
 const newItem = async (name: string, model?: string) => {
-  const id = (await addItem(t, { code: `AD-${++n}`, name, kind: 'equipment', location: 'Block A' })) as number;
-  if (model) await call(t.app, c.admin!, 'PUT', `/api/equipment/${id}/details`, { details: { manufacturer: 'Acme', model }, reason: 'Initial record', expectedVersion: 0 });
-  return id;
+  // Make and model are master data (D-29 3).
+  return (await addItem(t, { code: `AD-${++n}`, name, kind: 'equipment', location: 'Block A', ...(model ? { make: 'Acme', model } : {}) })) as number;
 };
 const breakdown = async (id: number, description: string, extra: object = {}) =>
   (await call(t.app, c.eng1!, 'POST', `/api/equipment/${id}/entries`, {
@@ -131,7 +130,7 @@ describe('breakdown suggestions (D-27)', () => {
   });
 
   it('the prompt carries the new breakdown and the past repairs, labelled by relation', () => {
-    const text = advicePrompt({ code: 'M-1', name: 'Press', location: 'A', details: { manufacturer: 'Acme', model: 'RTP-45' }, data: { description: 'Sticking', failureCategory: 'mechanical' } }, [
+    const text = advicePrompt({ code: 'M-1', name: 'Press', location: 'A', make: 'Acme', model: 'RTP-45', data: { description: 'Sticking', failureCategory: 'mechanical' } }, [
       { entryId: 7, equipmentId: 1, code: 'M-2', name: 'Press', relation: 'same_model', occurredAt: new Date('2026-09-01T00:00:00Z'), failureCategory: 'mechanical',
         description: 'Sticking', rootCause: 'Bush', workDone: 'Bush replaced', partsText: '1 × Bush', doneBy: 'Vendor: Acme (report R1)', downtime: '2 h', postRepairChecks: '', status: 'released' },
     ]);
