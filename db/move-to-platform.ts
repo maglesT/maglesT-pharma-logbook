@@ -27,7 +27,8 @@ const REASON = 'Moved from the standalone Pharma Logbook (B1-5)';
 // The id maps are filled by the move itself (a demo source holds stand-in ids there): not copied, not compared.
 const MAPPED: Record<string, string[]> = { users: ['employee_id'], equipment: ['item_id'], products: ['item_id'] };
 // Copied, then re-pointed to the new master ids (a demo source's stand-in ids), so not compared.
-const SUM_SKIP: Record<string, string[]> = { entry_master_values: ['item_id', 'product_item_id'] };
+// users.password_hash is blanked after the copy (the hashes are in core).
+const SUM_SKIP: Record<string, string[]> = { entry_master_values: ['item_id', 'product_item_id'], users: ['password_hash'] };
 // Core's password hash format (apps/core/server/passwords.ts), for --demo-password only.
 const scryptHash = (pw: string, salt = randomBytes(16)) =>
   ['scrypt', 16384, 8, 1, salt.toString('base64'), scryptSync(pw, salt, 64, { N: 16384, r: 8, p: 1 }).toString('base64')].join('$');
@@ -153,15 +154,17 @@ export async function moveToPlatform(o: MoveOptions): Promise<MoveResult> {
 
     if (problems.length || o.dryRun) return { rows, problems, moved: false };
 
-    // The whole move is one unit: the three platform databases commit only after every check below has passed (the
-    // commits themselves follow one another; a failure between them is reported by the run and leaves the old site live).
+    // The whole move is one unit: the three platform databases commit only after every check below has passed. The
+    // commits follow one another, innermost first: the logbook database first (it can be dropped and migrated again),
+    // then master data and core's identity, whose tables are insert-only. So if the logbook commit fails, nothing
+    // was written to core and the move can run again.
     const before = new Map<string, string>();
     for (const [t, cols] of copy) before.set(t, await checksum(src, t, cols));
-    await o.logbook.begin(async (lb) => {
-      await pin(lb);
-      await lb`set local session_replication_role = replica`;   // as pg_restore --disable-triggers: insert-only triggers stay quiet
-      await o.identity.begin(async (id) => {
-        await o.masterData.begin(async (md) => {
+    await o.identity.begin(async (id) => {
+      await o.masterData.begin(async (md) => {
+        await o.logbook.begin(async (lb) => {
+          await pin(lb);
+          await lb`set local session_replication_role = replica`;   // as pg_restore --disable-triggers: insert-only triggers stay quiet
           // --- 1. Rows, data only (PL-13). Rows travel as JSON text, never parsed on the way, in small batches. ---
           for (const [t, cols] of copy) {
             const list = cols.map(ident).join(', ');
@@ -236,6 +239,8 @@ export async function moveToPlatform(o: MoveOptions): Promise<MoveResult> {
 
           // --- 4. The id maps. A demo source's entries kept its stand-in master ids (PL-07 values): they follow. ---
           for (const [uid, e] of employee) await lb`update users set employee_id = ${e} where id = ${uid}`;
+          // Passwords live in core now: no live hash stays in the Logbook's users table, which the app login can read.
+          await lb`update users set password_hash = '-' where password_hash <> '-'`;
           for (const i of items) {
             const to = master.get(`item/${i.id}`)!;
             await lb`update equipment set item_id = ${to} where id = ${i.id}`;

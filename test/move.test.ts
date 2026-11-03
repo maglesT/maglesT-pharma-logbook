@@ -83,7 +83,7 @@ afterAll(async () => {
   for (const s of [`mvsrc_${process.pid}`, `mvdemo_${process.pid}`]) await test.unsafe(`drop schema if exists ${s} cascade; drop schema if exists ${s}_report cascade`);
   await test.end();
   for (const d of dbs.reverse()) await admin.unsafe(`drop database if exists ${d}`);
-  for (const tag of ['live', 'demo', 'rollback']) await admin.unsafe(`drop role if exists lbmv_${process.pid}_${tag}_owner`);
+  for (const tag of ['live', 'demo', 'rollback', 'commitfail']) await admin.unsafe(`drop role if exists lbmv_${process.pid}_${tag}_owner`);
   for (const d of temps) rmSync(d, { recursive: true, force: true });
   await admin.end();
 });
@@ -163,6 +163,22 @@ describe('the move of a standalone Logbook (B1-5)', () => {
       .not.toContain('--demo-password is only for a demo or test database');   // logbook_test is a test database
   }, 120_000);
 
+  it('PL-13: the logbook database commits first: if its commit fails, core and master data keep nothing and the move can run again', async () => {
+    const other = await platform('commitfail');
+    await other.logbook.unsafe(`create function fail_at_commit() returns trigger language plpgsql as $f$ begin raise exception 'forced commit failure'; end $f$;
+      create constraint trigger fail_at_commit after insert on users deferrable initially deferred for each row execute function fail_at_commit();
+      alter table users enable always trigger fail_at_commit`);
+    const counts = async () => [(await other.identity`select count(*)::int as n from employee`)[0]!.n,
+      (await other.identity`select count(*)::int as n from permission_grant`)[0]!.n, (await other.masterData`select count(*)::int as n from item`)[0]!.n];
+    const was = await counts();
+    await expect(moveToPlatform({ source, ...other, ...opts })).rejects.toThrow(/forced commit failure/);
+    expect(await counts()).toEqual(was);
+    expect((await other.logbook`select count(*)::int as n from users`)[0]!.n).toBe(0);
+    // With the failure gone, the same move runs through.
+    await other.logbook.unsafe('drop trigger fail_at_commit on users');
+    expect((await moveToPlatform({ source, ...other, ...opts })).problems).toEqual([]);
+  }, 120_000);
+
   it('PL-13: a dry run checks everything and writes nothing', async () => {
     const r = await moveToPlatform({ source, ...target, ...opts, dryRun: true });
     expect(r).toMatchObject({ moved: false, problems: [] });
@@ -180,6 +196,8 @@ describe('the move of a standalone Logbook (B1-5)', () => {
     expect(r.moved).toBe(true);
     expect(r.rows.filter((x) => x.type === 'table').map((x) => x.localId)).toEqual(expect.arrayContaining(['users', 'equipment', 'audit_log', 'equipment_details']));
     expect((await target.logbook`select count(*)::int as n from audit_log where action = 'site.created'`)[0]!.n).toBe(1);
+    // The passwords are in core now: no live hash is left in the Logbook's users table (the app login reads it).
+    expect(await target.logbook`select username from users where password_hash <> '-'`).toEqual([]);
     expect(await target.logbook`select username from users where employee_id is null`).toEqual([{ username: '1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' }]);
     // D-31 2: core has u9shift; the Logbook's own records keep 9shift, linked by the employee id.
     const [shift] = await target.identity<{ id: string }[]>`select id::text from employee where login = 'u9shift'`;
