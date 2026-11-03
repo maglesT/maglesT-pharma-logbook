@@ -29,7 +29,7 @@ standalone Logbook…").
 4. **Identity verification text** from the site (21 CFR 11.100(b), CP-03, D-29 5): who verified the moved people's
    identity and how (for example "Site HR", "employee ID card checked at hiring, SOP-HR-003").
 5. **Rehearsal on the owner's own server** (D-31 4), no separate test server: steps 2–6 below on last night's backup,
-   the real move and its checks, not only `--dry-run`; then restore the snapshot of step 4a, so the platform is as
+   the real move and its checks, not only `--dry-run`; then restore the snapshot of step 4a as in "Rollback" steps 1–3, so the platform is as
    before the rehearsal. The move must end "moved" with no problems. Tell the people with a prefixed login (D-31 2)
    their new login.
 6. Tell users the window, the new address, and that their login and password stay the same.
@@ -99,10 +99,12 @@ Until the owner signs off, the old installation (containers, database volume, `s
 at the freeze. To go back (D-31 3), in this order:
 
 1. Stop the Logbook and core: `plat stop logbook core`.
-2. Restore the step-4a snapshots of `logbook`, `identity` and `master_data`, each recreated with its owner:
-   `plat exec -T db dropdb --force -U <superuser> <db>`, `plat exec -T db createdb -U <superuser> -O <db>_owner <db>`, then
-   `plat exec -T db pg_restore -U <superuser> -d <db> < /backups/pre-move-<db>.dump`. This takes back the moved rows,
-   people and items, so the move can run again later.
+2. Restore the step-4a snapshots of `logbook`, `identity` and `master_data`, each recreated from its dump with
+   `--create`, which brings back the owner, the database's own rights (the app logins' and other products' link
+   CONNECT grants, PUBLIC revoked) and its settings; a plain `createdb` would leave PUBLIC able to connect:
+   `plat exec -T db dropdb --force -U <superuser> <db>`, then
+   `plat exec -T db pg_restore -U <superuser> --create -d postgres < /backups/pre-move-<db>.dump`. This takes back the
+   moved rows, people and items, so the move can run again later.
 3. Start core: `plat start core`.
 4. Licence the Logbook off in the config and apply. Apply runs after the restore, so its switch records (PL-10)
    are kept.
