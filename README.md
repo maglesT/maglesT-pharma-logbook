@@ -129,7 +129,7 @@ SOURCE_DATABASE_URL=postgres://<owner>@<old db>/logbook PLATFORM_DATABASE_URL=po
   --verified-how "<how, e.g. ID card at hiring, SOP-HR-003>" --report move.csv --dry-run
 ```
 
-The report lists each user, item and product with its new id, logins renamed for core (a `u` before a login that starts with a digit), refused logins and locations that match no room. A platform
+The report lists each user, item and product with its new id, logins renamed for core (a `u` before a login that does not start with a letter), refused logins and locations that match no room. A platform
 demo: seed a demo database (`npm run demo:seed`), then move it with `--demo-password <password>`.
 
 ## Conventions

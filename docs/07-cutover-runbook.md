@@ -13,9 +13,12 @@ standalone Logbook…").
 ## Before the day
 
 1. **Platform installed** on the owner's server (databsee README "Server setup"), with the first core administrator.
-   Address (D-31 1): the platform Logbook is tested at a temporary address (for example `logbook-new.<domain>`) through
-   the existing Caddy; `logbook.<domain>` keeps pointing at the old site until step 9.
-   Logins (D-31 2): the move gives a login that starts with a digit a `u` prefix in core (`1ravi` → `u1ravi`) and
+   Address (D-31 1): the platform serves the Logbook only at `logbook.<platform domain>` (apply fixes its sign-on
+   return address and core's client to `https://logbook.<domain>/cb`), so it is tested there, while the old site keeps
+   its own address until step 9. If the platform's domain would give the old site's name, the old site needs another
+   name first: an owner decision at go-live.
+   Logins (D-31 2): the move gives a login that does not start with a letter (a digit, `.`, `_` or `-`) a `u` prefix in
+   core (`1ravi` → `u1ravi`) and
    lists it in its report as "renamed"; the Logbook's own records keep the old login. A login that cannot take the
    prefix (40 characters already) or would clash with another person's is reported and stops or is refused.
 2. **Platform release with the Logbook pin** at the latest Logbook merge (`apps/logbook/manifest.json` in databsee),
@@ -36,7 +39,10 @@ standalone Logbook…").
 Record every step's time, who did it, and its output (the change record, with the customer's change reference).
 Database tools run inside containers (the hosts need no PostgreSQL client): `old` below is
 `docker compose -f ops/docker-compose.yml` in the old installation's folder, `plat` is
-`docker compose -f /opt/medhanta/current/deploy/compose.yml`.
+`docker compose -f /opt/medhanta/current/deploy/compose.yml`, always with the Logbook's pinned image named first
+(compose otherwise looks for `medhanta/logbook:none`):
+`export LOGBOOK_COMMIT=$(jq -r .source.commit /opt/medhanta/current/apps/logbook/manifest.json)`. No cron line of the
+cutover uses compose.
 
 1. **Freeze.** Stop the old app, leave its database running: `old stop app`. From here nobody can add records.
 2. **Check, then back up the frozen data.** First the integrity check (it adds its own `integrity.passed` row to the
@@ -62,7 +68,7 @@ Database tools run inside containers (the hosts need no PostgreSQL client): `old
    plus `sha256sum`. A rollback or the end of the rehearsal restores them, and the move can then run again.
 5. **Dry run, then the move**, inside the Logbook image at the pinned commit, on the platform's network:
    ```sh
-   export LOGBOOK_COMMIT=$(jq -r .source.commit /opt/medhanta/current/apps/logbook/manifest.json)
+   export LOGBOOK_COMMIT=$(jq -r .source.commit /opt/medhanta/current/apps/logbook/manifest.json)   # as above
    plat run --name lb-move --no-deps \
      -e SOURCE_DATABASE_URL=postgres://<superuser>:<pw>@db:5432/logbook_move_source \
      -e PLATFORM_DATABASE_URL=postgres://<superuser>:<pw>@db:5432 \
@@ -81,7 +87,8 @@ Database tools run inside containers (the hosts need no PostgreSQL client): `old
 7. **Records of the move**: the freeze dump and its SHA-256, the old site's integrity output, both move reports, the
    platform's integrity result, the checks of step 6, with times and names.
 8. **Owner go / no-go.** On "no-go": rollback below.
-9. **Switch.** Point `logbook.<domain>` at the platform instead of the temporary address (D-31 1); tell users. Drop the scratch database:
+9. **Switch.** Redirect the old address to `https://logbook.<platform domain>` in Caddy (a permanent redirect, so
+   bookmarks keep working; D-31 1); tell users. Drop the scratch database:
    `plat exec -T db dropdb -U <superuser> logbook_move_source`.
 
 ## Rollback
