@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, MEANING_LABEL, plantTime, TYPE_LABEL, type Entry, type Equipment, type Me } from '../api.js';
+import { api, can, MEANING_LABEL, plantTime, TYPE_LABEL, type Entry, type Equipment, type Me } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 import { AuditTable, type AuditRow } from '../components/AuditTable.js';
 import { Fields } from '../fields.js';
@@ -23,8 +23,8 @@ const startOf = (d: string) => new Date(`${d}T00:00:00+05:30`).toISOString();
 const endOf = (d: string) => new Date(new Date(`${d}T00:00:00+05:30`).getTime() + 86_400_000).toISOString();
 
 export function Review({ me }: { me: Me }) {
-  const reviewer = me.roles.includes('qa') || me.roles.includes('supervisor');
-  const auditor = me.roles.includes('qa') || me.roles.includes('admin');
+  const reviewer = can(me, 'review.read');
+  const auditor = can(me, 'audit.read');
   const [tab, setTab] = useState<'period' | 'batch' | 'audit'>(reviewer ? 'period' : 'audit');
   return (
     <>
@@ -90,7 +90,7 @@ function PeriodReview({ me }: { me: Me }) {
               {!r.valid && <span className="chip chip-bad"> Invalid: review content changed</span>}
             </p>
           ))}
-          {me.roles.includes('qa') && <button className="primary" onClick={() => setSigning(true)}>Sign as reviewed</button>}
+          {can(me, 'review.sign') && <button className="primary" onClick={() => setSigning(true)}>Sign as reviewed</button>}
 
           <h2>Entries</h2>
           <EntryTable entries={period.entries} />

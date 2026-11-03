@@ -2,9 +2,9 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
-import { parseId, requireRole, type SessionUser } from '../auth.js';
+import { parseId, requirePermission, type SessionUser } from '../auth.js';
 import { LOGBOOK_TYPES, typeByKey, type LogbookSettings } from '../logbook-types.js';
-import { DATA_SCHEMAS, REPORTED_FIELDS, VERIFIERS, checkData, mayCorrect, mayRecord, performerSigns, verificationNeeded, type EntryContext, type EquipmentInfo } from '../entries.js';
+import { DATA_SCHEMAS, REPORTED_FIELDS, checkData, correctCodes, mayCorrect, mayRecord, recordCode, performerSigns, verificationNeeded, type EntryContext, type EquipmentInfo } from '../entries.js';
 import { logbookItem, logbookProducts, type Master } from '../master.js';
 import { SignError, authenticateSigner, contentHash, proofOnly, sign, signBody, type AuthenticatedSigner } from '../signatures.js';
 import { settingsInForce } from './settings.js';
@@ -130,7 +130,7 @@ async function withMayCorrect<T extends { id: number; logbookType: string }>(sql
     from entries e join entries f on f.entry_id = e.entry_id and f.version = 1
     where e.id = any(${entries.map((x) => x.id)}::bigint[])`;
   const own = new Map(authors.map((a) => [a.id, a.latest === user.id || a.first === user.id]));
-  return entries.map((x) => ({ ...x, mayCorrect: mayCorrect(x.logbookType, user.roles, own.get(x.id) ?? false) }));
+  return entries.map((x) => ({ ...x, mayCorrect: mayCorrect(x.logbookType, user.permissions, own.get(x.id) ?? false) }));
 }
 
 function send(reply: FastifyReply, e: unknown) {
@@ -190,7 +190,7 @@ async function voiceSigner(sql: Sql, key: Buffer, user: SessionUser, b: { voiceN
   if (!b.voiceNotes.length) return null;
   if (!b.voiceSignature) throw new EntryError(400, 'voice_signature_required', ['Sign to confirm the voice-note text.']);
   if (main && b.signature?.proof === b.voiceSignature.proof) return main;
-  return authenticateSigner(sql, key, user, b.voiceSignature, { objectType: 'voice_note', objectId: 0, meaning: 'voice_confirmed' });
+  return authenticateSigner(sql, key, user, b.voiceSignature, { objectType: 'voice_note', objectId: 0, meaning: 'voice_confirmed', needs: ['logbook.voice_note.record'] });
 }
 
 // Refuses a voice translation that is not being confirmed now; links and signs those that are.
@@ -275,7 +275,7 @@ async function settingsFor(tx: Tx, type: string): Promise<{ id: number; settings
 }
 
 export function entryRoutes(app: FastifyInstance, sql: Sql) {
-  const anyUser = { preHandler: requireRole() };
+  const anyUser = { preHandler: requirePermission() };
 
   // Create an entry (LB-01–04, LB-10, LB-11).
   app.post<{ Params: { id: string } }>('/api/equipment/:id/entries', anyUser, async (req, reply) => {
@@ -287,12 +287,12 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
     const type = typeByKey(b.logbookType);
     try {
       if (!type || !DATA_SCHEMAS[b.logbookType]) throw new EntryError(400, 'type_not_available');
-      if (!mayRecord(b.logbookType, user.roles)) throw new EntryError(403, 'forbidden');
+      if (!mayRecord(b.logbookType, user.permissions)) throw new EntryError(403, 'forbidden');
       const signs = performerSigns(b.logbookType);
       if (signs && !b.signature) throw new EntryError(400, 'signature_required');
       // Check the signing proofs first, in their own transaction, so a refused one is always audited (LB-20).
       const signer = signs ? await authenticateSigner(sql, app.proofKey, user, b.signature!,
-        { objectType: 'entry', objectId: 0, meaning: 'performed' }) : null;
+        { objectType: 'entry', objectId: 0, meaning: 'performed', needs: [recordCode(b.logbookType)!] }) : null;
       const voice = await voiceSigner(sql, app.proofKey, user, b, signer);
 
       const created = await sql.begin(async (tx) => {
@@ -357,17 +357,17 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         select logbook_type, data, activity_end, exists (select 1 from entries x where x.supersedes = e.id) as replaced from entries e where id = ${id}`;
       if (!peek) throw new EntryError(404, 'not_found');
       if (!isOpenable(peek.logbook_type, peek.data) || peek.activity_end || peek.replaced) throw new EntryError(409, 'not_open');
-      if (!mayRecord(peek.logbook_type, user.roles)) throw new EntryError(403, 'forbidden');
+      if (!mayRecord(peek.logbook_type, user.permissions)) throw new EntryError(403, 'forbidden');
       const repair = peek.logbook_type === 'maintenance';
       if (repair && (!b.signature || !b.data)) throw new EntryError(400, 'signature_required');
       if (!repair && b.voiceNotes.length) throw new EntryError(400, 'check_failed', ['Ending a use takes no voice note.']);
       const signer = repair ? await authenticateSigner(sql, app.proofKey, user, b.signature!,
-        { objectType: 'entry', objectId: id, meaning: 'performed' }) : null;
+        { objectType: 'entry', objectId: id, meaning: 'performed', needs: [recordCode(peek.logbook_type)!] }) : null;
       const voice = await voiceSigner(sql, app.proofKey, user, b, signer);
       const row = await sql.begin(async (tx) => {
         const prev = await latestVersion(tx, id);
         if (!isOpenable(prev.logbook_type, prev.data) || prev.activity_end || prev.logbook_type !== peek!.logbook_type) throw new EntryError(409, 'not_open');
-        if (!mayRecord(prev.logbook_type, user.roles)) throw new EntryError(403, 'forbidden');
+        if (!mayRecord(prev.logbook_type, user.permissions)) throw new EntryError(403, 'forbidden');
         if (b.activityEnd < prev.activity_start) throw new EntryError(400, 'check_failed', ['The end cannot be before the start.']);
         const late = timing(await dbNow(tx), [b.activityEnd], b.lateReason);
         let data = prev.data;
@@ -405,14 +405,21 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
     const b = body.data;
     const user = req.user!;
     try {
-      const signer = await authenticateSigner(sql, app.proofKey, user, b.signature, { objectType: 'entry', objectId: id, meaning: 'corrected' });
+      // The rights this correction needs; checked again under the lock below.
+      const [peek] = await sql<{ logbook_type: string; own: boolean }[]>`
+        select e.logbook_type, (e.entered_by = ${user.id} or f.entered_by = ${user.id}) as own
+        from entries e join entries f on f.entry_id = e.entry_id and f.version = 1 where e.id = ${id}`;
+      if (!peek) throw new EntryError(404, 'not_found');
+      if (!mayCorrect(peek.logbook_type, user.permissions, peek.own)) throw new EntryError(403, 'forbidden');
+      const signer = await authenticateSigner(sql, app.proofKey, user, b.signature,
+        { objectType: 'entry', objectId: id, meaning: 'corrected', needs: correctCodes(peek.logbook_type, peek.own) });
       const voice = await voiceSigner(sql, app.proofKey, user, b, signer);
       const row = await sql.begin(async (tx) => {
         const prev = await latestVersion(tx, id);
         const [first] = await tx<{ entered_by: number; entered_at: Date }[]>`
           select entered_by::int, entered_at from entries where entry_id = ${prev.entry_id} and version = 1`;
         const own = first!.entered_by === user.id || prev.entered_by === user.id;
-        if (!mayCorrect(prev.logbook_type, user.roles, own)) {
+        if (!mayCorrect(prev.logbook_type, user.permissions, own)) {
           throw new EntryError(403, 'forbidden');
         }
         const eq = await loadEquipment(tx, prev.equipment_id);
@@ -467,13 +474,13 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
   });
 
   // LB-03: second-person verification of the latest version, signed against the content shown.
-  app.post<{ Params: { id: string } }>('/api/entries/:id/verify', { preHandler: requireRole(...VERIFIERS) }, async (req, reply) => {
+  app.post<{ Params: { id: string } }>('/api/entries/:id/verify', { preHandler: requirePermission('logbook.entry.verify') }, async (req, reply) => {
     const id = parseId(req.params.id);
     const body = signBody.safeParse(req.body);
     if (id === null || !body.success) return invalid(reply, body.error?.issues);
     const user = req.user!;
     try {
-      const signer = await authenticateSigner(sql, app.proofKey, user, body.data, { objectType: 'entry', objectId: id, meaning: 'verified' });
+      const signer = await authenticateSigner(sql, app.proofKey, user, body.data, { objectType: 'entry', objectId: id, meaning: 'verified', needs: ['logbook.entry.verify'] });
       await sql.begin(async (tx) => {
         const row = await latestVersion(tx, id);
         const [s] = await tx<{ settings: LogbookSettings }[]>`select settings from logbook_settings where id = ${row.settings_id}`;
@@ -497,12 +504,12 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
 
   // LB-06: QA returns equipment to service after a breakdown, with a "Released" e-signature on
   // the verified breakdown entry (SchM 18.4.3; Annex 1 5.6).
-  app.post<{ Params: { id: string } }>('/api/entries/:id/release', { preHandler: requireRole('qa') }, async (req, reply) => {
+  app.post<{ Params: { id: string } }>('/api/entries/:id/release', { preHandler: requirePermission('logbook.breakdown.release') }, async (req, reply) => {
     const id = parseId(req.params.id);
     const body = signBody.safeParse(req.body);
     if (id === null || !body.success) return invalid(reply, body.error?.issues);
     try {
-      const signer = await authenticateSigner(sql, app.proofKey, req.user!, body.data, { objectType: 'entry', objectId: id, meaning: 'released' });
+      const signer = await authenticateSigner(sql, app.proofKey, req.user!, body.data, { objectType: 'entry', objectId: id, meaning: 'released', needs: ['logbook.breakdown.release'] });
       await sql.begin(async (tx) => {
         const row = await latestVersion(tx, id);
         if (row.logbook_type !== 'maintenance' || row.data.kind !== 'breakdown') throw new EntryError(409, 'not_a_breakdown');

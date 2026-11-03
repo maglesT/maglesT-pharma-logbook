@@ -17,6 +17,7 @@ import type { SignOn } from '../server/signon.js';
 import type { Kind, Master } from '../server/master.js';
 import { randomBytes } from 'node:crypto';
 import { MEANINGS, makeProof } from '../server/signatures.js';
+import { ROLE_PERMISSIONS } from '../server/auth.js';
 
 export const DEMO_REASON = 'Demo data';
 const DEFAULT_PASSWORD = 'Demo-Logbook-2026';
@@ -94,7 +95,7 @@ export async function seedDemo(sql: Sql, opts: SeedOptions = {}): Promise<SeedRe
 }
 
 // The demo people as Medhanta core would sign them on (D-29), in this process only. On a platform installation the
-// same logins and roles must also exist in core for anyone to sign in to the demo.
+// same logins and permissions (ROLE_PERMISSIONS of each demo role) must also exist in core for anyone to sign in to the demo.
 // The demo items and product as Medhanta core's master data would hold them (D-29), in this process only. On a
 // platform installation the same codes must exist in core.
 const DEMO_ITEMS: [code: string, name: string, kind: Kind, room: string | null, make: string | null, model: string | null][] = [
@@ -118,7 +119,7 @@ function demoSignOn(): SignOn {
     const u = DEMO_USERS.find(([l]) => l === login);
     if (!u) throw new SeedError(`unknown demo login ${login}`);
     if (!subs.has(login)) subs.set(login, randomUUID());
-    return { sub: subs.get(login)!, login, name: u[1], roles: [u[2]], refreshToken: login };
+    return { sub: subs.get(login)!, login, name: u[1], permissions: [...ROLE_PERMISSIONS[u[2]]], refreshToken: login };
   };
   return {
     authUrl: ({ state, loginHint }) => `/cb?${new URLSearchParams({ state, code: loginHint ?? '' })}`,
@@ -137,7 +138,7 @@ async function run(app: FastifyInstance, proofKey: Buffer, password: string): Pr
     return res.json();
   };
   // Each signature carries a proof as /cb makes it after core's re-authentication (B1-4).
-  const sig = (who: Who) => ({ proof: makeProof(proofKey, { sub: subs.get(WHO[who])!, roles: [DEMO_USERS.find(([l]) => l === WHO[who])![2]] }, [...MEANINGS]) });
+  const sig = (who: Who) => ({ proof: makeProof(proofKey, { sub: subs.get(WHO[who])!, permissions: ROLE_PERMISSIONS[DEMO_USERS.find(([l]) => l === WHO[who])![2]] }, [...MEANINGS]) });
   const signIn = async (who: Who) => {
     const go = await app.inject({ method: 'GET', url: `/login?login_hint=${WHO[who]}` });
     const pending = go.cookies.find((c) => c.name === 'signon');

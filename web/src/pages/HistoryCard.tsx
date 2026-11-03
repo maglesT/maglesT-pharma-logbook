@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
-  api, ApiError, EMPTY_DETAILS, MEANING_LABEL, plantTime, QUALIFICATION_LABEL, TYPE_LABEL,
+  api, can, ApiError, EMPTY_DETAILS, MEANING_LABEL, plantTime, QUALIFICATION_LABEL, TYPE_LABEL,
   type Details, type Equipment, type EquipmentCard, type HistoryEvent, type Me,
 } from '../api.js';
 import { StatusChip } from '../components/StatusChip.js';
@@ -61,7 +61,7 @@ export function HistoryCard({ me, equipment }: { me: Me; equipment: Equipment })
             <dt>Record</dt><dd className="muted">Version {data!.details!.version}, {data!.details!.changedBy}, {plantTime(data!.details!.changedAt)}: {data!.details!.reason}</dd>
           </dl>
         ) : <p className="muted">No equipment details recorded yet.</p>}
-        {me.roles.includes('admin') && <button onClick={() => setEditing(true)}>Edit details</button>}
+        {can(me, 'site.manage') && <button onClick={() => setEditing(true)}>Edit details</button>}
         {data && data.locationHistory.length > 0 && (
           <>
             <h3>Location history</h3>

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, localInputValue, plantTime, type LogbookTypeInfo, type Me, type Settings, type SettingsVersion, VOICE_LANGUAGE_LABEL } from '../api.js';
+import { api, can, localInputValue, plantTime, type LogbookTypeInfo, type Me, type Settings, type SettingsVersion, VOICE_LANGUAGE_LABEL } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 
 const blank: Settings = { enabled: true, sopRef: '', checklist: [], verificationRequired: false, limits: {}, pressurePoints: [] };
@@ -21,8 +21,8 @@ const textToPoints = (text: string) =>
     }));
 
 export function LogbookSettings({ me }: { me: Me }) {
-  const isAdmin = me.roles.includes('admin');
-  const isQa = me.roles.includes('qa');
+  const isAdmin = can(me, 'settings.draft');
+  const isQa = can(me, 'settings.approve');
   const [types, setTypes] = useState<LogbookTypeInfo[]>([]);
   const [editing, setEditing] = useState<{ type: LogbookTypeInfo; draftId?: number } | null>(null);
   const [approving, setApproving] = useState<{ type: LogbookTypeInfo; version: SettingsVersion } | null>(null);

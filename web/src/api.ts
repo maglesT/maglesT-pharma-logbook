@@ -26,32 +26,14 @@ export async function api<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT', url: stri
   return data as T;
 }
 
-export type Role = 'operator' | 'supervisor' | 'engineering' | 'qa' | 'admin';
-export const ROLES: Role[] = ['operator', 'supervisor', 'engineering', 'qa', 'admin'];
-export const ROLE_LABEL: Record<Role, string> = {
-  operator: 'Operator',
-  supervisor: 'Supervisor',
-  engineering: 'Engineering',
-  qa: 'QA',
-  admin: 'Admin',
-};
-
+// This product's permission codes from core (D-30); the server checks every action again.
 export interface Me {
   id: number;
   username: string;
   fullName: string;
-  roles: Role[];
+  permissions: string[];
 }
-
-export interface User {
-  id: number;
-  username: string;
-  fullName: string;
-  roles: Role[];
-  active: boolean;
-  locked: boolean;
-  lastLoginAt: string | null;
-}
+export const can = (me: Me, code: string) => me.permissions.includes(`logbook.${code}`);
 
 export interface Alert {
   id: number;

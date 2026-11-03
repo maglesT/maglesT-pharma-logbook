@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
 import { logbookItems } from '../master.js';
-import { parseId, requireRole } from '../auth.js';
+import { parseId, requirePermission } from '../auth.js';
 import { settingsInForce } from './settings.js';
 import type { LogbookSettings } from '../logbook-types.js';
 import { rateLimiter } from '../voice.js';
@@ -18,7 +18,7 @@ const limit = rateLimiter(20, 3_600_000);
 
 export function adviceRoutes(app: FastifyInstance, sql: Sql, advisor: AdviceProvider | null) {
   // Admin records and reads no breakdown work; everyone who does may ask.
-  const askers = { preHandler: requireRole('operator', 'supervisor', 'engineering', 'qa') };
+  const askers = { preHandler: requirePermission('logbook.advice.ask') };
 
   app.post<{ Params: { id: string } }>('/api/entries/:id/advice', askers, async (req, reply) => {
     const id = parseId(req.params.id);

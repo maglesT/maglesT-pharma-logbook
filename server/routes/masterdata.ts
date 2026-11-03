@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
-import { parseId, requireRole } from '../auth.js';
+import { parseId, requirePermission } from '../auth.js';
 import { logbookItem, logbookItems, logbookProducts, type LogbookItem } from '../master.js';
 
 const siteBody = z.object({ name: z.string().trim().min(1).max(120), code: z.string().trim().min(1).max(20), reason: z.string().trim().min(1).max(500) });
@@ -18,8 +18,8 @@ const itemSettings = z.object({
 });
 
 export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
-  const anyUser = { preHandler: requireRole() };
-  const admin = { preHandler: requireRole('admin') };
+  const anyUser = { preHandler: requirePermission() };
+  const admin = { preHandler: requirePermission('logbook.site.manage') };
   app.get('/api/site', anyUser, async () => (await sql`select name, code from site where id = 1`)[0] ?? null);
 
   app.put('/api/site', admin, async (req, reply) => {

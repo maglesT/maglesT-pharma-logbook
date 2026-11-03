@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
-import { parseId, requireRole } from '../auth.js';
+import { parseId, requirePermission } from '../auth.js';
 import { mayRecord } from '../entries.js';
 import { LOGBOOK_TYPES, settingsSchema, typeByKey } from '../logbook-types.js';
 import { SignError, authenticateSigner, contentHash, sign, signBody } from '../signatures.js';
@@ -44,7 +44,7 @@ export async function settingsInForce(q: Sql | Tx, logbookType: string) {
 }
 
 export function settingsRoutes(app: FastifyInstance, sql: Sql) {
-  const anyUser = { preHandler: requireRole() };
+  const anyUser = { preHandler: requirePermission() };
 
   // All versions per type, with their approval signature (printed name, time, meaning: LB-19).
   app.get('/api/logbook-types', anyUser, async (req) => {
@@ -60,7 +60,7 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
     return LOGBOOK_TYPES.map((t) => ({
       ...t,
       // Whether this user may record this type, so screens offer only what the server accepts (S11).
-      mayRecord: mayRecord(t.key, req.user!.roles),
+      mayRecord: mayRecord(t.key, req.user!.permissions),
       versions: rows
         .filter((r) => r.logbook_type === t.key)
         .map((r) => ({
@@ -80,7 +80,7 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
   });
 
   // Admin drafts a new settings version (FRS §2); QA approves it.
-  app.post('/api/settings', { preHandler: requireRole('admin') }, async (req, reply) => {
+  app.post('/api/settings', { preHandler: requirePermission('logbook.settings.draft') }, async (req, reply) => {
     const body = draftBody.safeParse(req.body);
     if (!body.success || !typeByKey(body.data.logbookType)) return reply.code(400).send({ error: 'invalid_request' });
     const { logbookType, settings, effectiveFrom } = body.data;
@@ -101,7 +101,7 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
   });
 
   // Drafts can be edited until approved; approved versions are fixed.
-  app.patch<{ Params: { id: string } }>('/api/settings/:id', { preHandler: requireRole('admin') }, async (req, reply) => {
+  app.patch<{ Params: { id: string } }>('/api/settings/:id', { preHandler: requirePermission('logbook.settings.draft') }, async (req, reply) => {
     const id = parseId(req.params.id);
     const body = editBody.safeParse(req.body);
     if (id === null || !body.success) return reply.code(400).send({ error: 'invalid_request' });
@@ -126,12 +126,12 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
   });
 
   // LB-24: QA approves a version with an e-signature (LB-19/LB-20).
-  app.post<{ Params: { id: string } }>('/api/settings/:id/approve', { preHandler: requireRole('qa') }, async (req, reply) => {
+  app.post<{ Params: { id: string } }>('/api/settings/:id/approve', { preHandler: requirePermission('logbook.settings.approve') }, async (req, reply) => {
     const id = parseId(req.params.id);
     const body = signBody.safeParse(req.body);
     if (id === null || !body.success) return reply.code(400).send({ error: 'invalid_request' });
     try {
-      const signer = await authenticateSigner(sql, app.proofKey, req.user!, body.data, { objectType: 'settings', objectId: id, meaning: 'approved' });
+      const signer = await authenticateSigner(sql, app.proofKey, req.user!, body.data, { objectType: 'settings', objectId: id, meaning: 'approved', needs: ['logbook.settings.approve'] });
       const result = await sql.begin(async (tx) => {
         const [row] = await tx<SettingsRow[]>`
           select id::int, logbook_type, version, settings, effective_from, created_by::int, created_at

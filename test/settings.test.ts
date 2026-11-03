@@ -162,7 +162,7 @@ describe('e-signatures (LB-19, LB-20)', () => {
     const id = await draft('glove_integrity');
     expect((await approve(qa, id, 'op1')).statusCode).toBe(401);                              // another person
     expect((await approve(qa, id, 'qa1', 'made-up.proof')).statusCode).toBe(401);             // not made by /cb
-    const forged = makeProof(Buffer.alloc(32, 9), { sub: directory.get('qa1')!.sub, roles: ['qa'] }, ['approved']);
+    const forged = makeProof(Buffer.alloc(32, 9), { sub: directory.get('qa1')!.sub, permissions: ['logbook.settings.approve'] }, ['approved']);
     expect((await approve(qa, id, 'qa1', forged)).statusCode).toBe(401);                       // wrong key
     expect((await approve(qa, id, 'qa1', proofFor('qa1', Date.now() - (PROOF_SECONDS + 1) * 1000))).statusCode).toBe(401); // too old
     const fails = await t.owner`select reason from audit_log where action = 'signature.failed' and object_id = ${String(id)} order by id`;
@@ -171,15 +171,17 @@ describe('e-signatures (LB-19, LB-20)', () => {
     expect(await t.owner`select 1 from signatures where object_id = ${id}`).toHaveLength(0);
   });
 
-  it('PL-05: a signing proof is used once, only for the meaning it was made for, and refused if the signer\'s rights changed at core', async () => {
+  it('PL-05: a signing proof is used once, only for the meaning it was made for, and refused if core no longer gives the signer its code', async () => {
     const id = await draft('steriliser_test');
     const proof = proofFor('qa1');
     expect((await approve(qa, id, 'qa1', proof)).statusCode).toBe(200);
     const again = await draft('general_log');
     expect((await approve(qa, again, 'qa1', proof)).statusCode).toBe(401);
-    const changed = makeProof(TEST_PROOF_KEY, { sub: directory.get('qa1')!.sub, roles: ['qa', 'supervisor'] }, ['approved']);
+    const changed = makeProof(TEST_PROOF_KEY, { sub: directory.get('qa1')!.sub, permissions: ['logbook.review.sign'] }, ['approved']);
     expect((await approve(qa, again, 'qa1', proofFor('qa1', undefined, ['verified']))).statusCode).toBe(401);   // made for another meaning
     expect((await approve(qa, again, 'qa1', changed)).statusCode).toBe(401);
+    const [last] = await t.owner`select reason from audit_log where action = 'signature.failed' order by id desc limit 1`;
+    expect(last!.reason).toBe('meaning approved: no logbook.settings.approve at core');
   });
 
   it('LB-19: a signature shows printed name, meaning and server time, and is linked to the content by hash', async () => {
@@ -211,11 +213,11 @@ describe('e-signatures (LB-19, LB-20)', () => {
                        values ('settings', 1, 1, 'x', 'reviewed', 'h', now() - interval '1 day')`).rejects.toThrow(/permission denied/);
   });
 
-  it('LB-20: Admin can never sign, even when also holding QA', async () => {
+  it('LB-20 (D-30): a signature needs only its own code; holding admin codes as well does not block it', async () => {
     await seedUser(t.owner, `adminqa${++n}`, ['admin', 'qa']);
     const cookie = (await login(t.app, `adminqa${n}`)).cookie;
     const id = await draft('general_log');
-    expect((await approve(cookie, id, `adminqa${n}`)).statusCode).toBe(403);
+    expect((await approve(cookie, id, `adminqa${n}`)).statusCode).toBe(200);
   });
 });
 
