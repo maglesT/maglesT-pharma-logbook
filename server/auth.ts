@@ -100,8 +100,9 @@ export async function loadSession(sql: Sql, signOn: SignOn, sessionId: string, t
     returning refresh_token`;
   if (due) {
     try {
+      // Core may keep the refresh token and send none back (RFC 6749 6): the stored one then stays.
       const id = await signOn.refresh(due.refresh_token ?? '');
-      await sql`update sessions set permissions = ${asPermissions(id.permissions)}, refresh_token = ${id.refreshToken ?? null},
+      await sql`update sessions set permissions = ${asPermissions(id.permissions)}, refresh_token = coalesce(${id.refreshToken ?? null}, refresh_token),
                   id_token = coalesce(${id.idToken ?? null}, id_token)
                 where id = ${key}`;
     } catch {

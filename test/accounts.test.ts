@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { POLICY, ROLE_PERMISSIONS, sessionKey } from '../server/auth.js';
-import { call, directory, freshApp, login, seedUser, type TestApp } from './helpers.js';
+import { buildApp } from '../server/app.js';
+import { call, directory, fakeMaster, fakeSignOn, freshApp, login, seedUser, TEST_PROOF_KEY, type TestApp } from './helpers.js';
 
 // B1-2 (D-29): people, passwords, lockout and the permission register are Medhanta core's; the Logbook signs people
 // on through core (stand-in: helpers.fakeSignOn) and keeps sessions, per-action authority checks and its audit trail.
@@ -159,6 +160,34 @@ describe('sign-on through core', () => {
     const out = await call(t.app, cookie, 'POST', '/api/logout');
     expect(out.json().logoutUrl).toBe(`/?signed-out=id-op${n}`);
     expect((await call(t.app, cookie, 'GET', '/api/me')).statusCode).toBe(401);
+  });
+
+  it('PL-01: logout after the session went idle, or after core refused its renewal, still ends the core session', async () => {
+    await seedUser(t.owner, uniq('op'), ['operator']);
+    const idle = (await login(t.app, `op${n}`)).cookie;
+    await t.owner`update sessions set last_seen_at = now() - interval '16 minutes' where id = ${sid(idle)}`;
+    expect((await call(t.app, idle, 'POST', '/api/logout')).json().logoutUrl).toBe(`/?signed-out=id-op${n}`);
+    expect(await t.owner`select 1 from sessions where id = ${sid(idle)}`).toHaveLength(0);
+
+    const refused = (await login(t.app, `op${n}`)).cookie;
+    directory.get(`op${n}`)!.active = false;
+    await t.owner`update sessions set checked_at = now() - interval '6 minutes' where id = ${sid(refused)}`;
+    expect((await call(t.app, refused, 'POST', '/api/logout')).json().logoutUrl).toBe(`/?signed-out=id-op${n}`);
+    directory.get(`op${n}`)!.active = true;
+  });
+
+  it('PL-01: a renewal without a new refresh token keeps the stored one, so the session renews again (RFC 6749 6)', async () => {
+    const base = fakeSignOn();
+    const app = await buildApp({ sql: t.sql, signOn: { ...base, refresh: async (r) => ({ ...(await base.refresh(r)), refreshToken: undefined }) },
+      proofKey: TEST_PROOF_KEY, master: fakeMaster(), webRoot: '/nonexistent' });
+    await seedUser(t.owner, uniq('op'), ['operator']);
+    const { cookie } = await login(app, `op${n}`);
+    for (let i = 0; i < 2; i++) {
+      await t.owner`update sessions set checked_at = now() - interval '6 minutes' where id = ${sid(cookie)}`;
+      expect((await call(app, cookie, 'GET', '/api/me')).statusCode).toBe(200);
+    }
+    expect((await t.owner`select refresh_token from sessions where id = ${sid(cookie)}`)[0]!.refresh_token).toBe(`op${n}`);
+    await app.close();
   });
 
   it('writes without a JSON body type are refused', async () => {

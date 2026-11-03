@@ -62,7 +62,8 @@ export async function buildApp({ sql, signOn, master, proofKey = randomBytes(32)
       return reply.code(415).send({ error: 'json_required' });
     }
     const sid = req.cookies[SESSION_COOKIE];
-    if (sid) req.user = (await loadSession(sql, signOn, sid, !req.headers[BACKGROUND_HEADER])) ?? undefined;
+    // Logout reads the stored session itself: an idle or refused session still yields core's logout hint.
+    if (sid && req.url !== '/api/logout') req.user = (await loadSession(sql, signOn, sid, !req.headers[BACKGROUND_HEADER])) ?? undefined;
   });
 
   app.get('/api/health', async (_req, reply) => {
