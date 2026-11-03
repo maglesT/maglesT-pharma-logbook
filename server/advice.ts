@@ -42,11 +42,9 @@ const MAX_SAME_FAILURE_TYPE = 12;
 
 // "Rotary tablet compression machine (standby)" and "Rotary tablet compression machine" are one type.
 const machineType = (name: string) => name.toLowerCase().replace(/\([^)]*\)/g, '').replace(/\s+\d+\s*$/, '').replace(/\s+/g, ' ').trim();
-// Make and model are master data (D-29 3).
-const makeModel = (i: Pick<LogbookItem, 'make' | 'model'> | undefined) => {
-  const m = `${(i?.make ?? '').trim()} ${(i?.model ?? '').trim()}`.trim().toLowerCase();
-  return m || null;
-};
+// Make and model are master data (D-29 3); a make without a model is no model.
+const makeModel = (i: Pick<LogbookItem, 'make' | 'model'> | undefined) =>
+  i?.model?.trim() ? `${(i.make ?? '').trim()} ${i.model.trim()}`.trim().toLowerCase() : null;
 
 // Past breakdowns related to this one, closest relation first, newest first within a relation.
 export async function similarBreakdowns(sql: Sql, items: LogbookItem[], entryId: number, equipmentId: number, failureCategory: string | null, now = new Date()): Promise<Similar[]> {
