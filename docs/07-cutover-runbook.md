@@ -21,7 +21,9 @@ standalone Logbook…").
    `env.logbook` (`SARVAM_API_KEY`, `GEMINI_API_KEY` as on the old site).
 4. **Identity verification text** from the site (21 CFR 11.100(b), CP-03, D-29 5): who verified the moved people's
    identity and how (for example "Site HR", "employee ID card checked at hiring, SOP-HR-003").
-5. **Rehearsal** on last night's backup (steps 4–6 below on a scratch copy, with `--dry-run`): the report must show
+5. **Rehearsal** on a test server with the platform installed and the Logbook licensed (the move needs the Logbook's
+   permissions in core's catalogue and the `--by` core administrator): steps 2–6 below on last night's backup, the
+   real move and its checks, not only `--dry-run`; then discard that server's databases. The move must end "moved" with
    no problems. Logins that start with a digit are refused (core needs a letter first): agree with the owner what
    those people get (a new core login; their history stays under the old one).
 6. Tell users the window, the new address, and that their login and password stay the same.
@@ -29,51 +31,64 @@ standalone Logbook…").
 ## On the day
 
 Record every step's time, who did it, and its output (the change record, with the customer's change reference).
+Database tools run inside containers (the hosts need no PostgreSQL client): `old` below is
+`docker compose -f ops/docker-compose.yml` in the old installation's folder, `plat` is
+`docker compose -f /opt/medhanta/current/deploy/compose.yml`.
 
-1. **Freeze.** Stop the old app, leave its database running:
-   `docker compose -f ops/docker-compose.yml stop app` (in the old installation's folder). From here nobody can add
-   records.
-2. **Back up and check the frozen data.**
-   `DATABASE_URL=postgres://logbook_owner:<pw>@<db>/logbook BACKUP_DIR=/backups ops/backup.sh` (dump + `.sha256`), then
-   the integrity check on the frozen database:
-   `docker compose -f ops/docker-compose.yml run --rm app node dist/db/integrity.js` (exit 0 required).
-3. **Restore the backup into a scratch database on the platform server** (the move reads it; the old database stays
-   untouched for rollback):
-   `createdb logbook_move_source && pg_restore --no-owner --no-privileges -d logbook_move_source <dump>`
-   (as the platform's PostgreSQL superuser; `revoke all on database logbook_move_source from public`).
-4. **Licence on.** Commit the prepared config; apply runs the Logbook's migrations and starts it. Nobody holds a
-   Logbook permission in core yet, so nobody can sign in, and the scheduled integrity check leaves the empty database
-   alone (it skips a database without users).
-5. **Dry run, then the move**, inside the Logbook image on the platform's network:
+1. **Freeze.** Stop the old app, leave its database running: `old stop app`. From here nobody can add records.
+2. **Check, then back up the frozen data.** First the integrity check (it adds its own `integrity.passed` row to the
+   audit trail, so it runs before the dump): `old run --rm app node dist/db/integrity.js` (exit 0 required). Then the
+   dump and its checksum:
+   `old exec -T db pg_dump -U logbook_owner --format=custom logbook > /backups/logbook-freeze.dump && sha256sum /backups/logbook-freeze.dump`.
+   From here the old database is not touched again.
+3. **Restore the dump into a scratch database on the platform server** (the move reads this copy):
    ```sh
-   docker compose -f /opt/medhanta/current/deploy/compose.yml run --rm --no-deps \
+   plat exec -T db createdb -U <superuser> logbook_move_source
+   plat exec -T db psql -U <superuser> -c "revoke all on database logbook_move_source from public"
+   plat exec -T db pg_restore -U <superuser> --no-owner --no-privileges -d logbook_move_source < /backups/logbook-freeze.dump
+   ```
+4. **Licence on.** Commit the prepared config; apply runs the Logbook's migrations and starts it. **Nobody opens the
+   Logbook address until step 6**: a sign-on attempt, even a refused one, writes a `users` and an audit row, and the
+   move needs an empty database. (Nobody holds a Logbook permission in core yet, and the scheduled integrity check skips
+   a database without users.) Check it is empty:
+   `plat exec -T db psql -U <superuser> -d logbook -Atc "select (select count(*) from users) + (select count(*) from audit_log)"` → `0`.
+   If it is not (someone opened the address), note the rows in the change record, licence the Logbook off, drop the
+   `logbook` database and apply again: it holds no records yet.
+5. **Dry run, then the move**, inside the Logbook image at the pinned commit, on the platform's network:
+   ```sh
+   export LOGBOOK_COMMIT=$(jq -r .source.commit /opt/medhanta/current/apps/logbook/manifest.json)
+   plat run --name lb-move --no-deps \
      -e SOURCE_DATABASE_URL=postgres://<superuser>:<pw>@db:5432/logbook_move_source \
      -e PLATFORM_DATABASE_URL=postgres://<superuser>:<pw>@db:5432 \
      logbook node dist/db/move-to-platform.js --by <core admin login> \
      --verified-by "<who>" --verified-how "<how>" --report /tmp/move.csv --dry-run
+   docker cp lb-move:/tmp/move.csv ./move-dry-run.csv && docker rm lb-move
    ```
-   then the same without `--dry-run`. Exit 0 and "moved" are required; on any problem nothing is written (the three
-   databases commit together only after all checks passed). Copy the report out of the container (`docker cp`) and
-   keep it with the change record.
+   then the same without `--dry-run` (report `./move.csv`). Exit 0 and "moved" are required. A failed check writes
+   nothing: the three platform databases commit only after every check passed (one after the other; should the server
+   fail between those commits, the run reports it and the old site stays the live one). Keep both reports with the
+   change record.
 6. **Check on the platform** (as a moved QA person, with their own password):
    - sign in at the Logbook address; open two logbooks, an entry's versions and signatures, a history card;
    - Review → Audit trail shows the old entries; run the integrity check (QA): passed;
    - in core, the people screen shows the moved people with their permissions; master data shows the items.
-7. **Records of the move**: backup file and its SHA-256, the old site's integrity output, the move report, the
+7. **Records of the move**: the freeze dump and its SHA-256, the old site's integrity output, both move reports, the
    platform's integrity result, the checks of step 6, with times and names.
 8. **Owner go / no-go.** On "no-go": rollback below.
-9. **Switch.** Point the public Logbook address at the platform; tell users. Drop the scratch database
-   (`dropdb logbook_move_source`).
+9. **Switch.** Point the public Logbook address at the platform (core's address and the Logbook's are set by the
+   config's `domain`: `https://<domain>` and `https://logbook.<domain>`); tell users. Drop the scratch database:
+   `plat exec -T db dropdb -U <superuser> logbook_move_source`.
 
 ## Rollback
 
 Until the owner signs off, the old installation (containers, database volume, `standalone` image) stays as it was
-at the freeze. To go back: licence the Logbook off in the config (apply stops it), start the old app
-(`docker compose -f ops/docker-compose.yml start app`), point the address back. No record was added on either side
-in between, so nothing is lost.
+at the freeze. To go back: licence the Logbook off in the config (apply stops it), start the old app (`old start app`),
+point the address back. The old database is exactly as frozen, apart from the integrity check's own audit row; the
+records made on the platform in between are only the step-6 checks.
 
-Core keeps the moved people (its records are insert-only): a second move after a rollback refuses their logins.
-Before trying again, decide with the owner how to continue (fix forward on the platform, or let the move recognise
+A second move after a rollback is refused as it stands: the platform's `logbook` database keeps the moved rows (a
+licence off keeps data) and core keeps the moved people (its records are insert-only). Before trying again, decide
+with the owner how to continue (fix forward on the platform, or a fresh `logbook` database and a move that recognises
 the people it created itself); do not edit core's tables by hand.
 
 ## After sign-off
