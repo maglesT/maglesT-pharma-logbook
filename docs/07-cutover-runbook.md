@@ -65,7 +65,9 @@ cutover uses compose.
    `logbook` database and apply again: it holds no records yet.
 4a. **Snapshot the platform databases before the move** (D-31 3): `logbook` (still empty), `identity` and
    `master_data`, each with `plat exec -T db pg_dump -U <superuser> --format=custom <db> > /backups/pre-move-<db>.dump`,
-   plus `sha256sum`. A rollback or the end of the rehearsal restores them, and the move can then run again.
+   plus `sha256sum`. A rollback or the end of the rehearsal restores them, and the move can then run again. From the
+   snapshot until the owner's go (or a rollback), nobody moves another product and nobody administers people or master
+   data in core: a restore would take that work back too.
 5. **Dry run, then the move**, inside the Logbook image at the pinned commit, on the platform's network:
    ```sh
    export LOGBOOK_COMMIT=$(jq -r .source.commit /opt/medhanta/current/apps/logbook/manifest.json)   # as above
@@ -94,11 +96,20 @@ cutover uses compose.
 ## Rollback
 
 Until the owner signs off, the old installation (containers, database volume, `standalone` image) stays as it was
-at the freeze. To go back: licence the Logbook off in the config (apply stops it), start the old app (`old start app`),
-point the address back. The old database is exactly as frozen, apart from the integrity check's own audit row.
-On the platform (D-31 3): restore the three databases from the step-4a snapshot (drop and recreate each, then
-`pg_restore` its dump as the superuser); that takes back the moved rows, people and items and anything else written
-to those databases since the snapshot, so the move can run again later. Record the restore in the change record.
+at the freeze. To go back (D-31 3), in this order:
+
+1. Stop the Logbook and core: `plat stop logbook core`.
+2. Restore the step-4a snapshots of `logbook`, `identity` and `master_data`, each recreated with its owner:
+   `plat exec -T db dropdb --force -U <superuser> <db>`, `plat exec -T db createdb -U <superuser> -O <db>_owner <db>`, then
+   `plat exec -T db pg_restore -U <superuser> -d <db> < /backups/pre-move-<db>.dump`. This takes back the moved rows,
+   people and items, so the move can run again later.
+3. Start core: `plat start core`.
+4. Licence the Logbook off in the config and apply. Apply runs after the restore, so its switch records (PL-10)
+   are kept.
+5. Start the old app (`old start app`) and point the address back. The old database is exactly as frozen, apart from
+   the integrity check's own audit row.
+
+Record each step in the change record.
 
 ## After sign-off
 
