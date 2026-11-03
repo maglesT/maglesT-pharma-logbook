@@ -117,8 +117,7 @@ test('LB-18: Admin records equipment details with a reason; the change shows on 
   await page.getByRole('button', { name: 'Edit details' }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Asset number').fill('AST-3301');
-  await dialog.getByLabel('Make / manufacturer').fill('Bectochem');
-  await dialog.getByLabel('Serial number').fill('BC-1188');
+  await expect(dialog.getByLabel('Serial number')).toHaveCount(0);   // master data (D-29 3)
   await dialog.getByLabel('Reason for the change').fill('Initial record from IQ report');
   await dialog.getByRole('button', { name: 'Save' }).click();
   await expect(dialog).toHaveCount(0);

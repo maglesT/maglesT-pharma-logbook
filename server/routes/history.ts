@@ -224,7 +224,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     const { events } = await history(sql, app.master, id, q.data.fromDay, q.data.toDay, types);
     if (events.length > MAX_ROWS) return reply.code(413).send({ error: 'too_large', message: 'Choose a shorter period.' });
     const rows = events.map(eventRow);
-    const eq = head.equipment as { code: string; name: string; kind: string; location: string };
+    const eq = head.equipment as { code: string; name: string; kind: string; location: string; make: string | null; model: string | null; serial: string | null };
     const name = `history-${eq.code}-${q.data.fromDay}`;
     if (format.data === 'csv') {
       return sendCopy(reply, 'csv', name, csvText(['equipment', 'at_utc', 'kind', 'record', 'details', 'by', 'signatures', 'breakdown'],
@@ -232,9 +232,9 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     }
     const d = head.details?.details;
     const detailRows: [string, string][] = [
-      ['Equipment', `${eq.code} · ${eq.name} (${eq.kind})`], ['Location', eq.location], ['Status', head.status?.state.replaceAll('_', ' ') ?? ''],
+      ['Equipment', `${eq.code} · ${eq.name} (${eq.kind})`], ['Location', eq.location], ['Make / model', `${eq.make ?? ''} ${eq.model ?? ''}`.trim()], ['Serial number', eq.serial ?? ''], ['Status', head.status?.state.replaceAll('_', ' ') ?? ''],
       ...(d ? ([
-        ['Asset number', d.assetNumber], ['Manufacturer / model', `${d.manufacturer} ${d.model}`.trim()], ['Serial number', d.serialNumber], ['Capacity / size', d.capacity],
+        ['Asset number', d.assetNumber], ['Capacity / size', d.capacity],
         ['Installed / supplier', `${d.installationDate ?? ''} ${d.supplier}`.trim()], ['Qualification', `${d.qualificationStatus.replaceAll('_', ' ')} · IQ ${d.iq.date ?? '—'} ${d.iq.ref} · OQ ${d.oq.date ?? '—'} ${d.oq.ref} · PQ ${d.pq.date ?? '—'} ${d.pq.ref} · last requalification ${d.lastRequalification ?? '—'}`],
         ['Product contact / MOC', d.productContactMoc], ['SOPs', d.sopRefs], ['Details version', `${head.details!.version}, ${head.details!.changedBy}, ${plant(head.details!.changedAt)}`],
       ] as [string, string][]) : [['Details', 'not recorded']] as [string, string][]),

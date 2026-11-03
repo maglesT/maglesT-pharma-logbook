@@ -1,3 +1,4 @@
+import { audit } from '../server/audit.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem, addProduct, changeItem } from './helpers.js';
 import { breakdownStats, type Breakdown } from '../server/breakdowns.js';
@@ -255,7 +256,7 @@ describe('breakdown register (LB-02, LB-22)', () => {
 });
 
 describe('equipment details (LB-18)', () => {
-  const details = (extra: object = {}) => ({ assetNumber: 'AST-001', manufacturer: 'Glatt', model: 'GPCG 60', serialNumber: 'G-7781', capacity: '60 kg',
+  const details = (extra: object = {}) => ({ assetNumber: 'AST-001', capacity: '60 kg',
     installationDate: '2024-03-01', supplier: 'Glatt India', qualificationStatus: 'qualified', iq: { date: '2024-03-10', ref: 'IQ-11' },
     oq: { date: '2024-03-20', ref: 'OQ-11' }, pq: { date: '2024-04-05', ref: 'PQ-11' }, lastRequalification: null, productContactMoc: 'SS316L', sopRefs: 'SOP-FBD-01', ...extra });
   const put = (who: string, id: number, body: object) => call(t.app, c[who]!, 'PUT', `/api/equipment/${id}/details`, body);
@@ -266,16 +267,34 @@ describe('equipment details (LB-18)', () => {
     expect((await put('admin', id, { details: details(), expectedVersion: 0 })).statusCode).toBe(400);
     expect((await put('admin', id, { details: details(), reason: 'Initial record', expectedVersion: 0 })).json()).toEqual({ version: 1 });
     expect((await put('admin', id, { details: details(), reason: 'again', expectedVersion: 1 })).json().error).toBe('no_change');
-    expect((await put('admin', id, { details: details({ serialNumber: 'G-7782' }), reason: 'Typo', expectedVersion: 0 })).json().error).toBe('changed_meanwhile');
-    expect((await put('admin', id, { details: details({ serialNumber: 'G-7782' }), reason: 'Serial plate re-read', expectedVersion: 1 })).json()).toEqual({ version: 2 });
+    expect((await put('admin', id, { details: details({ capacity: '65 kg' }), reason: 'Typo', expectedVersion: 0 })).json().error).toBe('changed_meanwhile');
+    expect((await put('admin', id, { details: details({ capacity: '65 kg' }), reason: 'Capacity re-read', expectedVersion: 1 })).json()).toEqual({ version: 2 });
     const card = (await call(t.app, c.op1!, 'GET', `/api/equipment/${id}/details`)).json();
-    expect(card.details).toMatchObject({ version: 2, reason: 'Serial plate re-read', changedBy: 'ADMIN' });
-    expect(card.detailsVersions.map((v: { details: { serialNumber: string } }) => v.details.serialNumber)).toEqual(['G-7781', 'G-7782']);
+    expect(card.details).toMatchObject({ version: 2, reason: 'Capacity re-read', changedBy: 'ADMIN' });
+    expect(card.detailsVersions.map((v: { details: { capacity: string } }) => v.details.capacity)).toEqual(['60 kg', '65 kg']);
     const [a] = await t.owner`select old_value, new_value, reason from audit_log where action = 'equipment.details_updated' and object_id = ${String(id)} order by id desc limit 1`;
-    expect(a!.old_value.details.serialNumber).toBe('G-7781');
-    expect(a!.new_value.details.serialNumber).toBe('G-7782');
+    expect(a!.old_value.details.capacity).toBe('60 kg');
+    expect(a!.new_value.details.capacity).toBe('65 kg');
     await expect(t.sql`update equipment_details set reason = 'x'`).rejects.toThrow(/permission denied/);
     await expect(t.sql`delete from equipment_details`).rejects.toThrow(/permission denied/);
+  });
+
+  it('D-29 3: make, model and serial are master data: new details versions refuse them, older versions keep them', async () => {
+    const id = await newItem({ make: 'Glatt', model: 'GPCG 120', serial: 'G-9000' });
+    expect((await put('admin', id, { details: details({ serialNumber: 'G-7781' }), reason: 'x', expectedVersion: 0 })).statusCode).toBe(400);
+    // A version recorded before the move keeps them; the card shows master data's values.
+    const old = { ...details(), manufacturer: 'Glatt', model: 'GPCG 60', serialNumber: 'G-7781' };
+    await t.owner.begin(async (tx) => {
+      const [u] = await tx<{ id: number }[]>`select id::int from users where username = 'admin'`;
+      const [row] = await tx<{ id: number }[]>`insert into equipment_details (equipment_id, version, details, reason, changed_by)
+        values (${id}, 1, ${tx.json(old as never)}, 'before the move', ${u!.id}) returning id::int`;
+      await audit(tx, { actorId: u!.id, action: 'equipment.details_updated', objectType: 'equipment', objectId: id,
+        new: { id: row!.id, version: 1, details: old }, reason: 'before the move' });
+    });
+    const card = (await call(t.app, c.op1!, 'GET', `/api/equipment/${id}/details`)).json();
+    expect(card.equipment).toMatchObject({ make: 'Glatt', model: 'GPCG 120', serial: 'G-9000' });
+    expect(card.detailsVersions[0].details.serialNumber).toBe('G-7781');
+    expect((await put('admin', id, { details: details(), reason: 'Moved to master data', expectedVersion: 1 })).json()).toEqual({ version: 2 });
   });
 
   it('LB-18: details are checked: dates not in the future, IQ before OQ before PQ, unknown fields refused', async () => {

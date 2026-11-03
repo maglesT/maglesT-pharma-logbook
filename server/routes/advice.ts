@@ -32,7 +32,7 @@ export function adviceRoutes(app: FastifyInstance, sql: Sql, advisor: AdviceProv
     // Name and room are master data, read live (D-29).
     const items = await logbookItems(sql, app.master);
     const item = items.find((i) => i.id === found.equipment_id);
-    const row = { ...found, name: item?.name ?? found.code, location: item?.room ?? '' };
+    const row = { ...found, name: item?.name ?? found.code, location: item?.room ?? '', make: item?.make, model: item?.model };
     if (row.logbook_type !== 'maintenance' || row.data.kind !== 'breakdown') {
       return reply.code(409).send({ error: 'not_a_breakdown', problems: ['Suggestions are for breakdown entries.'] });
     }
@@ -46,11 +46,9 @@ export function adviceRoutes(app: FastifyInstance, sql: Sql, advisor: AdviceProv
     if (!similar.length) return off('There are no related past breakdowns yet, so there is nothing to suggest from.');
     if (!limit.take(user.id)) return reply.code(429).send({ error: 'rate_limited', problems: ['Too many suggestions in the last hour. Try later.'] });
 
-    const [details] = await sql<{ details: Record<string, unknown> }[]>`
-      select details from equipment_details where equipment_id = ${row.equipment_id} order by version desc limit 1`;
     let result;
     try {
-      result = await advisor.advise(ADVICE_INSTRUCTIONS, advicePrompt({ ...row, details: details?.details }, similar));
+      result = await advisor.advise(ADVICE_INSTRUCTIONS, advicePrompt(row, similar));
     } catch (e) {
       if (e instanceof AdviceError) {
         if (e.code !== 'rejected') limit.refund(user.id);

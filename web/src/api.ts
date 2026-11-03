@@ -60,6 +60,10 @@ export interface Equipment {
   cleanHoldHours: number | null;
   needsCalibration: boolean;
   active: boolean;
+  // Master data (D-29 3).
+  make: string | null;
+  model: string | null;
+  serial: string | null;
 }
 
 export interface Product {
@@ -237,9 +241,6 @@ export const downtimeText = (b: { downtimeMinutes: number; downtimeFinal: boolea
 export interface QualificationStep { date: string | null; ref: string }
 export interface Details {
   assetNumber: string;
-  manufacturer: string;
-  model: string;
-  serialNumber: string;
   capacity: string;
   installationDate: string | null;
   supplier: string;
@@ -252,7 +253,7 @@ export interface Details {
   sopRefs: string;
 }
 export const EMPTY_DETAILS: Details = {
-  assetNumber: '', manufacturer: '', model: '', serialNumber: '', capacity: '', installationDate: null, supplier: '',
+  assetNumber: '', capacity: '', installationDate: null, supplier: '',
   qualificationStatus: 'not_qualified', iq: { date: null, ref: '' }, oq: { date: null, ref: '' }, pq: { date: null, ref: '' },
   lastRequalification: null, productContactMoc: '', sopRefs: '',
 };
