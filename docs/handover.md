@@ -197,7 +197,7 @@ A10" arrived after B1-2 and B1-4 were merged on roles, so they must be switched 
 - Any new table needs `revoke all on <t> from logbook_app` before its grants (platform default grants; `0000`).
 - Signature content hashes must never change: PL-07 values live in their own table, not in `entries`.
 
-### Proposed Logbook permission list (B1-2b; for the owner, through the lead)
+### Logbook permission list (B1-2b; approved by the owner, D-30)
 One code per action the app checks today (`requireRole`, `RECORDERS`/`mayRecord`, `mayCorrect`, `VERIFIERS` and the
 "Admin never signs" rule in `server/signatures.ts`). Reading items, entries, statuses, the breakdown register and the
 history card needs any Logbook permission (sign-on itself needs one).
@@ -233,10 +233,9 @@ Old role → permissions (for the B1-5 data move; each moved user gets exactly t
 | qa | verify, breakdown.release, review.read, review.sign, audit.read, settings.approve, advice.ask |
 | admin | audit.read, settings.draft, site.manage |
 
-Open point for the owner: today the Admin role can never sign (DI segregation). With ticked permissions, a person could
-hold `site.manage` and a signing code. Options: (a) leave it to the site's access procedure (CP-02/CP-03) and the access
-review (PL-12), or (b) the Logbook refuses a signature from anyone holding `settings.draft` or `site.manage`. Proposal: (a),
-simpler; no binding clause requires the system to enforce it.
+Admins (D-30, option a): today the Admin role can never sign. With ticked permissions a person could hold `site.manage`
+and a signing code; the Logbook does not block this. Segregation is the site's access procedure (CP-02, CP-03) and the
+access review (PL-12). B1-2b drops the "Admin never signs" check: a signature needs only its own permission code.
 
 ### Known limits from the B1-3 review (accepted, for the next slices)
 - Items and products held locally before the move (`item_id` null) are not shown until the B1-5 move fills `item_id`.
