@@ -1,6 +1,6 @@
 # Handover
 
-Updated: 2026-11-02, Phase B1 (move onto the Medhanta platform, D-29): see the section "Phase B1" below first.
+Updated: 2026-11-03, Phase B1 (move onto the Medhanta platform, D-29): see the section "Phase B1" below first.
 
 ## State
 - Planning deliverables (a)–(d) are approved: decisions D-01 to D-05 in `decisions.md`.
@@ -148,6 +148,7 @@ proxy refused a tag). main is not deployable standalone any more. Fixes for the 
 | B1-2b | #26 | permissions instead of roles (A10, D-30): `PERMISSIONS` (18 codes) and `ROLE_PERMISSIONS` (old role → codes, for B1-5) in `server/auth.ts`; scope `openid profile permissions`, claim `permissions` (unknown codes ignored); `requirePermission(code)`; sessions keep codes (0017 renames the column and ends open sessions); the signing proof carries the fresh token's codes and `authenticateSigner` needs the signature's own code(s) (`needs`), no admin block; UI flags via `can(me, code)`. databsee `b1-logbook` rebased on A10, manifest lists the 18 codes |
 | B1-3b | #27 | make, model and serial are master data (D-29 3): `detailsSchema` no longer takes them (strict: a new version with them is refused; older versions keep theirs); history card, PDF and the details form show/read master `make/model/serial`; advice compares and prompts with master make and model |
 | B1-5 | #28 | data move (PL-13), `db/move-to-platform.ts`: dry run first (`--dry-run`, writes nothing). The platform's migrate builds the `logbook` schema (it must be empty); rows are copied data only (common columns; `sessions` and `schema_migrations` not moved), with triggers off (`session_replication_role = replica`), every table's count and checksum compared in the same transaction, and sequences continued. Core: employees with the same login and scrypt hash, the site's identity verification (`--verified-by/--verified-how`, D-29 5), permissions from old roles (D-30) plus `core.people.manage` and `core.masterdata.edit` for admins (D-29 6). Master data: areas → rooms, items with make/model/serial from the last details version, `located_in` where the location names a room, products. Then the id maps and checks: checksums again, every item/product/user mapped (refused logins listed: core needs a letter first), codes and names equal, permissions as planned, integrity check. All three platform databases are written in one unit and commit only after every check passed; any problem rolls them all back. A login core already has stops the move (never linked silently). An expired temporary password stays unusable (`expired-temporary-password`: reset in core). The scheduled integrity check skips a database without users, so a freshly licensed Logbook stays empty until the move. Report CSV (`--report`). Demo: seed a demo database, then move it with `--demo-password` (roles from the demo's list, must change at first use). Tests `test/move.test.ts` with core's migrations copied to `test/platform/identity`, `test/platform/master_data` (databsee 539eae6) |
+| B1-6 | #29 | cutover runbook `docs/07-cutover-runbook.md`: before the day (platform, pin, config, identity text, rehearsal), on the day (freeze, backup + integrity, restore into a scratch DB on the platform server, licence on, dry run + move, checks, records, owner go/no-go, switch), rollback (old site untouched until sign-off) |
 
 Platform side: branch `b1-logbook` in `maglesT/databsee` (not merged; waiting for the lead's OK): `apps/logbook/manifest.json`
 pinned to a Logbook commit (update the pin to the latest merged Logbook commit before merging), `bundle.sh` builds
@@ -179,13 +180,10 @@ A10" arrived after B1-2 and B1-4 were merged on roles, so they must be switched 
 2. ~~**B1-5 data move**~~ done (see Slices). Changed from the plan above: the schema is not restored from a dump. The
    platform's migrate builds it (0013 was edited after the live site applied it, and a restored schema would bring the
    standalone grants), and the script copies the data only, checked per table in the same transaction.
-3. **B1-6 cutover runbook** (owner's server, owner approval): freeze, back up, move + checks, Caddy switch, rollback =
-   the old container, kept untouched until the owner signs off. Order matters: the move needs an empty, migrated
-   `logbook` database, so nobody may sign in to the platform Logbook between apply (licence on, migrations run) and the
-   move (keep Caddy pointing at the old site until the move's checks pass). Run the script inside the Logbook image on
-   the platform's network: `docker compose run --rm --no-deps -e SOURCE_DATABASE_URL -e PLATFORM_DATABASE_URL logbook
-   node dist/db/move-to-platform.js ...`. The live database must be reachable from there (or restored from its backup
-   into a scratch database on the platform server first). Update the databsee pin to the latest Logbook merge.
+3. ~~**B1-6 cutover runbook**~~ written: `docs/07-cutover-runbook.md` (draft for the owner). The cutover itself waits
+   for the owner's approval and window. Open with the owner: how the public address reaches the platform's Caddy while
+   the old site runs; what people with logins starting with a digit get; how to continue after a rollback (core keeps
+   moved people, so a second move refuses their logins).
 
 ### Things to know
 - Tests: `TEST_DATABASE_URL=postgres://logbook_owner:dev@127.0.0.1:5432/logbook_test npx vitest run`; local PostgreSQL 16
