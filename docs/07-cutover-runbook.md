@@ -1,7 +1,8 @@
 # Cutover runbook: the live Logbook onto the Medhanta platform (B1-6)
 
-Status: draft for the owner. **The cutover itself runs only with the owner's approval**, on the owner's server, in a
-window the owner sets (D-29: timing later, with owner approval). Platform PL-13 (data moves checked), PL-10 (changes
+Status: approved approach (D-31), to apply at the **joint go-live**: all products go live on the platform together,
+after every product has been moved. **The cutover itself runs only with the owner's approval**, on the owner's server,
+in a window the owner sets. Platform PL-13 (data moves checked), PL-10 (changes
 through the config, with a change reference), A11 10 / CP-07 (change control).
 
 What moves: every record of the live Logbook (logbook.187-126-126-5.sslip.io, branch `standalone`). People keep
@@ -12,8 +13,10 @@ standalone Logbook…").
 ## Before the day
 
 1. **Platform installed** on the owner's server (databsee README "Server setup"), with the first core administrator.
-   Decide with the owner how the public address reaches the platform's Caddy (ports 80/443) while the old site still
-   runs; the old site keeps its own address until step 9.
+   Address (D-31 1): the platform Logbook is tested at a temporary address (for example `logbook-new.<domain>`) through
+   the existing Caddy; `logbook.<domain>` keeps pointing at the old site until step 9.
+   **To do before go-live (D-31 2):** the move script gives a login that starts with a digit a `u` prefix
+   (`1ravi` → `u1ravi`) instead of refusing it, and lists the change in its report. Today it refuses such logins.
 2. **Platform release with the Logbook pin** at the latest Logbook merge (`apps/logbook/manifest.json` in databsee),
    and the Actions secret `PRODUCT_SOURCE_TOKEN` (read-only token for this repo).
 3. **Customer config ready, not yet applied**: `licences` gains `logbook`, `links.logbook: { master_data:
@@ -21,11 +24,10 @@ standalone Logbook…").
    `env.logbook` (`SARVAM_API_KEY`, `GEMINI_API_KEY` as on the old site).
 4. **Identity verification text** from the site (21 CFR 11.100(b), CP-03, D-29 5): who verified the moved people's
    identity and how (for example "Site HR", "employee ID card checked at hiring, SOP-HR-003").
-5. **Rehearsal** on a test server with the platform installed and the Logbook licensed (the move needs the Logbook's
-   permissions in core's catalogue and the `--by` core administrator): steps 2–6 below on last night's backup, the
-   real move and its checks, not only `--dry-run`; then discard that server's databases. The move must end "moved" with
-   no problems. Logins that start with a digit are refused (core needs a letter first): agree with the owner what
-   those people get (a new core login; their history stays under the old one).
+5. **Rehearsal on the owner's own server** (D-31 4), no separate test server: steps 2–6 below on last night's backup,
+   the real move and its checks, not only `--dry-run`; then restore the snapshot of step 4a, so the platform is as
+   before the rehearsal. The move must end "moved" with no problems. Tell the people with a prefixed login (D-31 2)
+   their new login.
 6. Tell users the window, the new address, and that their login and password stay the same.
 
 ## On the day
@@ -54,6 +56,9 @@ Database tools run inside containers (the hosts need no PostgreSQL client): `old
    `plat exec -T db psql -U <superuser> -d logbook -Atc "select (select count(*) from users) + (select count(*) from audit_log)"` → `0`.
    If it is not (someone opened the address), note the rows in the change record, licence the Logbook off, drop the
    `logbook` database and apply again: it holds no records yet.
+4a. **Snapshot the platform databases before the move** (D-31 3): `logbook` (still empty), `identity` and
+   `master_data`, each with `plat exec -T db pg_dump -U <superuser> --format=custom <db> > /backups/pre-move-<db>.dump`,
+   plus `sha256sum`. A rollback or the end of the rehearsal restores them, and the move can then run again.
 5. **Dry run, then the move**, inside the Logbook image at the pinned commit, on the platform's network:
    ```sh
    export LOGBOOK_COMMIT=$(jq -r .source.commit /opt/medhanta/current/apps/logbook/manifest.json)
@@ -75,21 +80,17 @@ Database tools run inside containers (the hosts need no PostgreSQL client): `old
 7. **Records of the move**: the freeze dump and its SHA-256, the old site's integrity output, both move reports, the
    platform's integrity result, the checks of step 6, with times and names.
 8. **Owner go / no-go.** On "no-go": rollback below.
-9. **Switch.** Point the public Logbook address at the platform (core's address and the Logbook's are set by the
-   config's `domain`: `https://<domain>` and `https://logbook.<domain>`); tell users. Drop the scratch database:
+9. **Switch.** Point `logbook.<domain>` at the platform instead of the temporary address (D-31 1); tell users. Drop the scratch database:
    `plat exec -T db dropdb -U <superuser> logbook_move_source`.
 
 ## Rollback
 
 Until the owner signs off, the old installation (containers, database volume, `standalone` image) stays as it was
 at the freeze. To go back: licence the Logbook off in the config (apply stops it), start the old app (`old start app`),
-point the address back. The old database is exactly as frozen, apart from the integrity check's own audit row; the
-records made on the platform in between are only the step-6 checks.
-
-A second move after a rollback is refused as it stands: the platform's `logbook` database keeps the moved rows (a
-licence off keeps data) and core keeps the moved people (its records are insert-only). Before trying again, decide
-with the owner how to continue (fix forward on the platform, or a fresh `logbook` database and a move that recognises
-the people it created itself); do not edit core's tables by hand.
+point the address back. The old database is exactly as frozen, apart from the integrity check's own audit row.
+On the platform (D-31 3): restore the three databases from the step-4a snapshot (drop and recreate each, then
+`pg_restore` its dump as the superuser); that takes back the moved rows, people and items and anything else written
+to those databases since the snapshot, so the move can run again later. Record the restore in the change record.
 
 ## After sign-off
 
