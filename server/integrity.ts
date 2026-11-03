@@ -29,7 +29,8 @@ export async function runIntegrityCheck(sql: Sql, actorId: number | null = null)
   return result;
 }
 
-async function check(sql: Sql): Promise<IntegrityResult> {
+// The checks themselves, without the audit row: also run inside the data move's transaction (B1-5).
+export async function check(sql: Sql): Promise<IntegrityResult> {
   const problems: string[] = [];
 
   const entries = await sql.unsafe<EntryRow[]>(`select ${ENTRY_COLS} from entries order by entry_id, version`);
@@ -116,6 +117,8 @@ export function scheduleIntegrityCheck(sql: Sql, log: (msg: string) => void): ()
       const [last] = await sql<{ at: Date }[]>`
         select at from audit_log where object_type = 'system' and object_id = 'integrity' order by at desc limit 1`;
       if (last && Date.now() - last.at.getTime() < DAY) return;
+      // Nothing to check before anyone has used the Logbook; on the platform the data move needs this database empty (B1-5).
+      if (!(await sql`select 1 from users limit 1`).length) return;
       const r = await runIntegrityCheck(sql);
       log(r.problems.length ? `integrity check FAILED: ${r.problems.length} problem(s)` : `integrity check passed (${r.entries} entries, ${r.signatures} signatures)`);
     } catch (e) {

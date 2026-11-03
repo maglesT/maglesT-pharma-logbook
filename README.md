@@ -118,6 +118,20 @@ Investigate any failure as a data-integrity incident (CP-07).
 **Traceability (CP-01).** `npm run traceability` regenerates `docs/traceability.md`, the rule-to-test list. CI fails if a
 rule in force has no test. Together with the CI test report it supports the site's validation.
 
+**Moving a standalone Logbook onto the Medhanta platform (D-29, B1-5).** `db/move-to-platform.ts` copies the records
+into the platform's freshly migrated `logbook` database and creates the people (same logins and passwords) and
+permissions in core and the items and products in master data, then checks every table's count and checksum, the
+mappings and the integrity check (PL-13). Always run it with `--dry-run` first:
+
+```sh
+SOURCE_DATABASE_URL=postgres://<owner>@<old db>/logbook PLATFORM_DATABASE_URL=postgres://<superuser>@<platform db>:5432 \
+  node dist/db/move-to-platform.js --by <core login> --verified-by "<who verified identities>" \
+  --verified-how "<how, e.g. ID card at hiring, SOP-HR-003>" --report move.csv --dry-run
+```
+
+The report lists each user, item and product with its new id, refused logins and locations that match no room. A platform
+demo: seed a demo database (`npm run demo:seed`), then move it with `--demo-password <password>`.
+
 ## Conventions
 - One app: `server/` (Fastify), `web/` (React), `db/migrations/` (plain SQL), `test/`, `e2e/` (browser tests), `ops/`, `docs/`.
 - A test that proves a register rule starts its name with the rule ID, e.g. `LB-17: correction keeps the original visible`.
