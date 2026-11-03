@@ -114,12 +114,17 @@ export function authRoutes(app: FastifyInstance, sql: Sql, signOn: SignOn) {
 
   // Ends the Logbook session and returns where the browser goes to end the core session too.
   app.post('/api/logout', async (req, reply) => {
+    // Read straight from the stored session (the request hook skips logout), so a session that just went idle or was
+    // refused by core still sends the browser to end core's session too (shared terminals, PL-01).
     let idToken: string | null = null;
-    if (req.user) {
+    const sid = req.cookies[SESSION_COOKIE];
+    if (sid) {
       await sql.begin(async (tx) => {
-        const [s] = await tx<{ id_token: string | null }[]>`delete from sessions where id = ${sessionKey(req.user!.sessionId)} returning id_token`;
-        idToken = s?.id_token ?? null;
-        await audit(tx, { actorId: req.user!.id, action: 'logout', objectType: 'user', objectId: req.user!.id });
+        const [s] = await tx<{ id_token: string | null; user_id: number }[]>`
+          delete from sessions where id = ${sessionKey(sid)} returning id_token, user_id::int`;
+        if (!s) return;
+        idToken = s.id_token;
+        await audit(tx, { actorId: s.user_id, action: 'logout', objectType: 'user', objectId: s.user_id });
       });
     }
     void reply.clearCookie(SESSION_COOKIE, { path: '/' });
