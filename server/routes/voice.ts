@@ -36,11 +36,12 @@ export function voiceRoutes(app: FastifyInstance, sql: Sql, speech: SpeechProvid
   const anyUser = { preHandler: requirePermission() };
 
   // What the screens need to offer voice notes: on/off, languages, fields, limits.
-  app.get('/api/voice-notes/config', anyUser, async () => {
+  app.get('/api/voice-notes/config', anyUser, async (req) => {
     const s = await settingsInForce(sql, 'voice_notes');
     const settings = s?.settings as LogbookSettings | undefined;
     return {
-      enabled: Boolean(settings?.enabled && settings.voiceLanguages.length && speech),
+      // Offered only to people holding the voice-note code, as POST /api/voice-notes checks.
+      enabled: Boolean(settings?.enabled && settings.voiceLanguages.length && speech && req.user!.permissions.includes('logbook.voice_note.record')),
       switchedOn: Boolean(settings?.enabled),
       configured: Boolean(speech),
       languages: settings?.voiceLanguages ?? [],

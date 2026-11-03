@@ -6,7 +6,7 @@ import { parseId, requirePermission, type SessionUser } from '../auth.js';
 import { LOGBOOK_TYPES, typeByKey, type LogbookSettings } from '../logbook-types.js';
 import { DATA_SCHEMAS, REPORTED_FIELDS, checkData, correctCodes, mayCorrect, mayRecord, recordCode, performerSigns, verificationNeeded, type EntryContext, type EquipmentInfo } from '../entries.js';
 import { logbookItem, logbookProducts, type Master } from '../master.js';
-import { SignError, authenticateSigner, contentHash, proofOnly, sign, signBody, type AuthenticatedSigner } from '../signatures.js';
+import { SignError, authenticateSigner, contentHash, proofOnly, sign, signBody } from '../signatures.js';
 import { settingsInForce } from './settings.js';
 import { allStatuses, statusOf } from '../status.js';
 import { VoiceError, confirmVoiceNotes, unsignedDrafts, voiceNotesFor, type VoiceUse } from '../voice.js';
@@ -185,11 +185,10 @@ async function dbNow(tx: Tx): Promise<Date> {
 
 // D-26: the speaker confirms voice-note text with a signature of its own. One re-authentication at core may serve
 // both signatures of one save (same proof): the signer entered both components for this save (11.200(a)(1)).
-async function voiceSigner(sql: Sql, key: Buffer, user: SessionUser, b: { voiceNotes: VoiceUse[]; voiceSignature?: { proof: string }; signature?: { proof: string } },
-  main: AuthenticatedSigner | null) {
+// Each signature still checks its own code (D-30).
+async function voiceSigner(sql: Sql, key: Buffer, user: SessionUser, b: { voiceNotes: VoiceUse[]; voiceSignature?: { proof: string }; signature?: { proof: string } }) {
   if (!b.voiceNotes.length) return null;
   if (!b.voiceSignature) throw new EntryError(400, 'voice_signature_required', ['Sign to confirm the voice-note text.']);
-  if (main && b.signature?.proof === b.voiceSignature.proof) return main;
   return authenticateSigner(sql, key, user, b.voiceSignature, { objectType: 'voice_note', objectId: 0, meaning: 'voice_confirmed', needs: ['logbook.voice_note.record'] });
 }
 
@@ -293,7 +292,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
       // Check the signing proofs first, in their own transaction, so a refused one is always audited (LB-20).
       const signer = signs ? await authenticateSigner(sql, app.proofKey, user, b.signature!,
         { objectType: 'entry', objectId: 0, meaning: 'performed', needs: [recordCode(b.logbookType)!] }) : null;
-      const voice = await voiceSigner(sql, app.proofKey, user, b, signer);
+      const voice = await voiceSigner(sql, app.proofKey, user, b);
 
       const created = await sql.begin(async (tx) => {
         const eq = await loadEquipment(tx, equipmentId);
@@ -363,7 +362,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
       if (!repair && b.voiceNotes.length) throw new EntryError(400, 'check_failed', ['Ending a use takes no voice note.']);
       const signer = repair ? await authenticateSigner(sql, app.proofKey, user, b.signature!,
         { objectType: 'entry', objectId: id, meaning: 'performed', needs: [recordCode(peek.logbook_type)!] }) : null;
-      const voice = await voiceSigner(sql, app.proofKey, user, b, signer);
+      const voice = await voiceSigner(sql, app.proofKey, user, b);
       const row = await sql.begin(async (tx) => {
         const prev = await latestVersion(tx, id);
         if (!isOpenable(prev.logbook_type, prev.data) || prev.activity_end || prev.logbook_type !== peek!.logbook_type) throw new EntryError(409, 'not_open');
@@ -413,7 +412,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
       if (!mayCorrect(peek.logbook_type, user.permissions, peek.own)) throw new EntryError(403, 'forbidden');
       const signer = await authenticateSigner(sql, app.proofKey, user, b.signature,
         { objectType: 'entry', objectId: id, meaning: 'corrected', needs: correctCodes(peek.logbook_type, peek.own) });
-      const voice = await voiceSigner(sql, app.proofKey, user, b, signer);
+      const voice = await voiceSigner(sql, app.proofKey, user, b);
       const row = await sql.begin(async (tx) => {
         const prev = await latestVersion(tx, id);
         const [first] = await tx<{ entered_by: number; entered_at: Date }[]>`

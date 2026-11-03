@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createServer, type Server } from 'node:http';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem } from './helpers.js';
+import { call, directory, freshApp, login, seedUser, type TestApp, proofFor, addItem } from './helpers.js';
 import { runIntegrityCheck } from '../server/integrity.js';
 import { SpeechError, rateLimiter, sarvamProvider, type SpeechProvider, type Translator } from '../server/voice.js';
 import { AdviceError } from '../server/advice.js';
@@ -126,6 +126,26 @@ describe('confirmation (LB-19, LB-20)', () => {
     expect((await logEntry('op1', id, 'Something else', { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation, shownHash: note.shownHash }], voiceSignature: sig('op1') })).json().error).toBe('voice_check_failed');
     expect((await t.owner`select count(*)::int as n from entries`)[0]!.n).toBe(before);
     expect((await t.owner`select count(*)::int as n from voice_note_confirmations where voice_note_id = ${note.id}`)[0]!.n).toBe(0);
+  });
+
+  it('LB-20 (D-30): the voice confirmation needs the voice-note code at core; without it voice notes are not offered', async () => {
+    const id = await newItem();
+    const note = (await record('op1', id)).json();
+    const p = directory.get('op1')!;
+    const held = [...p.permissions];
+    p.permissions = held.filter((x) => x !== 'logbook.voice_note.record');
+    try {
+      expect((await logEntry('op1', id, note.translation, { voiceNotes: [{ id: note.id, field: 'notes', finalText: note.translation, shownHash: note.shownHash }], voiceSignature: sig('op1') })).statusCode).toBe(401);
+      const [last] = await t.owner`select reason from audit_log where action = 'signature.failed' order by id desc limit 1`;
+      expect(last!.reason).toBe('meaning voice_confirmed: no logbook.voice_note.record at core');
+      await seedUser(t.owner, `novoice${++n}`, []);
+      directory.get(`novoice${n}`)!.permissions = ['logbook.entry.record_general'];
+      const cookie = (await login(t.app, `novoice${n}`)).cookie;
+      expect((await call(t.app, cookie, 'GET', '/api/voice-notes/config')).json().enabled).toBe(false);
+      expect((await call(t.app, c.op1!, 'GET', '/api/voice-notes/config')).json().enabled).toBe(true);
+    } finally {
+      p.permissions = held;
+    }
   });
 
   it('LB-19: the confirmation must name the draft that was shown', async () => {

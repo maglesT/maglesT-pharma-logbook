@@ -191,7 +191,7 @@ export function EntryForm({
         type_not_configured: 'This logbook type has no approved settings yet.',
         not_fit_for_use: 'This equipment is not fit for use:',
         in_use: 'The equipment is in use.',
-        forbidden: correcting ? 'Only the person who made this entry, or a supervisor, may correct it. QA reviews and verifies but does not correct.' : 'Your role may not make this entry.',
+        forbidden: correcting ? 'Only the person who made this entry, or a supervisor, may correct it. QA reviews and verifies but does not correct.' : 'You may not make this entry.',
         invalid_request: 'Some information is missing or not valid:',
         voice_signature_required: 'Sign to confirm the voice-note text.',
         voice_confirmation_required: 'Confirm the voice-note text with your signature first.',
