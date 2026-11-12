@@ -7,25 +7,40 @@ import { StatusChip } from '../components/StatusChip.js';
 // counts (a count opens its items; "due soon" is counted, point 1) and its cleaning deadlines, overdue and due soon
 // (point 2); then what is in use (point 3). Every row opens the item.
 
+// Owner 2026-11-12: the graph also shows change over, breakdown, requalification needed and PM due, each item in one
+// group, the first that applies in this order: in use, change over, breakdown, requalification, PM, cleaning overdue,
+// other out of service (calibration), dirty, due soon, ready.
 const GROUPS = [
   { key: 'ready', label: 'Clean / ready', color: '#17803d' },
   { key: 'soon', label: 'Due soon', color: '#f0b429' },
   { key: 'in_use', label: 'In use', color: '#1f63b8' },
+  { key: 'change_over', label: 'Change over', color: '#6b4fbb' },
   { key: 'dirty', label: 'Dirty', color: '#b7791f' },
-  { key: 'late', label: 'Overdue', color: '#c0352b' },
-  { key: 'out', label: 'Out of service', color: '#5f5f5f' },
+  { key: 'late', label: 'Cleaning overdue', color: '#c0352b' },
+  { key: 'pm', label: 'PM due', color: '#d9622b' },
+  { key: 'requal', label: 'Requalification needed', color: '#a3195b' },
+  { key: 'breakdown', label: 'Breakdown', color: '#7a1f1f' },
+  { key: 'out', label: 'Out of service (calibration)', color: '#5f5f5f' },
 ] as const;
 type GroupKey = (typeof GROUPS)[number]['key'];
-const LATE = ['dirty_expired', 'clean_expired', 'cleaning_due', 'pm_overdue', 'requalification_overdue', 'calibration_overdue'];
-const OUT = ['out_of_service', 'calibration_failed', 'not_calibrated', 'not_qualified'];
+const CLEANING_LATE = ['dirty_expired', 'clean_expired', 'cleaning_due'];
+const OUT = ['calibration_overdue', 'calibration_failed', 'not_calibrated'];
+const dueOf = (s: EquipmentStatus, kind: Due['kind']) => s.dues.find((d) => d.kind === kind && (d.overdue || d.soon));
 function groupOf(s: EquipmentStatus): GroupKey {
-  if (s.state === 'in_use' || s.state === 'in_change_over') return 'in_use';
-  if (LATE.includes(s.state) || s.dues.some((d) => d.overdue)) return 'late';
+  if (s.state === 'in_use') return 'in_use';
+  if (s.state === 'in_change_over') return 'change_over';
+  if (s.state === 'out_of_service') return 'breakdown';
+  if (s.state === 'requalification_overdue' || s.state === 'not_qualified' || s.qualification === 'requalification_needed'
+    || dueOf(s, 'requalification')) return 'requal';
+  if (s.state === 'pm_overdue' || dueOf(s, 'pm')) return 'pm';
+  if (CLEANING_LATE.includes(s.state) || s.deadline?.overdue) return 'late';
   if (OUT.includes(s.state)) return 'out';
   if (s.state === 'dirty') return 'dirty';
   if (s.deadline?.soon || s.dues.some((d) => d.soon)) return 'soon';
   return 'ready';
 }
+const isOverdue = (s: EquipmentStatus) => Boolean(s.deadline?.overdue) || s.dues.some((d) => d.overdue)
+  || [...CLEANING_LATE, 'pm_overdue', 'requalification_overdue', 'calibration_overdue'].includes(s.state);
 
 interface Item { eq: Equipment; st: EquipmentStatus }
 const isDue = (i: Item) => Boolean(i.st.deadline && (i.st.deadline.soon || i.st.deadline.overdue));
@@ -231,9 +246,9 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
   const part = (kind: Equipment['kind'], basis?: 'frequency' | 'operation') =>
     items.filter((i) => i.eq.kind === kind && (!basis || (basis === 'frequency') === (i.eq.cleaningBasis === 'frequency')));
   const code = (id: number) => byId.get(id)?.code ?? '';
-  const overdue = items.filter((i) => groupOf(i.st) === 'late').length;
-  const soon = items.filter((i) => groupOf(i.st) === 'soon').length;
-  const inUse = items.filter((i) => groupOf(i.st) === 'in_use').length;
+  const overdue = items.filter((i) => isOverdue(i.st)).length;
+  const soon = items.filter((i) => !isOverdue(i.st) && (Boolean(i.st.deadline?.soon) || i.st.dues.some((d) => d.soon))).length;
+  const inUse = items.filter((i) => groupOf(i.st) === 'in_use' || groupOf(i.st) === 'change_over').length;
   const ready = items.filter((i) => groupOf(i.st) === 'ready' || groupOf(i.st) === 'soon').length;
   const hour = new Date().getHours();
   // Point 3: "In use" lists what occupies an item now: uses, change overs and repairs in progress.
