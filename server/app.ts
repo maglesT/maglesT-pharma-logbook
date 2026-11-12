@@ -23,6 +23,8 @@ import type { SignOn } from './signon.js';
 import { ConnectionOff, type Master } from './master.js';
 import type { Qualification } from './qualification.js';
 import type { Deviations } from './overdue.js';
+import type { Batches } from './batches.js';
+import { batchRoutes } from './routes/batches.js';
 import { overdueRoutes } from './routes/overdue.js';
 import { statusContext, type StatusContext } from './status.js';
 
@@ -41,6 +43,8 @@ export interface AppOptions {
   qualification?: Qualification | null;
   // D-37: the Deviations product's deviation_v1 (numbers of the deviations raised for missed limits); null without the link.
   deviations?: Deviations | null;
+  // Owner 2026-11-12: Batchwright's batch records (batch_fact_v1, equipment_use_v1); null without the link (batch typed).
+  batches?: Batches | null;
   logger?: boolean;
   webRoot?: string;
   // Secure flag on the session cookie; off only for plain-HTTP development.
@@ -51,13 +55,14 @@ export interface AppOptions {
   advisor?: AdviceProvider | null;
 }
 
-export async function buildApp({ sql, signOn, master, qualification = null, deviations = null, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ sql, signOn, master, qualification = null, deviations = null, batches = null, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger, trustProxy: true });
   app.decorate('cookieSecure', cookieSecure);
   app.decorate('proofKey', proofKey);
   app.decorate('master', master);
   app.decorate('qualification', qualification);
   app.decorate('deviations', deviations);
+  app.decorate('batches', batches);
   app.decorate('statusContext', (q: Sql | Tx = sql) => statusContext(q, master, qualification));
   // A cut master-data link stops the feature with one message (platform D-02, PL-08).
   app.setErrorHandler((err, _req, reply) => {
@@ -97,6 +102,7 @@ export async function buildApp({ sql, signOn, master, qualification = null, devi
   voiceRoutes(app, sql, speech);
   adviceRoutes(app, sql, advisor);
   overdueRoutes(app, sql);
+  batchRoutes(app, sql);
 
   // In production the built web UI is served from the same process.
   const root = webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');
@@ -117,6 +123,7 @@ declare module 'fastify' {
     master: Master;
     qualification: Qualification | null;
     deviations: Deviations | null;
+    batches: Batches | null;
     // What every status needs from master data and the Qualification product (platform D-24).
     statusContext: (q?: Sql | Tx) => Promise<StatusContext>;
   }

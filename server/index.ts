@@ -9,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { sqlMaster } from './master.js';
 import { sqlQualification } from './qualification.js';
 import { scheduleOverdue, sqlDeviations } from './overdue.js';
+import { sqlBatches } from './batches.js';
 
 const config = loadConfig();
 const sql = connect(config.DATABASE_URL, { role: config.DB_APP_ROLE });
@@ -30,9 +31,10 @@ const proofKey = createHash('sha256').update(`logbook-signing-proof:${config.OID
 const md = connect(config.MASTER_DATA_DATABASE_URL);
 const qual = config.QUAL_DATABASE_URL ? connect(config.QUAL_DATABASE_URL) : null;
 const dv = config.DEVIATIONS_DATABASE_URL ? connect(config.DEVIATIONS_DATABASE_URL) : null;
+const ebmr = config.EBMR_DATABASE_URL ? connect(config.EBMR_DATABASE_URL) : null;
 const master = sqlMaster(md);
 const qualification = qual ? sqlQualification(qual) : null;
-const app = await buildApp({ sql, signOn, proofKey, master, qualification, deviations: dv ? sqlDeviations(dv) : null, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
+const app = await buildApp({ sql, signOn, proofKey, master, qualification, deviations: dv ? sqlDeviations(dv) : null, batches: ebmr ? sqlBatches(ebmr) : null, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
 
 await app.listen({ port: config.PORT, host: config.HOST });
 const stopIntegrity = scheduleIntegrityCheck(sql, (msg) => app.log.info(msg));
@@ -48,6 +50,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     await md.end();
     await qual?.end();
     await dv?.end();
+    await ebmr?.end();
     process.exit(0);
   });
 }
