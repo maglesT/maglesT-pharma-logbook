@@ -48,12 +48,13 @@ describe('master data', () => {
 
   it('LB-18: changes to an item\'s Logbook settings need a reason and are audited with old and new values', async () => {
     const id = await addItem(t, { code: 'BLD-01', name: 'Blender' });
-    expect((await call(t.app, admin, 'PATCH', `/api/equipment/${id}`, { cleanHoldHours: 48 })).statusCode).toBe(400);
-    const res = await call(t.app, admin, 'PATCH', `/api/equipment/${id}`, { name: 'Ignored', cleanHoldHours: 48, reason: 'per SOP' });
-    expect(res.json()).toMatchObject({ name: 'Blender', cleanHoldHours: 48 });
+    expect((await call(t.app, admin, 'PATCH', `/api/equipment/${id}`, { classified: true })).statusCode).toBe(400);
+    // Name and hold times are master data's (D-24): the Logbook takes only its own settings and ignores the rest.
+    const res = await call(t.app, admin, 'PATCH', `/api/equipment/${id}`, { name: 'Ignored', cleanHoldHours: 48, classified: true, reason: 'per SOP' });
+    expect(res.json()).toMatchObject({ name: 'Blender', classified: true, cleanHoldHours: null });
     const [row] = await t.owner`select * from audit_log where action = 'equipment.updated' and object_id = ${String(id)}`;
-    expect(row!.old_value.cleanHoldHours).toBe(null);
-    expect(row!.new_value.cleanHoldHours).toBe(48);
+    expect(row!.old_value.classified).toBe(false);
+    expect(row!.new_value.classified).toBe(true);
     expect(row!.reason).toBe('per SOP');
   });
 

@@ -87,7 +87,7 @@ describe('report views (D-28)', () => {
     const corrected = await call(t.app, c.op1!, 'POST', `/api/entries/${cleaning.id}/correct`, {
       activityStart: (await call(t.app, c.qa!, 'GET', `/api/entries/${cleaning.id}/versions`)).json()[0].activityStart,
       data: { cleaningType: 'major', checklist: {}, remarks: 'Rinse water clear' }, reason: 'Remark missing', signature: sig('op1') });
-    expect(corrected.statusCode).toBe(200);
+    expect(corrected.statusCode, corrected.body).toBe(200);
 
     const rows = await view('entry_v1', `equipment_code = 'MIX-1' order by entry_id`);
     expect(rows.map((r) => [r.type, r.version, r.change, r.signed])).toEqual([

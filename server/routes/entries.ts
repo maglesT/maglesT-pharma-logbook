@@ -306,7 +306,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         const isUse = b.logbookType === 'equipment_use';
         // LB-05–07: a new use is refused unless the item is fit; the reasons are shown to the user.
         // The equipment row is locked, so the status cannot change before this entry commits.
-        const status = (await statusOf(tx, equipmentId))!;
+        const status = (await statusOf(tx, equipmentId, await app.statusContext(tx)))!;
         if (isUse && status.blockers.length) throw new EntryError(409, 'not_fit_for_use', status.blockers);
         // A sterilisation cycle needs a steriliser that is in service, calibrated and has passed its tests.
         if (b.logbookType === 'steriliser_cycle' && status.cycleBlockers.length) throw new EntryError(409, 'not_fit_for_use', status.cycleBlockers);
@@ -424,7 +424,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         const eq = await loadEquipment(tx, prev.equipment_id);
         const [s] = await tx<{ settings: LogbookSettings }[]>`select settings from logbook_settings where id = ${prev.settings_id}`;
         if (prev.logbook_type === 'equipment_cleaning' || prev.logbook_type === 'area_cleaning') {
-          cleaningFits((await statusOf(tx, prev.equipment_id))!, b.activityStart);
+          cleaningFits((await statusOf(tx, prev.equipment_id, await app.statusContext(tx)))!, b.activityStart);
         }
         // A correction keeps an open use open and a finished activity finished (review S3-2).
         if (prev.activity_end === null && b.activityEnd) {
@@ -523,11 +523,11 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
   });
 
   // Status of every item (home screen, tiles) and of one item (logbook page).
-  app.get('/api/equipment/status', anyUser, async () => allStatuses(sql));
+  app.get('/api/equipment/status', anyUser, async () => allStatuses(sql, await app.statusContext()));
   app.get<{ Params: { id: string } }>('/api/equipment/:id/status', anyUser, async (req, reply) => {
     const id = parseId(req.params.id);
     if (id === null) return reply.code(400).send({ error: 'invalid_request' });
-    return (await statusOf(sql, id)) ?? reply.code(404).send({ error: 'not_found' });
+    return (await statusOf(sql, id, await app.statusContext())) ?? reply.code(404).send({ error: 'not_found' });
   });
 
   // The logbook of one equipment item or area: latest version of each entry, newest first.

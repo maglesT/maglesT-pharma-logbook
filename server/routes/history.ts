@@ -2,11 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
-import { logbookItem, logbookItems, type Master } from '../master.js';
+import { needsCalibrationOf, logbookItem, logbookItems, type Master } from '../master.js';
 import { parseId, requirePermission } from '../auth.js';
 import { changeLines } from '../changes.js';
 import { canonical } from '../signatures.js';
-import { PLANT_TZ, statusOf } from '../status.js';
+import { PLANT_TZ, statusOf, type StatusContext } from '../status.js';
 import {
   breakdowns, filterAndSort, breakdownStats, checkDetails, detailsSchema, detailsVersions, inServiceSince, locationHistory, registerQuery,
   type Breakdown,
@@ -89,17 +89,17 @@ async function history(sql: Sql, master: Master, id: number, fromDay: string, to
   return { from, to, events };
 }
 
-async function card(sql: Sql, master: Master, id: number) {
+async function card(sql: Sql, master: Master, id: number, ctx: StatusContext) {
   const item = await logbookItem(sql, master, id);
   if (!item) return null;
   const [row] = await sql<{ created_at: Date }[]>`select created_at from equipment where id = ${id}`;
   const createdAt = row!.created_at;
   // Name, kind, room and active state are master data, read live (D-29).
   const equipment = { id, code: item.code, name: item.name, kind: item.kind, location: item.room ?? '', sterile: item.sterile,
-    classified: item.classified, cleanHoldHours: item.cleanHoldHours, needsCalibration: item.needsCalibration, active: item.active,
+    classified: item.classified, ...item.care, needsCalibration: needsCalibrationOf(item), active: item.active,
     make: item.make, model: item.model, serial: item.serial, createdAt };
   const versions = await detailsVersions(sql, id);
-  return { equipment, details: versions.at(-1) ?? null, detailsVersions: versions, locationHistory: await locationHistory(sql, id), status: await statusOf(sql, id) };
+  return { equipment, details: versions.at(-1) ?? null, detailsVersions: versions, locationHistory: await locationHistory(sql, id), status: await statusOf(sql, id, ctx) };
 }
 
 const flat = (v: unknown) => (v === null || v === undefined ? '' : typeof v === 'object' ? canonical(v) : String(v));
@@ -134,7 +134,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
   app.get<{ Params: { id: string } }>('/api/equipment/:id/details', anyUser, async (req, reply) => {
     const id = parseId(req.params.id);
     if (id === null) return reply.code(400).send({ error: 'invalid_request' });
-    return (await card(sql, app.master, id)) ?? reply.code(404).send({ error: 'not_found' });
+    return (await card(sql, app.master, id, await app.statusContext())) ?? reply.code(404).send({ error: 'not_found' });
   });
 
   // A new details version; the old one stays (D-25). expectedVersion guards against overwriting a
@@ -207,7 +207,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     const id = parseId(req.params.id);
     const q = historyQuery.safeParse(req.query);
     if (id === null || !q.success) return reply.code(400).send({ error: 'invalid_request' });
-    const head = await card(sql, app.master, id);
+    const head = await card(sql, app.master, id, await app.statusContext());
     if (!head) return reply.code(404).send({ error: 'not_found' });
     const types = q.data.types ? new Set(q.data.types.split(',').filter(Boolean)) : null;
     return { ...head, ...(await history(sql, app.master, id, q.data.fromDay, q.data.toDay, types)) };
@@ -218,7 +218,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     const id = parseId(req.query.equipmentId ?? '');
     const q = historyQuery.safeParse(req.query);
     if (!format.success || id === null || !q.success) return reply.code(400).send({ error: 'invalid_request' });
-    const head = await card(sql, app.master, id);
+    const head = await card(sql, app.master, id, await app.statusContext());
     if (!head) return reply.code(404).send({ error: 'not_found' });
     const types = q.data.types ? new Set(q.data.types.split(',').filter(Boolean)) : null;
     const { events } = await history(sql, app.master, id, q.data.fromDay, q.data.toDay, types);
