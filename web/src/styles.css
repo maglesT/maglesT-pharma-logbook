@@ -240,7 +240,7 @@ table.register { font-size: 0.86rem; }
 .kpi.info::before { background: var(--info); } .kpi.info b { color: var(--info); }
 .kpi.ok::before { background: var(--ok); } .kpi.ok b { color: var(--ok); }
 
-.dash { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 18px; margin-bottom: 18px; }
+.dash { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-bottom: 18px; }
 .dash-panel { position: relative; overflow: hidden; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
   padding: 18px 20px 20px; display: grid; gap: 14px; align-content: start; margin-bottom: 18px; }
 .dash .dash-panel { margin-bottom: 0; }
