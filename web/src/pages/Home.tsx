@@ -183,9 +183,11 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
     const eq = byId.get(st.equipmentId);
     return eq?.active ? [{ eq, st }] : [];
   });
-  const machines = items.filter((i) => i.eq.kind !== 'area');
-  const areas = items.filter((i) => i.eq.kind === 'area');
-  const frequencyRooms = areas.filter((i) => i.eq.cleaningBasis === 'frequency').length;
+  // Four parts (owner): equipment, instruments, operation-based rooms, frequency-based rooms.
+  const equipmentItems = items.filter((i) => i.eq.kind === 'equipment');
+  const instruments = items.filter((i) => i.eq.kind === 'instrument');
+  const operationRooms = items.filter((i) => i.eq.kind === 'area' && i.eq.cleaningBasis !== 'frequency');
+  const frequencyRooms = items.filter((i) => i.eq.kind === 'area' && i.eq.cleaningBasis === 'frequency');
   const code = (id: number) => byId.get(id)?.code ?? '';
   const overdue = items.filter((i) => i.st.deadline?.overdue || groupOf(i.st.state) === 'late').length;
   const soon = items.filter((i) => i.st.deadline?.soon).length;
@@ -218,9 +220,10 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
       </div>
       <AutoDevs.Provider value={autoDevs}>
       <div className="dash">
-        <Part title="Equipment and instruments" icon="⚙" items={machines} onOpen={onOpen} note="dirty hold after use, clean hold after cleaning" />
-        <Part title="Areas (rooms)" icon="▦" items={areas} onOpen={onOpen}
-          note={`${areas.length - frequencyRooms} operation-based, ${frequencyRooms} frequency-based`} />
+        <Part title="Equipment" icon="⚙" items={equipmentItems} onOpen={onOpen} note="dirty hold after use, clean hold after cleaning" />
+        <Part title="Instruments" icon="⚖" items={instruments} onOpen={onOpen} note="cleaning holds and calibration" />
+        <Part title="Operation-based rooms" icon="▦" items={operationRooms} onOpen={onOpen} note="processing rooms: dirty hold after use, clean hold after cleaning" />
+        <Part title="Frequency-based rooms" icon="↻" items={frequencyRooms} onOpen={onOpen} note="cleaned on a schedule (daily, weekly…)" />
       </div>
       </AutoDevs.Provider>
       <section className="dash-panel">
