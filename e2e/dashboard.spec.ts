@@ -44,8 +44,8 @@ test('LB-07: the dashboard warns of dirty-hold and frequency deadlines near thei
   await expect(rooms.locator('.deadline').filter({ hasText: mixer.code })).toHaveCount(0);
 
   // A count opens the list of those items; a row opens the item.
-  await rooms.getByRole('button', { name: /^Overdue \(hold expired/ }).click();
-  await expect(rooms.getByRole('row').filter({ hasText: store.code })).toContainText('Cleaning overdue');
+  await rooms.getByRole('button', { name: /^Overdue \d/ }).click();
+  await expect(rooms.locator('.dash-item').filter({ hasText: store.code })).toContainText('Cleaning overdue');
   await machines.locator('.deadline').filter({ hasText: mixer.code }).click();
   await expect(page.getByRole('heading', { level: 1 })).toContainText(mixer.code);
   await expect(page.locator('.statusbar')).toContainText('Dirty hold ends at');
