@@ -104,6 +104,11 @@ export function fakeSignOn(people = directory): SignOn {
     refresh: async (token) => who(token),
     // Core's end-session page; here a page of the app itself, so browser tests stay on the test server.
     logoutUrl: (idToken) => `/?signed-out=${idToken ?? ''}`,
+    // Core's signed logout token; the stand-in's is "logout:<sub>" (the real check is in test/backchannel.test.ts).
+    verifyLogoutToken: async (token) => {
+      if (!token.startsWith('logout:') || token.length <= 7) throw new Error('logout token: invalid');
+      return { sub: token.slice(7) };
+    },
   };
 }
 

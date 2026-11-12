@@ -131,6 +131,33 @@ export function authRoutes(app: FastifyInstance, sql: Sql, signOn: SignOn) {
     return { ok: true, logoutUrl: signOn.logoutUrl(idToken) };
   });
 
+  // OIDC Back-Channel Logout 1.0: core posts a signed logout token here when the person signs out at core (or core
+  // signs them in as someone else on that browser). Every Logbook session of that person ends at once, so a shared
+  // terminal never shows the previous person (PL-01). Not under /api: core posts a form, server to server.
+  app.register(async (inst) => {
+    inst.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) => done(null, new URLSearchParams(String(body))));
+    inst.post('/backchannel-logout', async (req, reply) => {
+      void reply.header('cache-control', 'no-store');
+      const token = req.body instanceof URLSearchParams ? req.body.get('logout_token') : null;
+      let who: { sub: string };
+      try {
+        if (!token) throw new Error('no logout token');
+        who = await signOn.verifyLogoutToken(token);
+      } catch {
+        return reply.code(400).send({ error: 'invalid_request' });
+      }
+      await sql.begin(async (tx) => {
+        const ended = await tx<{ user_id: number }[]>`
+          delete from sessions s using users u where u.id = s.user_id and u.employee_id = ${who.sub} returning s.user_id::int`;
+        const userId = ended[0]?.user_id;
+        if (userId !== undefined) {
+          await audit(tx, { actorId: userId, action: 'logout', objectType: 'user', objectId: userId, reason: `signed out at Medhanta core (${ended.length} session${ended.length === 1 ? '' : 's'} ended)` });
+        }
+      });
+      return reply.code(200).send();
+    });
+  });
+
   app.get('/api/me', { preHandler: requirePermission() }, async (req) => {
     const u = req.user!;
     return { id: u.id, username: u.username, fullName: u.fullName, permissions: u.permissions };

@@ -126,6 +126,8 @@ function demoSignOn(): SignOn {
     exchange: (code) => who(code),
     refresh: (token) => who(token),
     logoutUrl: () => null,
+    // The seed signs nobody out.
+    verifyLogoutToken: async () => { throw new SeedError('no logout in the demo seed'); },
   };
 }
 
