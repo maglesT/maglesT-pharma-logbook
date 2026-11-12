@@ -77,6 +77,10 @@ export interface Equipment {
   sterile: boolean;
   classified: boolean;
   cleanHoldHours: number | null;
+  // S16: cleaning schedule.
+  dirtyHoldHours: number | null;
+  cleaningBasis: 'operation' | 'frequency' | null;
+  cleaningFrequencyHours: number | null;
   needsCalibration: boolean;
   active: boolean;
 }
@@ -195,11 +199,39 @@ export interface EquipmentStatus {
   inUse: { entryId: number; productId: number | null; batch: string | null; stage: string; since: string } | null;
   cleanUntil: string | null;
   calibrationDue: string | null;
+  schedule: 'hold' | 'frequency' | null;
+  dirtyUntil: string | null;
+  deadline: CleaningDeadline | null;
+}
+
+// S16: the next time by which an item must be cleaned (soon: inside the warning window).
+export interface CleaningDeadline {
+  kind: 'dirty_hold' | 'clean_hold' | 'frequency';
+  at: string;
+  hours: number;
+  soon: boolean;
+  overdue: boolean;
+}
+export const DEADLINE_LABEL: Record<CleaningDeadline['kind'], string> = {
+  dirty_hold: 'Dirty hold',
+  clean_hold: 'Clean hold',
+  frequency: 'Scheduled cleaning',
+};
+
+// Time left until (or past) a moment, in words: "2 h 15 min", "3 days 4 h".
+export function timeLeft(iso: string, now = Date.now()): string {
+  const m = Math.round(Math.abs(new Date(iso).getTime() - now) / 60_000);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h} h${m % 60 ? ` ${m % 60} min` : ''}`;
+  return `${Math.floor(h / 24)} days${h % 24 ? ` ${h % 24} h` : ''}`;
 }
 
 export const STATE_LABEL: Record<string, [string, string]> = {
   in_use: ['In use', 'chip-info'],
   dirty: ['Dirty', 'chip-warn'],
+  dirty_expired: ['Dirty hold expired', 'chip-bad'],
+  cleaning_due: ['Cleaning overdue', 'chip-bad'],
   clean: ['Clean', 'chip-ok'],
   clean_expired: ['Clean expired', 'chip-warn'],
   out_of_service: ['Out of service', 'chip-bad'],

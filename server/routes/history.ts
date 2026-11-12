@@ -91,6 +91,7 @@ async function history(sql: Sql, id: number, fromDay: string, toDay: string, typ
 async function card(sql: Sql, id: number) {
   const [equipment] = await sql`
     select id::int, code, name, kind, location, sterile, classified, clean_hold_hours as "cleanHoldHours",
+      dirty_hold_hours as "dirtyHoldHours", cleaning_basis as "cleaningBasis", cleaning_frequency_hours as "cleaningFrequencyHours",
       needs_calibration as "needsCalibration", active, created_at as "createdAt"
     from equipment where id = ${id}`;
   if (!equipment) return null;

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
+import { scheduleText } from './MasterData.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
 import { HistoryCard } from './HistoryCard.js';
@@ -123,13 +124,14 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
       <button className="link dark" onClick={onBack}>← All equipment</button>
       <h1>{equipment.code} · {equipment.name}</h1>
       <p className="muted">
-        {equipment.location} {equipment.sterile && '· Sterile'} {equipment.classified && '· Classified room'} {equipment.cleanHoldHours && `· Clean-hold ${equipment.cleanHoldHours} h`}
+        {equipment.location} {equipment.sterile && '· Sterile'} {equipment.classified && '· Classified room'} · Cleaning: {scheduleText(equipment)}
       </p>
       {status && (
         <div className={`statusbar ${status.blockers.length ? 'blocked' : 'fit'}`}>
           <StatusChip status={status} />
           {status.inUse && <span>Batch {status.inUse.batch} {status.inUse.stage && `· ${status.inUse.stage}`} since {plantTime(status.inUse.since)}</span>}
-          {status.cleanUntil && !status.blockers.length && <span>Clean until {plantTime(status.cleanUntil)}</span>}
+          {status.cleanUntil && !status.blockers.length && <span>{status.schedule === 'frequency' ? 'Next cleaning due' : 'Clean until'} {plantTime(status.cleanUntil)}</span>}
+          {status.dirtyUntil && !status.deadline?.overdue && <span>Clean by {plantTime(status.dirtyUntil)} (dirty hold)</span>}
           {status.calibrationDue && <span>Calibration due {status.calibrationDue.slice(0, 10)}</span>}
           {[...status.blockers, ...status.warnings].map((b) => <span key={b} className="reason">{b}</span>)}
         </div>
