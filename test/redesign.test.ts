@@ -56,7 +56,7 @@ beforeAll(async () => {
   for (const [u, roles] of [['admin', ['admin']], ['qa1', ['qa']], ['op1', ['operator']], ['sup1', ['supervisor']], ['eng1', ['engineering']]] as const) await seedUser(t.owner, u, [...roles]);
   for (const [key, u] of [['admin', 'admin'], ['qa', 'qa1'], ['op1', 'op1'], ['sup1', 'sup1'], ['eng1', 'eng1']] as const) c[key] = (await login(t.app, u)).cookie;
   product = await addProduct(t, 'P1', 'Product 1');
-  for (const type of ['equipment_use', 'equipment_cleaning', 'maintenance', 'calibration']) await approve(type);
+  for (const type of ['equipment_use', 'equipment_cleaning', 'maintenance', 'calibration', 'change_over', 'requalification', 'general_log']) await approve(type);
 });
 afterAll(() => t.close());
 
@@ -157,3 +157,69 @@ describe('dues from master data and the Qualification product (owner, slide 4 an
     expect((await status(id)).blockers.join(' ')).toMatch(/Requalification needed/);
   });
 });
+
+describe('activities (owner, slides 1-3): change over, requalification, one activity at a time', () => {
+  const ago = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+  it('LB-01: a change over is started, occupies the item, and is ended like a use', async () => {
+    const id = await item();
+    await clean(id);
+    const co = await entry('op1', id, { logbookType: 'change_over', activityStart: now(), signature: sig('op1'),
+      data: { fromProduct: 'P1', fromBatch: 'B1', toProduct: 'P2', toBatch: 'B9', remarks: 'Line change' } });
+    expect(co.statusCode, co.body).toBe(201);
+    const s = await status(id);
+    expect(s.state).toBe('in_change_over');
+    expect(s.blockers.join(' ')).toMatch(/Change over in progress/);
+    // One activity at a time: no cleaning, use or calibration during the change over; a breakdown or a note is allowed.
+    const cleaning = await entry('op1', id, { logbookType: 'equipment_cleaning', activityStart: now(), data: { cleaningType: 'major', checklist: {} }, signature: sig('op1') });
+    expect(cleaning.json()).toMatchObject({ error: 'busy' });
+    expect(cleaning.json().problems[0]).toMatch(/in change over since .* end that first/);
+    expect((await entry('op1', id, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B9', data: { stage: 'S' } })).statusCode).toBe(409);
+    expect((await entry('op1', id, { logbookType: 'general_log', activityStart: now(), data: { notes: 'Waiting for QA line clearance' } })).statusCode).toBe(201);
+    expect((await call(t.app, c.op1!, 'POST', `/api/entries/${co.json().id}/complete`, { activityEnd: now() })).statusCode).toBe(200);
+    expect((await status(id)).state).not.toBe('in_change_over');
+  });
+
+  it('LB-01: activities may not overlap in time on one item', async () => {
+    const id = await item();
+    await verify((await entry('op1', id, { logbookType: 'equipment_cleaning', activityStart: ago(20), activityEnd: ago(10), data: { cleaningType: 'major', checklist: {} }, signature: sig('op1') })).json().id);
+    const inside = await entry('eng1', id, { logbookType: 'calibration', activityStart: ago(15), activityEnd: ago(12),
+      data: { result: 'pass', certificateRef: 'C', nextDue: day(30) }, signature: sig('eng1') });
+    expect(inside.json()).toMatchObject({ error: 'busy' });
+    expect(inside.json().problems[0]).toMatch(/overlaps another activity .*equipment cleaning/);
+    expect((await entry('eng1', id, { logbookType: 'calibration', activityStart: ago(9), activityEnd: ago(8),
+      data: { result: 'pass', certificateRef: 'C', nextDue: day(30) }, signature: sig('eng1') })).statusCode).toBe(201);
+  });
+
+  it('LB-02: a requalification from a protocol takes stage, result and next due date from the Qualification product', async () => {
+    const id = await item({ requalificationFrequencyMonths: 12 });
+    const m = t.master.items_.get(`RD-${n}`)!;
+    qual.delete(m.itemId);
+    protocols.push({ number: 'PRT-2026-0042', masterId: m.itemId, itemCode: m.code, stage: 'pq', step: 'closed', approvedAt: '2026-11-01',
+      reportOutcome: 'pass', reportRelease: 'released', statusDecided: 'qualified', nextReviewDueDecided: day(365), reportApprovedAt: '2026-11-10' });
+    protocols.push({ number: 'PRT-2026-0043', masterId: m.itemId, itemCode: m.code, stage: 'oq', step: 'executing', approvedAt: '2026-11-02',
+      reportOutcome: null, reportRelease: null, statusDecided: null, nextReviewDueDecided: null, reportApprovedAt: null });
+    const body = (data: object) => ({ logbookType: 'requalification', activityStart: now(), signature: sig('eng1'),
+      data: { source: 'protocol', outcome: 'fail', ...data } });
+    expect((await entry('eng1', id, body({ protocolNumber: 'PRT-2026-0043' }))).json().problems[0]).toMatch(/not approved yet/);
+    expect((await entry('eng1', id, body({ protocolNumber: 'PRT-9999-0001' }))).json().problems[0]).toMatch(/not a protocol of/);
+    const ok = await entry('eng1', id, body({ protocolNumber: 'PRT-2026-0042', stage: 'typed', nextDue: '2030-01-01' }));
+    expect(ok.statusCode, ok.body).toBe(201);
+    const [v] = (await call(t.app, c.qa!, 'GET', `/api/entries/${ok.json().id}/versions`)).json();
+    expect(v.data).toMatchObject({ source: 'protocol', protocolNumber: 'PRT-2026-0042', stage: 'pq', outcome: 'pass', nextDue: day(365), reportRef: 'PRT-2026-0042' });
+    expect((await entry('op1', id, body({ protocolNumber: 'PRT-2026-0042' }))).statusCode).toBe(403);   // operators do not record requalification
+  });
+
+  it('LB-02: a requalification written by hand needs its report number; once verified it gives the due date when Qualification has none', async () => {
+    const id = await item({ requalificationFrequencyMonths: 12 });
+    qual.delete(t.master.items_.get(`RD-${n}`)!.itemId);
+    const manual = (data: object) => entry('eng1', id, { logbookType: 'requalification', activityStart: now(), signature: sig('eng1'),
+      data: { source: 'manual', outcome: 'pass', doneBy: 'vendor', vendorName: 'Acme Validation', ...data } });
+    expect((await manual({})).json().problems).toContain('Give the requalification report number.');
+    const ok = await manual({ reportRef: 'VR-2026-118', nextDue: day(200) });
+    expect(ok.statusCode, ok.body).toBe(201);
+    expect((await status(id)).dues.some((d: { kind: string }) => d.kind === 'requalification')).toBe(false);   // not verified yet
+    await verify(ok.json().id);
+    expect((await status(id)).dues).toContainEqual({ kind: 'requalification', due: day(200), frequency: 'every 12 months', soon: false, overdue: false });
+  });
+});
+

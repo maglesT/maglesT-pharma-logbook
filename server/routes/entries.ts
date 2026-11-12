@@ -199,7 +199,39 @@ async function guardVoice(tx: Tx, user: SessionUser, equipmentId: number, type: 
 }
 
 // An open breakdown repair or use is completed, not corrected (D-25).
-const isOpenable = (type: string, data: Record<string, unknown>) => type === 'equipment_use' || (type === 'maintenance' && data.kind === 'breakdown');
+const isOpenable = (type: string, data: Record<string, unknown>) =>
+  type === 'equipment_use' || type === 'change_over' || (type === 'maintenance' && data.kind === 'breakdown');
+
+// Owner 2026-11-12 ("one activity at a time"): the activities that occupy an item. While one is in progress (a use, a
+// change over, a repair not finished) nothing else is recorded on the item except reporting a breakdown or a note, and
+// no two of them may overlap in time. A breakdown may happen during another activity, so it is not checked for overlap.
+const ACTIVITIES = ['equipment_use', 'equipment_cleaning', 'area_cleaning', 'change_over', 'maintenance', 'calibration', 'requalification'];
+const ACTIVITY_LABEL: Record<string, string> = { equipment_use: 'in use', change_over: 'in change over', maintenance: 'under repair' };
+async function oneActivityAtATime(tx: Tx, equipmentId: number, type: string, data: Record<string, unknown>, start: Date, end: Date | null,
+  ignoreEntryId: number | null = null, checkOpen = true) {
+  const breakdown = type === 'maintenance' && data.kind === 'breakdown';
+  if (type === 'general_log' || breakdown || !ACTIVITIES.includes(type)) return;
+  const [open] = await tx<{ logbook_type: string; activity_start: Date }[]>`
+    select e.logbook_type, e.activity_start from entries e
+    where e.equipment_id = ${equipmentId} and e.activity_end is null and not exists (select 1 from entries x where x.supersedes = e.id)
+      and (e.logbook_type in ('equipment_use', 'change_over') or (e.logbook_type = 'maintenance' and e.data->>'kind' = 'breakdown'))
+      and (${ignoreEntryId}::bigint is null or e.entry_id <> ${ignoreEntryId}::bigint)
+    order by e.activity_start desc limit 1`;
+  if (open && checkOpen) {
+    const since = open.activity_start.toLocaleString('en-IN', { timeZone: process.env.DISPLAY_TZ ?? 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
+    throw new EntryError(409, 'busy', [`This item is ${ACTIVITY_LABEL[open.logbook_type] ?? 'busy'} since ${since} IST: end that first. One activity at a time.`]);
+  }
+  const [clash] = await tx<{ logbook_type: string }[]>`
+    select e.logbook_type from entries e
+    where e.equipment_id = ${equipmentId} and e.logbook_type = any(${ACTIVITIES}::text[])
+      and not (e.logbook_type = 'maintenance' and e.data->>'kind' = 'breakdown')
+      and not exists (select 1 from entries x where x.supersedes = e.id)
+      and (${ignoreEntryId}::bigint is null or e.entry_id <> ${ignoreEntryId}::bigint)
+      -- Forms enter whole minutes (S5): an activity may start in the minute the previous one ended.
+      and e.activity_start < coalesce(${end}::timestamptz, 'infinity') and ${start}::timestamptz < coalesce(date_trunc('minute', e.activity_end), 'infinity')
+    limit 1`;
+  if (clash) throw new EntryError(409, 'busy', [`The time overlaps another activity on this item (${clash.logbook_type.replaceAll('_', ' ')}). One activity at a time.`]);
+}
 
 // An entry made before S9 (its first version has no occurrence time) keeps its old rules (D-25).
 async function isLegacyBreakdown(tx: Tx, entryId: number): Promise<boolean> {
@@ -317,9 +349,23 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (b.logbookType === 'equipment_cleaning' || b.logbookType === 'area_cleaning') cleaningFits(status, b.activityStart);
         if (isUse && (!b.productId || !b.batch)) throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
         if (isUse && b.activityEnd) throw new EntryError(400, 'check_failed', ['Record the end of use when it happens.']);
-        // A breakdown may be reported before its repair has ended (D-25); other activities end when recorded.
+        // A breakdown may be reported before its repair has ended (D-25); a change over may be started and ended later
+        // like a use; other activities end when recorded.
         const openBreakdown = b.logbookType === 'maintenance' && b.data.kind === 'breakdown' && !b.activityEnd;
-        const end = isUse || openBreakdown ? null : (b.activityEnd ?? b.activityStart);
+        const openChangeOver = b.logbookType === 'change_over' && !b.activityEnd;
+        const end = isUse || openBreakdown || openChangeOver ? null : (b.activityEnd ?? b.activityStart);
+        if (b.logbookType === 'change_over' && status.inUse) throw new EntryError(409, 'busy', ['End the use first: a change over follows the use.']);
+        await oneActivityAtATime(tx, equipmentId, b.logbookType, b.data, b.activityStart, end);
+        // Owner 2026-11-12: a requalification from a protocol takes its stage, result and next due date from the
+        // Qualification product (the approved report); nothing is typed again.
+        if (b.logbookType === 'requalification' && b.data.source === 'protocol') {
+          if (!app.qualification) throw new EntryError(409, 'check_failed', ['The Qualification system is not linked: record the requalification by hand.']);
+          const number = String(b.data.protocolNumber ?? '').trim();
+          const p = (await app.qualification.protocols(item.itemId)).find((x) => x.number === number);
+          if (!p) throw new EntryError(400, 'check_failed', [`Protocol ${number || '(none)'} is not a protocol of ${item.code} in the Qualification system.`]);
+          if (!p.reportApprovedAt || !p.reportOutcome) throw new EntryError(409, 'check_failed', [`The report of ${p.number} is not approved yet in the Qualification system.`]);
+          Object.assign(b.data, { stage: p.stage, outcome: p.reportOutcome, nextDue: p.nextReviewDueDecided ?? '', reportRef: p.number });
+        }
         if (end && end < b.activityStart) throw new EntryError(400, 'check_failed', ['The end cannot be before the start.']);
         if (b.productId) await activeProduct(tx, app.master, b.productId);
         const late = timing(await dbNow(tx), [b.activityStart, end], b.lateReason);
@@ -433,6 +479,8 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (prev.activity_end !== null && b.activityEnd === null) throw new EntryError(400, 'check_failed', ['A finished activity cannot be reopened.']);
         const end = b.activityEnd === undefined || b.activityEnd === null ? prev.activity_end : b.activityEnd;
         if (end && end < b.activityStart) throw new EntryError(400, 'check_failed', ['The end cannot be before the start.']);
+        // One activity at a time: the corrected times must not overlap another activity (the entry itself excepted).
+        if (prev.activity_end !== null) await oneActivityAtATime(tx, prev.equipment_id, prev.logbook_type, (b.data ?? prev.data) as Record<string, unknown>, b.activityStart, end, prev.entry_id, false);
         if (prev.logbook_type === 'equipment_use' && (b.productId === null || b.batch === null)) {
           throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
         }

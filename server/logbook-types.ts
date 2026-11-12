@@ -53,6 +53,9 @@ export const LOGBOOK_TYPES: LogbookType[] = [
   { key: 'maintenance', label: 'Maintenance / breakdown', appliesTo: ['equipment', 'instrument', 'area'], sterile: false, alwaysVerified: true },
   { key: 'calibration', label: 'Calibration / check', appliesTo: ['equipment', 'instrument'], sterile: false, alwaysVerified: true },
   { key: 'area_cleaning', label: 'Area cleaning', appliesTo: ['area'], sterile: false, alwaysVerified: true },
+  // Owner 2026-11-12 (slides 1-3): change over between products or batches, and requalification.
+  { key: 'change_over', label: 'Change over', appliesTo: ['equipment', 'instrument', 'area'], sterile: false, alwaysVerified: true },
+  { key: 'requalification', label: 'Requalification', appliesTo: ['equipment', 'instrument', 'area'], sterile: false, alwaysVerified: true },
   { key: 'general_log', label: 'General equipment log', appliesTo: ['equipment', 'instrument', 'area'], sterile: false, alwaysVerified: false },
   { key: 'steriliser_cycle', label: 'Sterilisation / decontamination cycle', appliesTo: ['equipment'], sterile: true, alwaysVerified: true },
   { key: 'steriliser_test', label: 'Steriliser test (leak, air removal)', appliesTo: ['equipment'], sterile: true, alwaysVerified: true },

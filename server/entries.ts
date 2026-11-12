@@ -70,6 +70,29 @@ export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
     remarks: z.string().trim().max(1000).default(''),
   }),
   general_log: z.object({ checklist: checklistAnswers, notes: z.string().trim().max(2000).default('') }),
+  // Owner 2026-11-12: change over between products or batches; open until it is ended, like a use.
+  change_over: z.object({
+    fromProduct: z.string().trim().max(200).default(''),
+    fromBatch: z.string().trim().max(80).default(''),
+    toProduct: z.string().trim().max(200).default(''),
+    toBatch: z.string().trim().max(80).default(''),
+    checklist: checklistAnswers,
+    remarks: z.string().trim().max(1000).default(''),
+  }),
+  // Owner 2026-11-12: requalification, pulled from the approved protocol in the Qualification product, or written by
+  // hand (e.g. done by a vendor outside it). The protocol's result and next due date are taken from Qualification.
+  requalification: z.object({
+    source: z.enum(['protocol', 'manual']),
+    protocolNumber: z.string().trim().max(40).default(''),
+    stage: z.string().trim().max(60).default(''),
+    outcome: z.enum(['pass', 'pass_conditions', 'fail']),
+    nextDue: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(isRealDate, 'not a real date').or(z.literal('')).default(''),
+    doneBy: z.enum(['in_house', 'vendor']).default('in_house'),
+    vendorName: z.string().trim().max(120).default(''),
+    reportRef: z.string().trim().max(60).default(''),
+    remarks: z.string().trim().max(2000).default(''),
+    ...outOfLimit,
+  }),
   // Sterile types (S6; Annex 1).
   steriliser_cycle: z.object({
     cycleType: z.enum(['steam', 'dry_heat', 'sip', 'vhp']),
@@ -107,7 +130,7 @@ export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
 };
 
 // D-16: types whose performer signs with an e-signature (a clause requires the signature).
-const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test']);
+const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test', 'change_over', 'requalification']);
 export const performerSigns = (type: string) => PERFORMER_SIGNS.has(type);
 
 // LB-03 / LB-11: second-person verification needed for this type under these settings.
@@ -120,6 +143,8 @@ const RECORD_CODE: Record<string, Permission> = {
   equipment_cleaning: 'logbook.entry.record_cleaning',
   area_cleaning: 'logbook.entry.record_cleaning',
   general_log: 'logbook.entry.record_general',
+  change_over: 'logbook.entry.record_use',
+  requalification: 'logbook.entry.record_requalification',
   maintenance: 'logbook.entry.record_maintenance',
   calibration: 'logbook.entry.record_calibration',
   steriliser_cycle: 'logbook.entry.record_sterile',
@@ -141,7 +166,7 @@ export interface EquipmentInfo {
   classified: boolean;
 }
 
-const HAS_CHECKLIST = new Set(['equipment_cleaning', 'area_cleaning', 'general_log']);
+const HAS_CHECKLIST = new Set(['equipment_cleaning', 'area_cleaning', 'general_log', 'change_over']);
 
 // Where the entry stands: the activity end (null while a use or repair is open) and whether it
 // continues an entry made before S9, which need not carry the S9 breakdown fields (D-25).
@@ -216,6 +241,18 @@ export function checkData(
       if (data.outOfLimit && (!String(data.comment ?? '').trim() || !String(data.deviationRef ?? '').trim())) {
         problems.push(`Reading outside ${point.min}–${point.max} ${point.unit}: give a comment and a deviation reference.`);
       }
+    }
+  }
+  if (type === 'requalification') {
+    const day = activityStart.toLocaleDateString('en-CA', { timeZone: process.env.DISPLAY_TZ ?? 'Asia/Kolkata' });
+    if (data.source === 'protocol' && !String(data.protocolNumber ?? '').trim()) problems.push('Choose the requalification protocol.');
+    if (data.source === 'manual') {
+      if (!String(data.reportRef ?? '').trim()) problems.push('Give the requalification report number.');
+      if (data.doneBy === 'vendor' && !String(data.vendorName ?? '').trim()) problems.push('Give the vendor name.');
+    }
+    if (data.nextDue && String(data.nextDue) <= day) problems.push('The next requalification due date must be after this requalification.');
+    if (data.outcome === 'fail' && (!String(data.comment ?? '').trim() || !String(data.deviationRef ?? '').trim())) {
+      problems.push('A failed requalification needs a comment and a deviation reference.');
     }
   }
   if (type === 'area_cleaning' && equipment.classified) {

@@ -8,7 +8,7 @@ export const PLANT_TZ = process.env.DISPLAY_TZ ?? 'Asia/Kolkata';
 // Equipment and area status (LB-05–08), computed from the latest entry versions. Nothing is stored:
 // the log is the single source of truth.
 
-export type StatusCode = 'in_use' | 'dirty' | 'dirty_expired' | 'clean' | 'clean_expired' | 'cleaning_due' | 'pm_overdue' | 'requalification_overdue' | 'not_qualified' | 'out_of_service' | 'calibration_overdue' | 'calibration_failed' | 'not_calibrated' | 'available';
+export type StatusCode = 'in_use' | 'in_change_over' | 'dirty' | 'dirty_expired' | 'clean' | 'clean_expired' | 'cleaning_due' | 'pm_overdue' | 'requalification_overdue' | 'not_qualified' | 'out_of_service' | 'calibration_overdue' | 'calibration_failed' | 'not_calibrated' | 'available';
 
 export interface EquipmentStatus {
   equipmentId: number;
@@ -62,6 +62,13 @@ export function deadline(kind: CleaningDeadline['kind'], from: Date, hours: numb
 const plantTime = (d: Date) => d.toLocaleString('sv-SE', { timeZone: PLANT_TZ }).slice(0, 16);
 const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 const plantDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: PLANT_TZ });
+const addMonths = (date: string, months: number) => {
+  const d = new Date(`${date}T00:00:00Z`);
+  const day = d.getUTCDate();
+  d.setUTCMonth(d.getUTCMonth() + months);
+  if (d.getUTCDate() < day) d.setUTCDate(0);
+  return d.toISOString().slice(0, 10);
+};
 function dueOf(kind: Due['kind'], due: string, today: string, frequency: string): Due {
   return { kind, due, frequency, overdue: due < today, soon: due >= today && due <= addDays(today, DUES_WARN_DAYS) };
 }
@@ -88,6 +95,10 @@ interface Facts {
   hasQual: boolean;
   last_pm_end: Date | null;
   last_cal_pass_at: Date | null;
+  open_change_over_since: Date | null;
+  // The latest verified requalification written in the Logbook (owner 2026-11-12): its date and next due date.
+  last_requal_at: Date | null;
+  last_requal_due: string | null;
   tracks_cleaning: boolean;
   open_use_id: number | null;
   open_use_product: number | null;
@@ -149,6 +160,8 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
          and l.data->>'kind' = 'preventive') as last_pm_end,
       (select max(coalesce(l.activity_end, l.activity_start)) from latest l where l.equipment_id = q.id and l.verified
          and l.logbook_type = 'calibration' and l.data->>'result' = 'pass') as last_cal_pass_at,
+      (select max(l.activity_start) from latest l where l.equipment_id = q.id and l.logbook_type = 'change_over' and l.activity_end is null) as open_change_over_since,
+      rq.at as last_requal_at, rq.due as last_requal_due,
       coalesce((select en.on from enabled en
                 where en.logbook_type = case when q.kind = 'area' then 'area_cleaning' else 'equipment_cleaning' end), false) as tracks_cleaning,
       coalesce((select en.on from enabled en where en.logbook_type = 'calibration'), false) as calibrations_enabled,
@@ -206,6 +219,11 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
     left join lateral (
       select l.* from latest l where l.equipment_id = q.id and l.logbook_type = 'calibration' order by l.activity_start desc limit 1
     ) c on true
+    left join lateral (
+      select coalesce(l.activity_end, l.activity_start) as at, nullif(l.data->>'nextDue', '') as due from latest l
+      where l.equipment_id = q.id and l.logbook_type = 'requalification' and l.verified and l.data->>'outcome' <> 'fail'
+      order by coalesce(l.activity_end, l.activity_start) desc limit 1
+    ) rq on true
     left join lateral (
       select l.* from latest l where l.equipment_id = q.id and l.logbook_type = 'calibration' and l.verified
       order by l.activity_start desc limit 1
@@ -337,6 +355,14 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   if (calibrationDue && (c.calibrationFrequencyDays || f.care.needsCalibration)) {
     dues.push(dueOf('calibration', calibrationDue, f.today, c.calibrationFrequencyDays ? `every ${c.calibrationFrequencyDays} days` : 'per certificate'));
   }
+  // A requalification written in the Logbook gives the due date where the Qualification product has none.
+  const requalDue = f.qual?.nextReviewDue ?? f.last_requal_due
+    ?? (f.last_requal_at && c.requalificationFrequencyMonths ? addMonths(plantDate(f.last_requal_at), c.requalificationFrequencyMonths) : null);
+  if (requalDue && !f.qual?.nextReviewDue) {
+    const d = dueOf('requalification', requalDue, f.today, c.requalificationFrequencyMonths ? `every ${c.requalificationFrequencyMonths} months` : 'per requalification report');
+    dues.push(d);
+    if (d.overdue) { blockers.push(`Requalification overdue since ${d.due}: requalify before use.`); duesState ??= 'requalification_overdue'; }
+  }
   if (f.qual) {
     if (f.qual.nextReviewDue) {
       const d = dueOf('requalification', f.qual.nextReviewDue, f.today,
@@ -350,6 +376,8 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     }
   }
 
+  // Owner 2026-11-12: one activity at a time; a change over in progress occupies the item like a use.
+  if (f.open_change_over_since) blockers.push(`Change over in progress since ${plantTime(f.open_change_over_since)}: end it first.`);
   // LB-08: the item in use shows what is in it.
   if (f.open_use_id) blockers.push('In use: end the current use first.');
   // Cycles are stopped by everything except the cleaning status (review S6-1: including use).
@@ -357,6 +385,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
 
   const state: StatusCode = f.open_use_id
     ? 'in_use'
+    : f.open_change_over_since ? 'in_change_over'
     : f.open_breakdowns > 0 || (f.failed_steriliser_tests?.length ?? 0) > 0 || (f.failed_glove_ports?.length ?? 0) > 0
       ? 'out_of_service'
       : (calState ?? duesState ?? cleanState ?? 'available');
