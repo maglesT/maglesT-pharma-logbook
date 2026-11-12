@@ -5,7 +5,7 @@ import { canonical } from './signatures.js';
 
 const LABEL: Record<string, string> = {
   code: 'ID', name: 'Name', kind: 'Type', location: 'Location', sterile: 'Sterile', classified: 'Classified room',
-  cleanHoldHours: 'Clean-hold (hours)', needsCalibration: 'Needs calibration', active: 'Active',
+  cleanHoldHours: 'Clean-hold (hours)', dirtyHoldHours: 'Dirty-hold (hours)', cleaningFrequencyHours: 'Cleaning frequency (hours)', cleaningBasis: 'Room cleaning', needsCalibration: 'Needs calibration', active: 'Active',
   assetNumber: 'Asset no.', manufacturer: 'Manufacturer', model: 'Model', serialNumber: 'Serial no.', capacity: 'Capacity',
   installationDate: 'Installed', supplier: 'Supplier', qualificationStatus: 'Qualification', iq: 'IQ', oq: 'OQ', pq: 'PQ',
   lastRequalification: 'Last requalification', productContactMoc: 'Product contact / MOC', sopRefs: 'SOPs',

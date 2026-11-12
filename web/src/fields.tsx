@@ -13,7 +13,7 @@ export const LABELS: Record<string, string> = {
 };
 // Master data, users and settings, as named in the audit trail.
 Object.assign(LABELS, {
-  code: 'ID', name: 'Name', location: 'Location', sterile: 'Sterile', classified: 'Classified room', cleanHoldHours: 'Clean-hold (hours)',
+  code: 'ID', name: 'Name', location: 'Location', sterile: 'Sterile', classified: 'Classified room', cleanHoldHours: 'Clean-hold (hours)', dirtyHoldHours: 'Dirty-hold (hours)', cleaningFrequencyHours: 'Cleaning frequency (hours)', cleaningBasis: 'Room cleaning',
   needsCalibration: 'Needs calibration', active: 'Active', assetNumber: 'Asset no.', manufacturer: 'Manufacturer', model: 'Model',
   serialNumber: 'Serial no.', capacity: 'Capacity', installationDate: 'Installed', supplier: 'Supplier', qualificationStatus: 'Qualification',
   iq: 'IQ', oq: 'OQ', pq: 'PQ', lastRequalification: 'Last requalification', productContactMoc: 'Product contact / MOC', sopRefs: 'SOPs',

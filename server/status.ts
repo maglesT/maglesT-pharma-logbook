@@ -6,7 +6,7 @@ export const PLANT_TZ = process.env.DISPLAY_TZ ?? 'Asia/Kolkata';
 // Equipment and area status (LB-05–08), computed from the latest entry versions. Nothing is stored:
 // the log is the single source of truth.
 
-export type StatusCode = 'in_use' | 'dirty' | 'clean' | 'clean_expired' | 'out_of_service' | 'calibration_overdue' | 'calibration_failed' | 'not_calibrated' | 'available';
+export type StatusCode = 'in_use' | 'dirty' | 'dirty_expired' | 'clean' | 'clean_expired' | 'cleaning_due' | 'out_of_service' | 'calibration_overdue' | 'calibration_failed' | 'not_calibrated' | 'available';
 
 export interface EquipmentStatus {
   equipmentId: number;
@@ -23,12 +23,39 @@ export interface EquipmentStatus {
   cleanUntil: Date | null;
   // Plant-local date (YYYY-MM-DD).
   calibrationDue: string | null;
+  // S16: how the item's cleaning is scheduled, and the next cleaning deadline (dirty hold, clean hold or frequency).
+  schedule: 'hold' | 'frequency' | null;
+  dirtyUntil: Date | null;
+  deadline: CleaningDeadline | null;
 }
+
+// S16: the next time by which the item must be cleaned. soon: within the warning window (a quarter of the hold or
+// frequency, at least 1 hour); overdue: the time has passed.
+export interface CleaningDeadline {
+  kind: 'dirty_hold' | 'clean_hold' | 'frequency';
+  at: Date;
+  hours: number;
+  soon: boolean;
+  overdue: boolean;
+}
+
+export const WARN_FRACTION = 0.25;
+export const WARN_MIN_HOURS = 1;
+export function deadline(kind: CleaningDeadline['kind'], from: Date, hours: number, now: number): CleaningDeadline {
+  const at = new Date(from.getTime() + hours * 3_600_000);
+  const left = at.getTime() - now;
+  const window = Math.max(WARN_MIN_HOURS, hours * WARN_FRACTION) * 3_600_000;
+  return { kind, at, hours, overdue: left < 0, soon: left >= 0 && left <= window };
+}
+const plantTime = (d: Date) => d.toLocaleString('sv-SE', { timeZone: PLANT_TZ }).slice(0, 16);
 
 interface Facts {
   id: number;
   kind: 'equipment' | 'instrument' | 'area';
   clean_hold_hours: number | null;
+  dirty_hold_hours: number | null;
+  cleaning_basis: 'operation' | 'frequency' | null;
+  cleaning_frequency_hours: number | null;
   needs_calibration: boolean;
   tracks_cleaning: boolean;
   open_use_id: number | null;
@@ -86,7 +113,7 @@ async function facts(q: Sql | Tx, ids: number[] | null): Promise<Facts[]> {
       from latest where logbook_type = 'equipment_use' and activity_end is not null
       order by equipment_id, activity_end desc
     )
-    select q.id::int, q.kind, q.clean_hold_hours, q.needs_calibration,
+    select q.id::int, q.kind, q.clean_hold_hours, q.dirty_hold_hours, q.cleaning_basis, q.cleaning_frequency_hours, q.needs_calibration,
       coalesce((select en.on from enabled en
                 where en.logbook_type = case when q.kind = 'area' then 'area_cleaning' else 'equipment_cleaning' end), false) as tracks_cleaning,
       coalesce((select en.on from enabled en where en.logbook_type = 'calibration'), false) as calibrations_enabled,
@@ -207,28 +234,56 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   if (f.last_cycle_result === 'fail') warnings.push('The last sterilisation cycle failed: see its deviation.');
   for (const point of f.pressure_out_of_limit ?? []) warnings.push(`Last pressure reading out of limits: ${point}.`);
 
-  // LB-07: cleaning status, where the site tracks cleaning for this kind of item.
+  // LB-07: cleaning status, where the site tracks cleaning for this kind of item. S16: a frequency-based room is due
+  // its cleaning every cleaning_frequency_hours; everything else is cleaned after use, within its dirty hold, and
+  // stays clean for its clean hold.
   let cleanUntil: Date | null = null;
+  let dirtyUntil: Date | null = null;
+  let due: CleaningDeadline | null = null;
   let cleanState: StatusCode | null = null;
+  const schedule: EquipmentStatus['schedule'] = !f.tracks_cleaning ? null
+    : f.kind === 'area' && f.cleaning_basis === 'frequency' && f.cleaning_frequency_hours ? 'frequency' : 'hold';
   if (f.tracks_cleaning && !f.open_use_id) {
     // The query only returns cleanings that followed the last use.
     const cleanedAfterUse = Boolean(f.last_clean_end);
     if (!cleanedAfterUse) {
-      blockers.push(f.unverified_cleanings > 0 ? 'Dirty: the cleaning is awaiting verification.' : 'Dirty: clean and verify before the next use.');
       cleanState = 'dirty';
+      if (schedule === 'hold' && f.dirty_hold_hours && f.last_use_end) {
+        due = deadline('dirty_hold', f.last_use_end, f.dirty_hold_hours, now);
+        dirtyUntil = due.at;
+        if (due.overdue) cleanState = 'dirty_expired';
+      }
+      blockers.push(f.unverified_cleanings > 0 ? 'Dirty: the cleaning is awaiting verification.'
+        : cleanState === 'dirty_expired' ? `Dirty-hold time expired at ${plantTime(dirtyUntil!)}: the cleaning is late; clean, verify and record why.`
+          : 'Dirty: clean and verify before the next use.');
+      if (due?.soon) warnings.push(`Dirty hold ends at ${plantTime(due.at)}: clean before then.`);
+    } else if (schedule === 'frequency') {
+      due = deadline('frequency', f.last_clean_end!, f.cleaning_frequency_hours!, now);
+      cleanUntil = due.at;
+      if (due.overdue) {
+        blockers.push(`Cleaning overdue since ${plantTime(due.at)} (every ${f.cleaning_frequency_hours} h): clean and verify.`);
+        cleanState = 'cleaning_due';
+      } else {
+        cleanState = 'clean';
+        if (due.soon) warnings.push(`Next cleaning due at ${plantTime(due.at)}.`);
+      }
     } else if (f.clean_hold_hours) {
-      cleanUntil = new Date(f.last_clean_end!.getTime() + f.clean_hold_hours * 3_600_000);
-      if (cleanUntil.getTime() < now) {
-        blockers.push(`Clean-hold time expired at ${cleanUntil.toISOString().slice(0, 16).replace('T', ' ')} UTC: clean again before use.`);
+      due = deadline('clean_hold', f.last_clean_end!, f.clean_hold_hours, now);
+      cleanUntil = due.at;
+      if (due.overdue) {
+        blockers.push(`Clean-hold time expired at ${plantTime(cleanUntil)}: clean again before use.`);
         cleanState = 'clean_expired';
-      } else cleanState = 'clean';
+      } else {
+        cleanState = 'clean';
+        if (due.soon) warnings.push(`Clean hold ends at ${plantTime(cleanUntil)}: use or clean again before then.`);
+      }
     } else cleanState = 'clean';
   }
 
   // LB-08: the item in use shows what is in it.
   if (f.open_use_id) blockers.push('In use: end the current use first.');
   // Cycles are stopped by everything except the cleaning status (review S6-1: including use).
-  const cycleBlockers = blockers.filter((b) => !/^(Dirty|Clean-hold)/.test(b));
+  const cycleBlockers = blockers.filter((b) => !/^(Dirty|Clean-hold|Cleaning overdue)/.test(b));
 
   const state: StatusCode = f.open_use_id
     ? 'in_use'
@@ -249,6 +304,9 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     hasPassedSterilizerTest: f.has_passed_steriliser_test,
     cleanUntil,
     calibrationDue,
+    schedule,
+    dirtyUntil,
+    deadline: due,
   };
 }
 
