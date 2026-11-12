@@ -40,6 +40,10 @@ test('LB-06: PM due within 15 days shows in Dues and in the sign-in banner; scan
   await expect(banner).toContainText(`${item.code} · Preventive maintenance due`);
   const dues = page.getByRole('region', { name: 'Dues' });
   await expect(dues.locator('.due-card').filter({ hasText: item.code })).toContainText('in 10 days');
+  // Owner 2026-11-12: the graph has its own row for PM due (and change over, breakdown, requalification needed).
+  const legend = page.getByRole('region', { name: 'Equipment' }).locator('.legend');
+  for (const g of ['Change over', 'PM due', 'Requalification needed', 'Breakdown']) await expect(legend).toContainText(g);
+  await expect(legend.getByRole('button', { name: /PM due/ })).toBeEnabled();
   await page.screenshot({ path: 'test-results/redesign-home.png', fullPage: true });
   await page.getByLabel('Scan or type the item ID').fill(item.code.toLowerCase());
   await page.getByLabel('Scan or type the item ID').press('Enter');
