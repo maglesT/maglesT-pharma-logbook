@@ -91,6 +91,11 @@ export function cleaningText(c: Care & { kind: Equipment['kind'] }): string {
   return c.kind === 'area' ? `${text} (operation-based room)` : text;
 }
 
+// Owner 2026-11-12: a batch from the batch records (Batchwright), with the Logbook's product for its product code.
+export interface BatchChoice {
+  batchNumber: string; productCode: string; strength: string | null; status: string; issuedAt: string | null; completedAt: string | null;
+  released: boolean; inProduction: boolean; productId: number | null; productName: string | null; onThisItem: boolean;
+}
 export interface Product {
   id: number;
   code: string;

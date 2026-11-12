@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { api, ApiError, getSignProof, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
+import { api, ApiError, getSignProof, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type BatchChoice, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
 import { VoiceButton } from '../components/VoiceNote.js';
 
 type Data = Record<string, unknown>;
@@ -112,6 +112,16 @@ export function EntryForm({
   const [productId, setProductId] = useState<number | ''>(correcting?.productId ?? '');
   const [batch, setBatch] = useState(correcting?.batch ?? '');
   const [lateReason, setLateReason] = useState('');
+  // Owner 2026-11-12: batches come from the batch records (Batchwright) when the site links it; null until known.
+  const [batchList, setBatchList] = useState<{ linked: boolean; batches: BatchChoice[]; error?: string } | null>(null);
+  useEffect(() => {
+    if (type !== 'equipment_use' && type !== 'change_over') return;
+    api<{ linked: boolean; batches: BatchChoice[] }>('GET', `/api/equipment/${equipment.id}/batches`)
+      .then(setBatchList)
+      .catch((e) => setBatchList({ linked: true, batches: [], error: e instanceof Error ? e.message : String(e) }));
+  }, [type, equipment.id]);
+  const linkedBatches = batchList?.linked ? batchList.batches : null;
+  const chosen = linkedBatches?.find((b) => b.batchNumber === batch) ?? null;
   const [reason, setReason] = useState('');
   const [problems, setProblems] = useState<string[]>([]);
   // Voice-note drafts per field, with the text the field had before; signed on save (D-26).
@@ -217,7 +227,21 @@ export function EntryForm({
         <h2>{completing ? 'Complete repair' : correcting ? 'Correct' : 'New'}: {TYPE_LABEL[type]} · {equipment.code}</h2>
         {settings.sopRef && <p className="muted">SOP {settings.sopRef}</p>}
 
-        {type === 'equipment_use' && (
+        {batchList?.error && <p className="error" role="alert">{batchList.error}</p>}
+        {type === 'equipment_use' && linkedBatches && (
+          <>
+            <BatchSelect label="Batch (from the batch records)" value={batch} onChange={setBatch} batches={linkedBatches} inProductionOnly />
+            <p className="muted batch-product">Product: <strong>{chosen ? (chosen.productName ? `${chosen.productCode} · ${chosen.productName}` : chosen.productCode) : '—'}</strong>
+              {chosen && ` · ${chosen.strength ?? ''} · ${chosen.status.replaceAll('_', ' ').toLowerCase()}`}</p>
+          </>
+        )}
+        {type === 'change_over' && linkedBatches && (
+          <>
+            <BatchSelect label="From batch" value={String(data.fromBatch ?? '')} onChange={(v) => set('fromBatch', v)} batches={linkedBatches} />
+            <BatchSelect label="To batch" value={String(data.toBatch ?? '')} onChange={(v) => set('toBatch', v)} batches={linkedBatches} inProductionOnly />
+          </>
+        )}
+        {type === 'equipment_use' && batchList && !batchList.linked && (
           <>
             <label>
               Product
@@ -279,7 +303,7 @@ export function EntryForm({
             ))}
           </fieldset>
         )}
-        {(TEXT_FIELDS[type] ?? []).map(([k, label, long]) =>
+        {(TEXT_FIELDS[type] ?? []).filter(([k]) => !(linkedBatches && type === 'change_over' && ['fromProduct', 'fromBatch', 'toProduct', 'toBatch'].includes(k))).map(([k, label, long]) =>
           type === 'maintenance' && k === 'impactAssessment' && !equipment.sterile ? null : (
             <Fragment key={k}>
               <label>
@@ -492,5 +516,27 @@ function RequalificationFields({ data, setData, equipment }: { data: Data; setDa
         </>
       )}
     </>
+  );
+}
+
+// Owner 2026-11-12: a batch is chosen from the batch records; batches using this item come first.
+function BatchSelect({ label, value, onChange, batches, inProductionOnly = false }: {
+  label: string; value: string; onChange: (v: string) => void; batches: BatchChoice[]; inProductionOnly?: boolean;
+}) {
+  const shown = batches.filter((b) => !inProductionOnly || b.inProduction);
+  const text = (b: BatchChoice) => `${b.batchNumber} · ${b.productCode}${b.strength ? ` ${b.strength}` : ''} · ${b.status.replaceAll('_', ' ').toLowerCase()}`
+    + (b.productId === null ? ' (product not in master data)' : '');
+  const group = (title: string, list: BatchChoice[]) => list.length > 0 && (
+    <optgroup label={title}>{list.map((b) => <option key={b.batchNumber} value={b.batchNumber} disabled={b.productId === null && inProductionOnly}>{text(b)}</option>)}</optgroup>
+  );
+  return (
+    <label>
+      {label}
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{shown.length ? 'Choose the batch…' : 'No batch in production in the batch records'}</option>
+        {group('Batches using this item', shown.filter((b) => b.onThisItem))}
+        {group(inProductionOnly ? 'Other batches in production' : 'Other batches', shown.filter((b) => !b.onThisItem))}
+      </select>
+    </label>
   );
 }

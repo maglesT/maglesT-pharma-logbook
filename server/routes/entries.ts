@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
+import { batchWithProduct } from './batches.js';
 import { parseId, requirePermission, type SessionUser } from '../auth.js';
 import { LOGBOOK_TYPES, typeByKey, type LogbookSettings } from '../logbook-types.js';
 import { DATA_SCHEMAS, REPORTED_FIELDS, checkData, correctCodes, mayCorrect, mayRecord, recordCode, performerSigns, verificationNeeded, type EntryContext, type EquipmentInfo } from '../entries.js';
@@ -347,6 +348,25 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           throw new EntryError(409, 'not_fit_for_use', ['No verified passed steriliser test on record: test the steriliser first.']);
         }
         if (b.logbookType === 'equipment_cleaning' || b.logbookType === 'area_cleaning') cleaningFits(status, b.activityStart);
+        // Owner 2026-11-12: with Batchwright linked, the batch is one of its batch records and the product is the batch's.
+        if (app.batches && isUse) {
+          if (!b.batch) throw new EntryError(400, 'check_failed', ['Choose the batch from the batch records.']);
+          const found = await batchWithProduct(tx, app, b.batch);
+          if (!found) throw new EntryError(400, 'check_failed', [`Batch ${b.batch} is not in the batch records (Batchwright).`]);
+          if (!found.batch.inProduction) throw new EntryError(409, 'check_failed', [`Batch ${b.batch} is not in production in Batchwright (${found.batch.status}).`]);
+          if (!found.productId) throw new EntryError(409, 'check_failed', [`The product ${found.batch.productCode} of batch ${b.batch} is not in master data: ask your master data editor.`]);
+          b.productId = found.productId;
+        }
+        if (app.batches && b.logbookType === 'change_over') {
+          for (const [k, product, must] of [['fromBatch', 'fromProduct', false], ['toBatch', 'toProduct', true]] as const) {
+            const n = String(b.data[k] ?? '').trim();
+            if (!n) continue;
+            const found = await batchWithProduct(tx, app, n);
+            if (!found) throw new EntryError(400, 'check_failed', [`Batch ${n} is not in the batch records (Batchwright).`]);
+            if (must && !found.batch.inProduction) throw new EntryError(409, 'check_failed', [`Batch ${n} is not in production in Batchwright (${found.batch.status}).`]);
+            b.data[product] = found.productLabel;
+          }
+        }
         if (isUse && (!b.productId || !b.batch)) throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
         if (isUse && b.activityEnd) throw new EntryError(400, 'check_failed', ['Record the end of use when it happens.']);
         // A breakdown may be reported before its repair has ended (D-25); a change over may be started and ended later
@@ -483,6 +503,12 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (prev.activity_end !== null) await oneActivityAtATime(tx, prev.equipment_id, prev.logbook_type, (b.data ?? prev.data) as Record<string, unknown>, b.activityStart, end, prev.entry_id, false);
         if (prev.logbook_type === 'equipment_use' && (b.productId === null || b.batch === null)) {
           throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
+        }
+        if (app.batches && prev.logbook_type === 'equipment_use' && b.batch && b.batch !== prev.batch) {
+          const found = await batchWithProduct(tx, app, b.batch);
+          if (!found) throw new EntryError(400, 'check_failed', [`Batch ${b.batch} is not in the batch records (Batchwright).`]);
+          if (!found.productId) throw new EntryError(409, 'check_failed', [`The product ${found.batch.productCode} of batch ${b.batch} is not in master data: ask your master data editor.`]);
+          b.productId = found.productId;
         }
         if (b.productId && b.productId !== prev.product_id) await activeProduct(tx, app.master, b.productId);
         const now = await dbNow(tx);
