@@ -10,6 +10,7 @@ export const PERMISSIONS = {
   'logbook.entry.record_general': 'Record general log entries',
   'logbook.entry.record_maintenance': 'Record maintenance and breakdowns, complete repairs',
   'logbook.entry.record_calibration': 'Record calibrations',
+  'logbook.entry.record_requalification': 'Record requalifications',
   'logbook.entry.record_sterile': 'Record steriliser cycles, glove tests and pressure readings',
   'logbook.entry.record_steriliser_test': 'Record steriliser tests (leak, air removal)',
   'logbook.entry.correct_others': 'Correct entries made by others',
@@ -35,7 +36,7 @@ const OPERATOR: Permission[] = ['logbook.entry.record_use', 'logbook.entry.recor
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   operator: OPERATOR,
   supervisor: [...OPERATOR, 'logbook.entry.correct_others', 'logbook.entry.verify', 'logbook.review.read'],
-  engineering: ['logbook.entry.record_general', 'logbook.entry.record_maintenance', 'logbook.entry.record_calibration',
+  engineering: ['logbook.entry.record_general', 'logbook.entry.record_maintenance', 'logbook.entry.record_calibration', 'logbook.entry.record_requalification',
     'logbook.entry.record_steriliser_test', 'logbook.voice_note.record', 'logbook.advice.ask'],
   qa: ['logbook.entry.verify', 'logbook.breakdown.release', 'logbook.review.read', 'logbook.review.sign', 'logbook.audit.read',
     'logbook.settings.approve', 'logbook.advice.ask'],

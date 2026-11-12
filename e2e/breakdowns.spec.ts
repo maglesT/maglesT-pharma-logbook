@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { apiAs, proofOf, cleanVerified, localTime, logIn, logOut, newEquipment, openLogbook, post, sign, statusBar } from './helpers.js';
+import { apiAs, proofOf, cleanVerified, localTime, logIn, logOut, newEquipment, openLogbook, post, sign, statusBar, newEntry } from './helpers.js';
 
 test('LB-06: a breakdown with parts is verified and released, then shows in the register with its downtime and on the history card', async ({ page }) => {
   const { id, code } = await newEquipment({ name: 'Fluid bed dryer', location: 'Granulation' });
@@ -8,7 +8,7 @@ test('LB-06: a breakdown with parts is verified and released, then shows in the 
   // The engineer records the breakdown and the repair, with the parts used.
   await logIn(page, 'eng1');
   await openLogbook(page, code);
-  await page.getByRole('button', { name: '+ Maintenance / breakdown' }).click();
+  await newEntry(page, 'Breakdown');
   const form = page.getByRole('dialog');
   await form.getByLabel('Type').selectOption('breakdown');
   await form.getByLabel('Breakdown occurred at').fill(await localTime(page, 90));
@@ -79,7 +79,7 @@ test('LB-06: a breakdown reported while the repair is open is completed later, s
 
   await logIn(page, 'op1');
   await openLogbook(page, code);
-  await page.getByRole('button', { name: '+ Maintenance / breakdown' }).click();
+  await newEntry(page, 'Breakdown');
   const form = page.getByRole('dialog');
   await form.getByLabel('Type').selectOption('breakdown');
   await form.getByLabel('Failure category').selectOption('electrical');

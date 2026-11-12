@@ -4,7 +4,7 @@ import { migrate } from '../db/migrate.js';
 import { buildApp, type AppOptions } from '../server/app.js';
 import type { Identity, SignOn } from '../server/signon.js';
 import { MEANINGS, makeProof } from '../server/signatures.js';
-import { ConnectionOff, logbookItems, logbookProducts, type Kind, type Master, type MasterItem, type MasterProduct } from '../server/master.js';
+import { addToLogbook, ConnectionOff, logbookProducts, NO_CARE, type Care, type Kind, type Master, type MasterItem, type MasterProduct } from '../server/master.js';
 import { randomUUID } from 'node:crypto';
 import { permissionsOf, type Role } from '../server/auth.js';
 
@@ -61,20 +61,20 @@ export function fakeMaster(): FakeMaster {
   return m;
 }
 
-export interface ItemBody {
+export interface ItemBody extends Partial<Care> {
   code: string; name?: string; kind?: Kind; location?: string; make?: string; model?: string; serial?: string;
-  sterile?: boolean; classified?: boolean; cleanHoldHours?: number | null; needsCalibration?: boolean;
+  sterile?: boolean; classified?: boolean; needsCalibration?: boolean;
 }
-// Adds an item to master data as core would, and gives it its Logbook settings; returns its local id.
+// Adds an item to master data as core would (with its parameters, platform D-24), then to the Logbook; returns its local id.
 export async function addItem(t: TestApp, b: ItemBody): Promise<number> {
   const kind = b.kind ?? 'equipment';
-  t.master.items_.set(b.code, { itemId: randomUUID(), code: b.code, name: b.name ?? `Item ${b.code}`, version: 1, active: true, kind,
+  const care: Care = { ...NO_CARE, cleaningBasis: kind === 'area' ? 'operation' : null };
+  for (const k of Object.keys(NO_CARE) as (keyof Care)[]) if (b[k] !== undefined) (care as unknown as Record<string, unknown>)[k] = b[k];
+  const m: MasterItem = { itemId: randomUUID(), code: b.code, name: b.name ?? `Item ${b.code}`, version: 1, active: true, kind,
     room: kind === 'area' ? null : (b.location || null), make: b.make ?? null, model: b.model ?? null, serial: b.serial ?? null,
-    needsCalibration: kind === 'instrument' });
-  const item = (await logbookItems(t.sql, t.master)).find((i) => i.code === b.code)!;
-  await t.owner`update equipment set sterile = ${b.sterile ?? false}, classified = ${b.classified ?? false},
-    clean_hold_hours = ${b.cleanHoldHours ?? null}, needs_calibration = ${b.needsCalibration ?? kind === 'instrument'} where id = ${item.id}`;
-  return item.id;
+    needsCalibration: b.needsCalibration ?? kind === 'instrument', care };
+  t.master.items_.set(b.code, m);
+  return (await addToLogbook(t.sql, m, { sterile: b.sterile ?? false, classified: b.classified ?? false }))!;
 }
 // Changes an item in master data (a new version), e.g. a rename or retirement.
 export function changeItem(t: TestApp, code: string, change: Partial<Pick<MasterItem, 'name' | 'active' | 'room'>>) {
@@ -120,7 +120,7 @@ export function proofFor(username: string, at?: number, meanings: string[] = [..
 }
 export const sig = (username: string) => ({ proof: proofFor(username) });
 
-export async function freshApp(opts: Pick<AppOptions, 'speech' | 'advisor'> = {}): Promise<TestApp> {
+export async function freshApp(opts: Pick<AppOptions, 'speech' | 'advisor' | 'qualification'> = {}): Promise<TestApp> {
   const db = await freshDb();
   const master = fakeMaster();
   const app = await buildApp({ sql: db.sql, signOn: fakeSignOn(), proofKey: TEST_PROOF_KEY, master, webRoot: '/nonexistent', ...opts });

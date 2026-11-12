@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, can, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
+import { api, cleaningText, daysLeft, type Due, can, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
@@ -8,13 +8,32 @@ import { VoiceNoteDialog } from '../components/VoiceNote.js';
 import { AdviceDialog } from '../components/AdviceDialog.js';
 import { Fields } from '../fields.js';
 
-const CORE_TYPES = ['equipment_use', 'equipment_cleaning', 'maintenance', 'calibration', 'area_cleaning', 'general_log',
+const CORE_TYPES = ['equipment_use', 'equipment_cleaning', 'change_over', 'maintenance', 'calibration', 'requalification', 'area_cleaning', 'general_log',
   'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading'];
+// Owner 2026-11-12 (slide 3): one "New entry" with an Activity dropdown. Breakdown and preventive maintenance are both
+// the maintenance logbook, opened with the kind chosen.
+const ACTIVITIES: { key: string; label: string; type: string; preset?: Record<string, unknown> }[] = [
+  { key: 'operation', label: 'Operation (use)', type: 'equipment_use' },
+  { key: 'cleaning', label: 'Cleaning', type: 'equipment_cleaning' },
+  { key: 'area_cleaning', label: 'Cleaning', type: 'area_cleaning' },
+  { key: 'change_over', label: 'Change over', type: 'change_over' },
+  { key: 'breakdown', label: 'Breakdown', type: 'maintenance', preset: { kind: 'breakdown' } },
+  { key: 'pm', label: 'Preventive maintenance', type: 'maintenance', preset: { kind: 'preventive' } },
+  { key: 'calibration', label: 'Calibration', type: 'calibration' },
+  { key: 'requalification', label: 'Requalification', type: 'requalification' },
+  { key: 'others', label: 'Others (general log)', type: 'general_log' },
+  { key: 'steriliser_cycle', label: 'Sterilisation cycle', type: 'steriliser_cycle' },
+  { key: 'steriliser_test', label: 'Steriliser test', type: 'steriliser_test' },
+  { key: 'glove_integrity', label: 'Glove integrity', type: 'glove_integrity' },
+  { key: 'pressure_reading', label: 'Pressure reading', type: 'pressure_reading' },
+];
 const STERILE_TYPES = new Set(['steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading']);
 const APPLIES: Record<string, Equipment['kind'][]> = {
   equipment_use: ['equipment', 'instrument', 'area'],
   equipment_cleaning: ['equipment', 'instrument'],
   maintenance: ['equipment', 'instrument', 'area'],
+  change_over: ['equipment', 'instrument', 'area'],
+  requalification: ['equipment', 'instrument', 'area'],
   calibration: ['equipment', 'instrument'],
   area_cleaning: ['area'],
   general_log: ['equipment', 'instrument', 'area'],
@@ -63,7 +82,8 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
   const [entries, setEntries] = useState<Entry[]>([]);
   const [types, setTypes] = useState<LogbookTypeInfo[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [form, setForm] = useState<{ type: string; correcting?: Entry; completing?: Entry } | null>(null);
+  const [form, setForm] = useState<{ type: string; correcting?: Entry; completing?: Entry; preset?: Record<string, unknown> } | null>(null);
+  const [activity, setActivity] = useState('');
   const [tab, setTab] = useState<'log' | 'history'>('log');
   const [verifying, setVerifying] = useState<Entry | null>(null);
   const [releasing, setReleasing] = useState<Entry | null>(null);
@@ -99,6 +119,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
   // Only what the server accepts from this user: only the types this person's codes record (S11).
   const mayRecord = (k: string) => types.find((t) => t.key === k)?.mayRecord ?? false;
   const available = switchedOn.filter(mayRecord);
+  const activities = ACTIVITIES.filter((a) => available.includes(a.type));
   const productName = (id: number | null) => products.find((p) => p.id === id)?.code ?? '';
   const isVerifier = can(me, 'entry.verify');
 
@@ -123,7 +144,9 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
       <button className="link dark" onClick={onBack}>← All equipment</button>
       <h1>{equipment.code} · {equipment.name}</h1>
       <p className="muted">
-        {equipment.location} {equipment.sterile && '· Sterile'} {equipment.classified && '· Classified room'} {equipment.cleanHoldHours && `· Clean-hold ${equipment.cleanHoldHours} h`}
+        {equipment.location} {equipment.sterile && '· Sterile'} {equipment.classified && '· Classified room'} · Cleaning: {cleaningText(equipment)}
+        {equipment.pmFrequencyDays ? ` · PM every ${equipment.pmFrequencyDays} days` : ''}{equipment.calibrationFrequencyDays ? ` · calibration every ${equipment.calibrationFrequencyDays} days` : ''}
+        {equipment.requalificationFrequencyMonths ? ` · requalification every ${equipment.requalificationFrequencyMonths} months` : ''}
       </p>
       {status && (
         <div className={`statusbar ${status.blockers.length ? 'blocked' : 'fit'}`}>
@@ -134,6 +157,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
           {[...status.blockers, ...status.warnings].map((b) => <span key={b} className="reason">{b}</span>)}
         </div>
       )}
+      {status && <UseCheck status={status} />}
       <div className="subtabs">
         <button className={tab === 'log' ? 'on' : ''} onClick={() => setTab('log')}>Logbook</button>
         <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>History card</button>
@@ -141,7 +165,17 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
       {tab === 'history' && <HistoryCard me={me} equipment={equipment} />}
       {tab === 'log' && <>
       <div className="row">
-        {available.map((k) => <button key={k} className="primary" onClick={() => setForm({ type: k })}>+ {TYPE_LABEL[k]}</button>)}
+        {activities.length > 0 && (
+          <form className="new-entry" onSubmit={(ev) => { ev.preventDefault(); const a = ACTIVITIES.find((x) => x.key === activity); if (a) setForm({ type: a.type, preset: a.preset }); }}>
+            <label>Activity
+              <select value={activity} onChange={(ev) => setActivity(ev.target.value)} aria-label="Activity">
+                <option value="">Choose the activity…</option>
+                {activities.map((a) => <option key={a.key} value={a.key}>{a.label}</option>)}
+              </select>
+            </label>
+            <button className="primary" type="submit" disabled={!activity}>+ New entry</button>
+          </form>
+        )}
         {switchedOn.length === 0 && <p className="muted">No logbook types are switched on for this item yet.</p>}
       </div>
       {error && <p className="error">{error}</p>}
@@ -175,6 +209,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
               </td>
               <td className="actions-cell">
                 {e.inProgress && e.logbookType === 'equipment_use' && <button onClick={() => endUse(e)}>End use</button>}
+                {e.inProgress && e.logbookType === 'change_over' && mayRecord('change_over') && <button onClick={() => endUse(e)}>End change over</button>}
                 {e.inProgress && e.logbookType === 'maintenance' && mayRecord('maintenance') && (
                   <button onClick={() => setForm({ type: 'maintenance', completing: e })}>Complete repair</button>
                 )}
@@ -204,6 +239,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
           products={products}
           correcting={form.correcting}
           completing={form.completing}
+          preset={form.preset}
           voice={voice}
           onCancel={() => setForm(null)}
           onDone={async () => {
@@ -279,4 +315,29 @@ export function VoiceLinks({ e, onOpen }: { e: Entry; onOpen: (id: number) => vo
 export function Summary({ e, full = false }: { e: Entry; full?: boolean }) {
   const checklist = Object.entries((e.data.checklist ?? {}) as Record<string, boolean>).filter(([, v]) => v).map(([k]) => k);
   return <Fields data={e.data} extra={full && checklist.length ? [['Checklist confirmed', checklist.join('; ')]] : []} />;
+}
+
+// Owner 2026-11-12 (slide 4): what is checked before use, when the item is scanned or opened.
+function UseCheck({ status: s }: { status: EquipmentStatus }) {
+  const due = (k: Due['kind']) => s.dues.find((d) => d.kind === k);
+  const has = (re: RegExp) => s.blockers.some((b) => re.test(b));
+  const line = (label: string, bad: boolean, warn: boolean, text: string) => (
+    <li className={bad ? 'bad' : warn ? 'warn' : 'ok'}><span aria-hidden="true">{bad ? '✕' : warn ? '!' : '✓'}</span><b>{label}</b><span>{text}</span></li>
+  );
+  const dueText = (d: Due | undefined, none: string) => (d ? `${d.overdue ? 'Overdue since' : 'Due'} ${d.due} (${daysLeft(d.due)})` : none);
+  const pm = due('pm');
+  const cal = due('calibration');
+  const rq = due('requalification');
+  const cleaningBad = has(/^(Dirty|Clean-hold|Cleaning overdue)/);
+  return (
+    <ul className="use-check" aria-label="Before use">
+      {line('Cleaning status', cleaningBad, Boolean(s.deadline?.soon), cleaningBad ? s.blockers.find((b) => /^(Dirty|Clean-hold|Cleaning overdue)/.test(b))!
+        : s.deadline ? `${s.deadline.kind === 'dirty_hold' ? 'Dirty hold ends' : s.schedule === 'frequency' ? 'Next cleaning due' : 'Clean until'} ${plantTime(s.deadline.at)}` : 'Clean')}
+      {line('Preventive maintenance', Boolean(pm?.overdue), Boolean(pm?.soon), dueText(pm, 'No PM schedule in master data'))}
+      {line('Calibration', has(/^(Calibration|Not calibrated|Re-calibration)/), Boolean(cal?.soon), has(/^(Calibration|Not calibrated|Re-calibration)/) ? s.blockers.find((b) => /^(Calibration|Not calibrated|Re-calibration)/.test(b))! : dueText(cal, 'Not calibrated in the Logbook'))}
+      {line('Requalification', Boolean(rq?.overdue) || has(/^(Not qualified|Requalification needed)/), Boolean(rq?.soon),
+        has(/^(Not qualified|Requalification needed)/) ? s.blockers.find((b) => /^(Not qualified|Requalification needed)/.test(b))! : dueText(rq, 'No requalification date'))}
+      {line('Breakdown (QA released)', has(/^Out of service/), false, has(/^Out of service/) ? 'A breakdown is not released by QA' : 'No open breakdown')}
+    </ul>
+  );
 }

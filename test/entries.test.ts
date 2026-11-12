@@ -33,11 +33,12 @@ const verify = async (who: string, versionId: number) => {
 
 // A fresh item that has been cleaned and verified, so a use may start on it (S4 blocking).
 let readyCount = 0;
+// Cleaned and verified 25 minutes ago, before the activities the tests record (one activity at a time).
 async function ready(kind: 'equipment' | 'area' = 'equipment'): Promise<number> {
   const id = (await addItem(t, { code: `RDY-${++readyCount}`, name: 'Ready item', kind })) as number;
   const cleaning = kind === 'area'
-    ? { logbookType: 'area_cleaning', activityStart: now(), data: { cleaningType: 'daily' }, signature: sig('op2') }
-    : { logbookType: 'equipment_cleaning', activityStart: now(), data: { cleaningType: 'major', checklist: { 'Previous product removed': true } }, signature: sig('op2') };
+    ? { logbookType: 'area_cleaning', activityStart: minutesAgo(25), data: { cleaningType: 'daily' }, signature: sig('op2') }
+    : { logbookType: 'equipment_cleaning', activityStart: minutesAgo(25), data: { cleaningType: 'major', checklist: { 'Previous product removed': true } }, signature: sig('op2') };
   const entry = (await create('op2', id, cleaning)).json().id;
   expect((await verify('sup1', entry)).statusCode).toBe(200);
   return id;
@@ -233,8 +234,10 @@ describe('corrections (LB-17)', () => {
   });
 
   it('LB-17: a correction voids the earlier verification, which must be redone', async () => {
-    const start = minutesAgo(3);
-    const id = (await create('op1', mixer, { logbookType: 'equipment_cleaning', activityStart: start, data: { cleaningType: 'major', checklist: { 'Previous product removed': true } }, signature: sig('op1') })).json().id;
+    const start = now();   // after the mixer's earlier cleanings (one activity at a time)
+    const made = await create('op1', mixer, { logbookType: 'equipment_cleaning', activityStart: start, data: { cleaningType: 'major', checklist: { 'Previous product removed': true } }, signature: sig('op1') });
+    expect(made.statusCode, made.body).toBe(201);
+    const id = made.json().id;
     await verify('sup1', id);
     const corrected = await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/correct`, { activityStart: start, activityEnd: start, data: { cleaningType: 'product_change', checklist: { 'Previous product removed': true } }, reason: 'Was a product change', signature: sig('op1') });
     expect(corrected.json()).toMatchObject({ id: expect.any(Number) });

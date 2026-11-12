@@ -14,7 +14,7 @@ import { buildApp } from '../server/app.js';
 import { connect, type Sql } from '../server/db.js';
 import { randomUUID } from 'node:crypto';
 import type { SignOn } from '../server/signon.js';
-import type { Kind, Master } from '../server/master.js';
+import { NO_CARE, type Care, type Kind, type Master } from '../server/master.js';
 import { randomBytes } from 'node:crypto';
 import { MEANINGS, makeProof } from '../server/signatures.js';
 import { ROLE_PERMISSIONS } from '../server/auth.js';
@@ -98,17 +98,19 @@ export async function seedDemo(sql: Sql, opts: SeedOptions = {}): Promise<SeedRe
 // same logins and permissions (ROLE_PERMISSIONS of each demo role) must also exist in core for anyone to sign in to the demo.
 // The demo items and product as Medhanta core's master data would hold them (D-29), in this process only. On a
 // platform installation the same codes must exist in core.
-const DEMO_ITEMS: [code: string, name: string, kind: Kind, room: string | null, make: string | null, model: string | null][] = [
-  ['GRAN-1', 'Granulation room 1', 'area', null, null, null],
-  ['COMP-1', 'Compression room 1', 'area', null, null, null],
-  ['FBD-01', 'Fluid bed dryer', 'equipment', 'GRAN-1', 'Demo Process Equipment', 'FBD-120'],
-  ['PRESS-01', 'Rotary tablet press', 'equipment', 'COMP-1', 'Demo Press Works', 'RTP-37'],
-  ['HT-01', 'Tablet hardness tester', 'instrument', 'COMP-1', 'Demo Instruments', 'HT-500'],
+// With the maintenance and requalification parameters core keeps for each (platform D-24). No hold times: the seeded
+// history has fixed dates in the past, and holds would have run out between its entries.
+const DEMO_ITEMS: [code: string, name: string, kind: Kind, room: string | null, make: string | null, model: string | null, care: Partial<Care>][] = [
+  ['GRAN-1', 'Granulation room 1', 'area', null, null, null, { cleaningBasis: 'operation', requalificationFrequencyMonths: 36 }],
+  ['COMP-1', 'Compression room 1', 'area', null, null, null, { cleaningBasis: 'operation', requalificationFrequencyMonths: 36 }],
+  ['FBD-01', 'Fluid bed dryer', 'equipment', 'GRAN-1', 'Demo Process Equipment', 'FBD-120', { pmFrequencyDays: 90, requalificationFrequencyMonths: 24 }],
+  ['PRESS-01', 'Rotary tablet press', 'equipment', 'COMP-1', 'Demo Press Works', 'RTP-37', { pmFrequencyDays: 90, requalificationFrequencyMonths: 24 }],
+  ['HT-01', 'Tablet hardness tester', 'instrument', 'COMP-1', 'Demo Instruments', 'HT-500', { calibrationFrequencyDays: 180, requalificationFrequencyMonths: 24 }],
 ];
 const DEMO_PRODUCT = { code: 'RAB-GR-20', name: 'Rabeprazole sodium 20 mg gastro-resistant tablets (DEMO-ONLY)' };
 function demoMaster(): Master {
-  const items = DEMO_ITEMS.map(([code, name, kind, room, make, model]) => ({ itemId: randomUUID(), code, name, version: 1, active: true, kind, room,
-    make, model, serial: null, needsCalibration: kind === 'instrument' }));
+  const items = DEMO_ITEMS.map(([code, name, kind, room, make, model, care]) => ({ itemId: randomUUID(), code, name, version: 1, active: true, kind, room,
+    make, model, serial: null, needsCalibration: kind === 'instrument', care: { ...NO_CARE, ...care } }));
   const product = { itemId: randomUUID(), ...DEMO_PRODUCT, version: 1, active: true };
   return { items: async () => items, products: async () => [product] };
 }
@@ -157,6 +159,13 @@ async function run(app: FastifyInstance, proofKey: Buffer, password: string): Pr
   // Master data.
   if (!(await api('admin', 'GET', '/api/site'))) await api('admin', 'PUT', '/api/site', { name: 'Demo Tablet Plant', code: 'DEMO', reason: DEMO_REASON });
   const product = (await api('admin', 'GET', '/api/products') as { id: number; code: string }[]).find((p) => p.code === DEMO_PRODUCT.code)!.id;
+  // Items are added to the Logbook by their master ID (owner 2026-11-12, point 4).
+  const have = new Set((await api('admin', 'GET', '/api/equipment') as { code: string }[]).map((e) => e.code));
+  const candidates = (await api('admin', 'GET', '/api/equipment/candidates') as { items: { itemId: string; code: string }[] }).items;
+  for (const [code] of DEMO_ITEMS) {
+    const c = candidates.find((x) => x.code === code);
+    if (!have.has(code) && c) await api('admin', 'POST', '/api/equipment', { itemId: c.itemId, reason: DEMO_REASON });
+  }
   const listed = await api('admin', 'GET', '/api/equipment') as { id: number; code: string }[];
   const item = async (code: string, _name: string, _kind: Kind, _location: string, sopRefs = '') => {
     const id = listed.find((e) => e.code === code)!.id;

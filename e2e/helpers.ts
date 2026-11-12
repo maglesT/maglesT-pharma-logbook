@@ -61,16 +61,18 @@ export async function post(ctx: APIRequestContext, url: string, data: object) {
 let n = 0;
 export async function newEquipment(body: object = {}): Promise<{ id: number; code: string }> {
   // Items are core's master data (D-29): added to the test server's stand-in, then given their Logbook settings.
-  const b = { name: 'Test item', kind: 'equipment', location: 'Block A', ...body } as { name: string; kind: string; location: string; sterile?: boolean; cleanHoldHours?: number };
+  // Master data keeps the hold times and frequencies (platform D-24); the item is then added by its ID (owner, point 4).
+  const { name, kind, location, sterile, ...care } = { name: 'Test item', kind: 'equipment', location: 'Block A', ...body } as
+    { name: string; kind: string; location: string; sterile?: boolean } & Record<string, unknown>;
   const code = `E2E-${Date.now().toString(36)}-${++n}`.toUpperCase();
   const db = owner();
-  await db`insert into e2e_master_items (code, name, kind, room) values (${code}, ${b.name}, ${b.kind}, ${b.kind === 'area' ? null : b.location})`;
-  const admin = await apiAs('admin');
-  const id = ((await (await admin.get('/api/equipment')).json()) as { id: number; code: string }[]).find((e) => e.code === code)!.id;
-  await admin.dispose();
-  await db`update equipment set sterile = ${b.sterile ?? false}, clean_hold_hours = ${b.cleanHoldHours ?? null} where id = ${id}`;
+  const [row] = await db<{ item_id: string }[]>`insert into e2e_master_items (code, name, kind, room, care)
+    values (${code}, ${name}, ${kind}, ${kind === 'area' ? null : location}, ${db.json(care as never)}) returning item_id::text`;
   await db.end();
-  return { id, code };
+  const admin = await apiAs('admin');
+  const added = await post(admin, '/api/equipment', { itemId: row!.item_id, sterile: sterile ?? false, reason: 'E2E set-up' });
+  await admin.dispose();
+  return { id: added.id as number, code };
 }
 
 export async function recordAndVerify(equipmentId: number, body: object, performer = 'op1', verifier = 'sup1') {
@@ -106,3 +108,9 @@ export const localTime = (page: Page, minutesAgo: number) =>
     const d = new Date(Date.now() - m * 60_000);
     return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
   }, minutesAgo);
+
+// Owner 2026-11-12 (slide 3): a new entry starts from the Activity dropdown.
+export async function newEntry(page: Page, activity: string) {
+  await page.getByLabel('Activity').selectOption({ label: activity });
+  await page.getByRole('button', { name: '+ New entry' }).click();
+}

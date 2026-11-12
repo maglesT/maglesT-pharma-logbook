@@ -1,12 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { apiAs, logIn, logOut, newEquipment, openLogbook, post, sign } from './helpers.js';
+import { apiAs, logIn, logOut, newEquipment, openLogbook, post, sign, newEntry } from './helpers.js';
 
 
 test('LB-17: a correction keeps the original readable, with the reason and a signature', async ({ page }) => {
   const { code } = await newEquipment();
   await logIn(page, 'op1');
   await openLogbook(page, code);
-  await page.getByRole('button', { name: '+ General equipment log' }).click();
+  await newEntry(page, 'Others (general log)');
   const form = page.getByRole('dialog');
   await form.getByLabel('Notes').fill('Gauge reads 2.4 bar');
   await form.getByRole('button', { name: 'Save' }).click();
@@ -31,7 +31,7 @@ test('LB-04: an entry for an activity more than 30 minutes ago needs a reason an
   const { code } = await newEquipment();
   await logIn(page, 'op1');
   await openLogbook(page, code);
-  await page.getByRole('button', { name: '+ General equipment log' }).click();
+  await newEntry(page, 'Others (general log)');
   const form = page.getByRole('dialog');
   // A datetime-local value two hours ago, in the browser's own time zone.
   const twoHoursAgo = await page.evaluate(() => {
@@ -66,8 +66,8 @@ test('S11: buttons follow the server rules: QA records and corrects nothing; onl
   // Engineering may record a general log, but may not correct someone else's entry.
   await logIn(page, 'eng1');
   await openLogbook(page, code);
-  await expect(page.getByRole('button', { name: '+ General equipment log' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '+ Equipment use' })).toHaveCount(0);
+  await expect(page.getByLabel('Activity').locator('option', { hasText: 'Others (general log)' })).toHaveCount(1);
+  await expect(page.getByLabel('Activity').locator('option', { hasText: 'Operation (use)' })).toHaveCount(0);
   await expect(row.getByRole('button', { name: 'Correct' })).toHaveCount(0);
   await logOut(page);
 

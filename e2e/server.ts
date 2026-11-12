@@ -5,7 +5,7 @@ import { migrate } from '../db/migrate.js';
 import { buildApp } from '../server/app.js';
 import globalSetup from '../test/global-setup.js';
 import { TEST_DATABASE_URL, TEST_PROOF_KEY, fakeSignOn, login, proofFor, seedUser, call } from '../test/helpers.js';
-import type { Master } from '../server/master.js';
+import { NO_CARE, type Care, type Master } from '../server/master.js';
 import { E2E_PORT, E2E_SCHEMA, USERS } from './config.js';
 import type { SpeechProvider } from '../server/voice.js';
 
@@ -34,12 +34,13 @@ const sql = connect(TEST_DATABASE_URL, { role: 'logbook_app', searchPath: E2E_SC
 // which the specs fill (e2e/helpers.ts newEquipment).
 const setup = connect(TEST_DATABASE_URL, { searchPath: E2E_SCHEMA });
 await setup`create table e2e_master_items (item_id uuid primary key default gen_random_uuid(), code text, name text, kind text,
-  room text, active boolean default true, version int default 1, is_product boolean default false)`;
+  room text, active boolean default true, version int default 1, is_product boolean default false, care jsonb not null default '{}')`;
 await setup`insert into e2e_master_items (code, name, is_product) values ('P1', 'Paracetamol 500 mg', true)`;
 const master: Master = {
-  items: async () => (await setup<{ item_id: string; code: string; name: string; kind: 'equipment' | 'instrument' | 'area'; room: string | null; active: boolean; version: number }[]>`
+  items: async () => (await setup<{ item_id: string; code: string; name: string; kind: 'equipment' | 'instrument' | 'area'; room: string | null; active: boolean; version: number; care: Partial<Care> }[]>`
     select * from e2e_master_items where not is_product`).map((r) => ({ itemId: r.item_id, code: r.code, name: r.name, kind: r.kind, room: r.room,
-      active: r.active, version: r.version, make: null, model: null, serial: null, needsCalibration: r.kind === 'instrument' })),
+      active: r.active, version: r.version, make: null, model: null, serial: null, needsCalibration: r.kind === 'instrument',
+      care: { ...NO_CARE, cleaningBasis: r.kind === 'area' ? 'operation' : null, ...r.care } })),
   products: async () => (await setup<{ item_id: string; code: string; name: string; active: boolean; version: number }[]>`
     select * from e2e_master_items where is_product`).map((r) => ({ itemId: r.item_id, code: r.code, name: r.name, active: r.active, version: r.version })),
 };

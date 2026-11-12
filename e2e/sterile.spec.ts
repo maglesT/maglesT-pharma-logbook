@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { approveSettings, cleanVerified, logIn, newEquipment, openLogbook, sign, statusBar } from './helpers.js';
+import { approveSettings, cleanVerified, logIn, newEquipment, openLogbook, sign, statusBar, newEntry } from './helpers.js';
 
 test.beforeAll(async () => {
   // Switch the sterile types on for this site, as Admin and QA would in Logbook settings.
@@ -12,7 +12,7 @@ test('LB-12: a failed steriliser test takes the steriliser out of service and st
 
   await logIn(page, 'op1');
   await openLogbook(page, code);
-  await page.getByRole('button', { name: '+ Steriliser test' }).click();
+  await newEntry(page, 'Steriliser test');
   const form = page.getByRole('dialog');
   await form.getByLabel('Test').selectOption('air_removal');
   await form.getByLabel('Result').selectOption('fail');
@@ -23,7 +23,7 @@ test('LB-12: a failed steriliser test takes the steriliser out of service and st
   await expect(statusBar(page)).toContainText('Out of service');
   await expect(statusBar(page)).toContainText('failed or awaiting verification');
 
-  await page.getByRole('button', { name: '+ Sterilisation cycle' }).click();
+  await newEntry(page, 'Sterilisation cycle');
   await form.getByLabel('Cycle number').fill('C-0001');
   await form.getByLabel('Programme').fill('121 °C porous load');
   await form.getByLabel('Controller printout / record reference').fill('PRN-0001');

@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { cleanVerified, logIn, logOut, newEquipment, openLogbook, owner, sign, statusBar } from './helpers.js';
+import { cleanVerified, logIn, logOut, newEquipment, openLogbook, owner, sign, statusBar, newEntry } from './helpers.js';
 
 test('LB-07: after use the equipment is dirty and blocked until a cleaning verified by a second person', async ({ page }) => {
   const { id, code } = await newEquipment({ cleanHoldHours: 24 });
@@ -10,7 +10,7 @@ test('LB-07: after use the equipment is dirty and blocked until a cleaning verif
   await expect(statusBar(page)).toContainText('Clean');
 
   // Use: product and batch, then end it.
-  await page.getByRole('button', { name: '+ Equipment use' }).click();
+  await newEntry(page, 'Operation (use)');
   const form = page.getByRole('dialog');
   await form.getByLabel('Product').selectOption({ label: 'P1 · Paracetamol 500 mg' });
   await form.getByLabel('Batch number').fill('B-E2E-1');
@@ -22,7 +22,7 @@ test('LB-07: after use the equipment is dirty and blocked until a cleaning verif
   await expect(statusBar(page)).toContainText('Dirty');
 
   // A new use is refused with the reason.
-  await page.getByRole('button', { name: '+ Equipment use' }).click();
+  await newEntry(page, 'Operation (use)');
   await form.getByLabel('Product').selectOption({ label: 'P1 · Paracetamol 500 mg' });
   await form.getByLabel('Batch number').fill('B-E2E-2');
   await form.getByRole('button', { name: 'Save' }).click();
@@ -31,7 +31,7 @@ test('LB-07: after use the equipment is dirty and blocked until a cleaning verif
   await form.getByRole('button', { name: 'Cancel' }).click();
 
   // The operator cleans and signs; it stays dirty until verified.
-  await page.getByRole('button', { name: '+ Equipment cleaning' }).click();
+  await newEntry(page, 'Cleaning');
   await form.getByLabel('Cleaning type').selectOption('batch_to_batch');
   await sign(form, 'op1', 'Sign and save');
   await expect(form).toHaveCount(0);
@@ -50,7 +50,7 @@ test('LB-07: after use the equipment is dirty and blocked until a cleaning verif
   await expect(page.getByRole('row').filter({ hasText: 'Equipment cleaning' }).first()).toContainText('Verified: SUP1');
 
   // Use is allowed again.
-  await page.getByRole('button', { name: '+ Equipment use' }).click();
+  await newEntry(page, 'Operation (use)');
   await form.getByLabel('Product').selectOption({ label: 'P1 · Paracetamol 500 mg' });
   await form.getByLabel('Batch number').fill('B-E2E-2');
   await form.getByRole('button', { name: 'Save' }).click();
@@ -72,7 +72,7 @@ test('LB-07: past its clean-hold time the equipment shows Clean expired and use 
   await openLogbook(page, code);
   await expect(statusBar(page)).toContainText('Clean expired');
   await expect(statusBar(page)).toContainText('Clean-hold time expired');
-  await page.getByRole('button', { name: '+ Equipment use' }).click();
+  await newEntry(page, 'Operation (use)');
   const form = page.getByRole('dialog');
   await form.getByLabel('Product').selectOption({ label: 'P1 · Paracetamol 500 mg' });
   await form.getByLabel('Batch number').fill('B-E2E-3');

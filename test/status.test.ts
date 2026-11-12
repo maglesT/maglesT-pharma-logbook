@@ -265,10 +265,10 @@ describe('review fixes (S4)', () => {
     expect(res.json().problems[0]).toMatch(/before the last use ended/);
   });
 
-  it('LB-05: rooms cannot be set to need calibration', async () => {
-    const id = await addItem(t, { code: `RM-${++n}`, name: 'Room', kind: 'area' });
-    const res = await call(t.app, c.admin!, 'PATCH', `/api/equipment/${id}`, { needsCalibration: true, reason: 'test' });
-    expect(res.statusCode).toBe(400);
+  it('LB-05: rooms are never calibrated, whatever is sent (calibration is master data\'s, D-24)', async () => {
+    const id = await addItem(t, { code: `RM-${++n}`, name: 'Room', kind: 'area', needsCalibration: true });
+    await call(t.app, c.admin!, 'PATCH', `/api/equipment/${id}`, { needsCalibration: true, reason: 'test' });
+    expect((await call(t.app, c.qa!, 'GET', '/api/equipment')).json().find((e: { id: number }) => e.id === id).needsCalibration).toBe(false);
   });
 
   it('LB-06: correcting a released breakdown withdraws the release until re-verified and released (D-19)', async () => {

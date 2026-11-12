@@ -5,7 +5,7 @@ import fastifyStatic from '@fastify/static';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import type { Sql } from './db.js';
+import type { Sql, Tx } from './db.js';
 import { BACKGROUND_HEADER, SESSION_COOKIE, loadSession } from './auth.js';
 import { authRoutes } from './routes/auth.js';
 import { masterDataRoutes } from './routes/masterdata.js';
@@ -21,6 +21,8 @@ import type { SpeechProvider } from './voice.js';
 import type { AdviceProvider } from './advice.js';
 import type { SignOn } from './signon.js';
 import { ConnectionOff, type Master } from './master.js';
+import type { Qualification } from './qualification.js';
+import { statusContext, type StatusContext } from './status.js';
 
 export const VERSION = '0.5.0';
 
@@ -33,6 +35,8 @@ export interface AppOptions {
   proofKey?: Buffer;
   // Master data read live from master_data's views (D-29); tests pass a stand-in.
   master: Master;
+  // Owner 2026-11-12: the Qualification product's views (status, requalification due, protocols); null without the link.
+  qualification?: Qualification | null;
   logger?: boolean;
   webRoot?: string;
   // Secure flag on the session cookie; off only for plain-HTTP development.
@@ -43,11 +47,13 @@ export interface AppOptions {
   advisor?: AdviceProvider | null;
 }
 
-export async function buildApp({ sql, signOn, master, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ sql, signOn, master, qualification = null, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger, trustProxy: true });
   app.decorate('cookieSecure', cookieSecure);
   app.decorate('proofKey', proofKey);
   app.decorate('master', master);
+  app.decorate('qualification', qualification);
+  app.decorate('statusContext', (q: Sql | Tx = sql) => statusContext(q, master, qualification));
   // A cut master-data link stops the feature with one message (platform D-02, PL-08).
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ConnectionOff) return reply.code(503).send({ error: 'connection_off', message: err.message });
@@ -103,5 +109,8 @@ declare module 'fastify' {
     cookieSecure: boolean;
     proofKey: Buffer;
     master: Master;
+    qualification: Qualification | null;
+    // What every status needs from master data and the Qualification product (platform D-24).
+    statusContext: (q?: Sql | Tx) => Promise<StatusContext>;
   }
 }
