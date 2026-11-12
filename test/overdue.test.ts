@@ -52,10 +52,23 @@ beforeAll(async () => {
   for (const [u, roles] of [['admin', ['admin']], ['qa1', ['qa']], ['op1', ['operator']], ['sup1', ['supervisor']]] as const) await seedUser(t.owner, u, [...roles]);
   for (const [key, u] of [['admin', 'admin'], ['qa', 'qa1'], ['op1', 'op1'], ['sup1', 'sup1']] as const) c[key] = (await login(t.app, u)).cookie;
   await approve('equipment_cleaning');
+  // As on an installation with history: the feature was installed 30 days ago.
+  await t.owner`update overdue_since set since = now() - interval '30 days'`;
 });
 afterAll(() => t.close());
 
 describe('missed limits are recorded for Deviations (owner 2026-11-12, D-37)', () => {
+  it('LB-06: a limit that ran out before the feature was installed is not recorded (no flood of old misses)', async () => {
+    const a = await item({ pmFrequencyDays: 10 });
+    await t.owner`update equipment set created_at = now() - interval '12 days' where id = ${a.id}`;   // PM due 2 days ago
+    await t.owner`update overdue_since set since = now() - interval '1 day'`;
+    await record();
+    expect(await events(a.id)).toHaveLength(0);
+    await t.owner`update overdue_since set since = now() - interval '30 days'`;
+    await record();
+    expect(await events(a.id)).toHaveLength(1);
+  });
+
   it('LB-06: an overdue PM is recorded once, with the report text, and published in overdue_v1', async () => {
     const a = await item({ pmFrequencyDays: 10 });
     await t.owner`update equipment set created_at = now() - interval '12 days' where id = ${a.id}`;
