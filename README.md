@@ -97,6 +97,18 @@ The microphone works only over HTTPS (or on localhost). Clips are up to 30 secon
 The audio and both texts are stored in the database, so they are in every backup. Without a key, or when the service is
 down, entries are typed as before.
 
+**Cleaning schedule and automatic deviations (D-33, D-34, optional).** On Master data, give equipment and operation-based
+rooms a dirty hold (hours from the end of a use to the cleaning) and a clean hold; give frequency-based rooms their cleaning
+frequency (24 = daily, 168 = weekly). Home shows the deadlines that are close or past. To raise a deviation automatically
+when a dirty hold runs out or a scheduled cleaning is missed:
+1. In the Deviations system, as its Admin, add the area `Cleaning (Logbook)` (or another name, see `DEVIATIONS_AREA`) and a
+   user for automatic reports (role *user*), and change that user's temporary password once by signing in.
+2. Put `DEVIATIONS_URL`, `DEVIATIONS_USERNAME` and `DEVIATIONS_PASSWORD` in `ops/.env` (optional: `DEVIATIONS_AREA`,
+   `DEVIATIONS_PUBLIC_URL` for the link people open) and restart the app.
+The Logbook checks every 5 minutes. Each missed limit is reported once, as an unplanned deviation with its impact "not known"
+for QA to classify; the number is shown on Home. A report the Deviations system does not take is retried, and the reason is
+shown. An expired clean hold is not reported: the item is cleaned again before its next use.
+
 **Backups (LB-23).** Run `ops/backup.sh` daily, e.g. from cron on the host:
 `15 1 * * * DATABASE_URL=postgres://logbook_owner:...@localhost/logbook BACKUP_DIR=/srv/backups /opt/logbook/ops/backup.sh`.
 Backups are kept for 365 days (`KEEP_DAYS`). Copy them to storage outside the server.

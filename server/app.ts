@@ -15,6 +15,7 @@ import { entryRoutes } from './routes/entries.js';
 import { reviewRoutes } from './routes/review.js';
 import { exportRoutes } from './routes/exports.js';
 import { integrityRoutes } from './routes/integrity.js';
+import { autoDeviationRoutes } from './routes/autodeviations.js';
 import { historyRoutes } from './routes/history.js';
 import { voiceRoutes } from './routes/voice.js';
 import { adviceRoutes } from './routes/advice.js';
@@ -34,9 +35,11 @@ export interface AppOptions {
   speech?: SpeechProvider | null;
   // Language model for breakdown suggestions (D-27); null when no API key is configured.
   advisor?: AdviceProvider | null;
+  // S16b (D-34): the Deviations system's address when automatic deviations are on; null when off.
+  deviationsUrl?: string | null;
 }
 
-export async function buildApp({ sql, logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ sql, logger = false, webRoot, cookieSecure = true, speech = null, advisor = null, deviationsUrl = null }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger, trustProxy: true });
   app.decorate('cookieSecure', cookieSecure);
   await app.register(fastifyCookie);
@@ -69,6 +72,7 @@ export async function buildApp({ sql, logger = false, webRoot, cookieSecure = tr
   reviewRoutes(app, sql);
   exportRoutes(app, sql);
   integrityRoutes(app, sql);
+  autoDeviationRoutes(app, sql, deviationsUrl);
   historyRoutes(app, sql);
   voiceRoutes(app, sql, speech);
   adviceRoutes(app, sql, advisor);
