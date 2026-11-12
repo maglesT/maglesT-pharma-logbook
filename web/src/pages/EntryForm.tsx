@@ -1,4 +1,4 @@
-import { Fragment, useState, type FormEvent, type ReactNode } from 'react';
+import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { api, ApiError, getSignProof, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
 import { VoiceButton } from '../components/VoiceNote.js';
 
@@ -15,6 +15,9 @@ const EMPTY: Record<string, Data> = {
   calibration: { result: 'pass', certificateRef: '', nextDue: '', remarks: '', comment: '', deviationRef: '' },
   area_cleaning: { cleaningType: 'daily', agent: '', sporicidal: false, disinfectantLot: '', checklist: {}, remarks: '' },
   general_log: { checklist: {}, notes: '' },
+  // Owner 2026-11-12: change over and requalification.
+  change_over: { fromProduct: '', fromBatch: '', toProduct: '', toBatch: '', checklist: {}, remarks: '' },
+  requalification: { source: 'protocol', protocolNumber: '', stage: '', outcome: 'pass', nextDue: '', doneBy: 'in_house', vendorName: '', reportRef: '', remarks: '', comment: '', deviationRef: '' },
   steriliser_cycle: { cycleType: 'steam', cycleId: '', programme: '', load: '', result: 'pass', controllerRecordRef: '', indicators: '', remarks: '', comment: '', deviationRef: '' },
   steriliser_test: { test: 'air_removal', result: 'pass', remarks: '', comment: '', deviationRef: '' },
   glove_integrity: { port: '', method: '', result: 'pass', remarks: '', comment: '', deviationRef: '' },
@@ -39,6 +42,9 @@ const TEXT_FIELDS: Record<string, [string, string, boolean?][]> = {
   calibration: [['certificateRef', 'Certificate / report reference'], ['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
   area_cleaning: [['agent', 'Cleaning / disinfecting agent'], ['disinfectantLot', 'Disinfectant lot'], ['remarks', 'Remarks', true]],
   general_log: [['notes', 'Notes', true]],
+  change_over: [['fromProduct', 'From product'], ['fromBatch', 'From batch'], ['toProduct', 'To product'], ['toBatch', 'To batch'], ['remarks', 'Remarks', true]],
+  // Requalification has its own field layout (RequalificationFields).
+  requalification: [['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
   steriliser_cycle: [['cycleId', 'Cycle number'], ['programme', 'Programme'], ['load', 'Load', true], ['controllerRecordRef', 'Controller printout / record reference'], ['indicators', 'Indicators (BI/CI) used'], ['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
   steriliser_test: [['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
   glove_integrity: [['port', 'Glove port'], ['method', 'Test method'], ['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
@@ -47,7 +53,7 @@ const TEXT_FIELDS: Record<string, [string, string, boolean?][]> = {
 
 const OPTION_LABEL: Record<string, string> = { kind: 'Type', result: 'Result', cleaningType: 'Cleaning type', cycleType: 'Cycle type', test: 'Test' };
 
-const HAS_CHECKLIST = new Set(['equipment_cleaning', 'area_cleaning', 'general_log']);
+const HAS_CHECKLIST = new Set(['equipment_cleaning', 'area_cleaning', 'general_log', 'change_over']);
 const HAS_END = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'steriliser_cycle']);
 
 const BREAKDOWN_ONLY = ['occurredAt', 'reportedBy', 'failureCategory', 'rootCause'];
@@ -75,11 +81,14 @@ export function EntryForm({
   products,
   correcting,
   completing,
+  preset,
   voice,
   onDone,
   onCancel,
 }: {
   type: string;
+  // Owner 2026-11-12: the activity chosen fixes some data, e.g. the maintenance kind (breakdown or preventive).
+  preset?: Data;
   equipment: Equipment;
   settings: Settings;
   products: Product[];
@@ -91,7 +100,7 @@ export function EntryForm({
   onCancel: () => void;
 }) {
   const source = correcting ?? completing;
-  const [data, setData] = useState<Data>(source ? { ...EMPTY[type], ...source.data } : { ...EMPTY[type] });
+  const [data, setData] = useState<Data>(source ? { ...EMPTY[type], ...source.data } : { ...EMPTY[type], ...preset });
   // A new breakdown defaults to now; one recorded before S9 has no occurrence time, and none is invented.
   const storedOccurred = { iso: source?.data.occurredAt, local: source?.data.occurredAt ? localInputValue(String(source.data.occurredAt)) : '' };
   const [occurredLocal, setOccurredLocal] = useState(source ? storedOccurred.local : localInputValue());
@@ -243,6 +252,7 @@ export function EntryForm({
         {type === 'calibration' && (
           <label>Next due<input type="date" value={String(data.nextDue ?? '').slice(0, 10)} onChange={(e) => set('nextDue', e.target.value)} /></label>
         )}
+        {type === 'requalification' && <RequalificationFields data={data} setData={setData} equipment={equipment} />}
         {type === 'pressure_reading' && (
           <>
             <label>
@@ -418,6 +428,69 @@ function MaintenanceFields({
         <label className="check"><input type="checkbox" checked={Boolean(data.recalibrationNeeded)} onChange={(e) => set('recalibrationNeeded', e.target.checked)} />Re-calibration needed before use</label>
       )}
       {equipment.sterile && text('impactAssessment', 'Impact assessment (sterile equipment)', true)}
+    </>
+  );
+}
+
+// Owner 2026-11-12: a requalification is pulled from the item's approved protocol in the Qualification system (stage,
+// result and next due date filled in, read only), or written by hand, e.g. done by a vendor outside it.
+interface QualProtocol { number: string; stage: string; step: string; reportOutcome: string | null; nextReviewDueDecided: string | null; reportApprovedAt: string | null }
+const STAGE_LABEL: Record<string, string> = { iq: 'IQ', oq: 'OQ', pq: 'PQ', iq_oq: 'IQ/OQ', dq: 'DQ', urs: 'URS', periodic_review: 'Periodic review', csv: 'CSV' };
+const OUTCOME_LABEL: Record<string, string> = { pass: 'Pass', pass_conditions: 'Pass with conditions', fail: 'Fail' };
+function RequalificationFields({ data, setData, equipment }: { data: Data; setData: (d: Data) => void; equipment: Equipment }) {
+  const [list, setList] = useState<{ linked: boolean; protocols: QualProtocol[] } | null>(null);
+  useEffect(() => {
+    void api<{ linked: boolean; protocols: QualProtocol[] }>('GET', `/api/equipment/${equipment.id}/protocols`).then(setList, () => setList({ linked: false, protocols: [] }));
+  }, [equipment.id]);
+  const approved = (list?.protocols ?? []).filter((p) => p.reportApprovedAt && p.reportOutcome);
+  const set = (patch: Data) => setData({ ...data, ...patch });
+  const pick = (number: string) => {
+    const p = approved.find((x) => x.number === number);
+    set({ protocolNumber: number, stage: p?.stage ?? '', outcome: p?.reportOutcome ?? 'pass', nextDue: p?.nextReviewDueDecided ?? '', reportRef: number });
+  };
+  return (
+    <>
+      <fieldset className="checklist">
+        <legend>Source</legend>
+        <label className="check"><input type="radio" checked={data.source === 'protocol'} disabled={!list?.linked} onChange={() => set({ source: 'protocol' })} />From a protocol in the Qualification system</label>
+        <label className="check"><input type="radio" checked={data.source === 'manual'} onChange={() => set({ source: 'manual', protocolNumber: '' })} />Written by hand (e.g. done by a vendor)</label>
+        {list && !list.linked && <p className="muted">The Qualification system is not linked: write the requalification by hand.</p>}
+      </fieldset>
+      {data.source === 'protocol' ? (
+        <>
+          <label>Protocol
+            <select value={String(data.protocolNumber ?? '')} onChange={(e) => pick(e.target.value)}>
+              <option value="">Choose the protocol…</option>
+              {approved.map((p) => <option key={p.number} value={p.number}>{p.number} · {STAGE_LABEL[p.stage] ?? p.stage} · {OUTCOME_LABEL[p.reportOutcome ?? ''] ?? p.reportOutcome}</option>)}
+            </select>
+          </label>
+          {approved.length === 0 && list?.linked && <p className="muted">No protocol of {equipment.code} has an approved report yet.</p>}
+          {data.protocolNumber ? (
+            <dl className="fields pulled">
+              <div><dt>Stage</dt><dd>{STAGE_LABEL[String(data.stage)] ?? String(data.stage)}</dd></div>
+              <div><dt>Result</dt><dd>{OUTCOME_LABEL[String(data.outcome)] ?? String(data.outcome)}</dd></div>
+              <div><dt>Next requalification due</dt><dd>{String(data.nextDue || '—')}</dd></div>
+            </dl>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <label>Done by
+            <select value={String(data.doneBy)} onChange={(e) => set({ doneBy: e.target.value })}>
+              <option value="in_house">In house</option><option value="vendor">External vendor</option>
+            </select>
+          </label>
+          {data.doneBy === 'vendor' && <label>Vendor name<input value={String(data.vendorName ?? '')} onChange={(e) => set({ vendorName: e.target.value })} /></label>}
+          <label>Requalification report number<input value={String(data.reportRef ?? '')} onChange={(e) => set({ reportRef: e.target.value })} /></label>
+          <label>Stage<input value={String(data.stage ?? '')} onChange={(e) => set({ stage: e.target.value })} placeholder="e.g. PQ, IQ/OQ" /></label>
+          <label>Result
+            <select value={String(data.outcome)} onChange={(e) => set({ outcome: e.target.value })}>
+              {Object.entries(OUTCOME_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+            </select>
+          </label>
+          <label>Next requalification due<input type="date" value={String(data.nextDue ?? '')} onChange={(e) => set({ nextDue: e.target.value })} /></label>
+        </>
+      )}
     </>
   );
 }

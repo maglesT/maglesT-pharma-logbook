@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
-import { cleanVerified, logIn, logOut, newEquipment, openLogbook, owner, recordAndVerify, sign, statusBar } from './helpers.js';
+import { cleanVerified, logIn, logOut, newEquipment, openLogbook, owner, recordAndVerify, sign, statusBar, newEntry } from './helpers.js';
 
 async function tryUse(page: Page, batch: string) {
-  await page.getByRole('button', { name: '+ Equipment use' }).click();
+  await newEntry(page, 'Operation (use)');
   const form = page.getByRole('dialog');
   await form.getByLabel('Product').selectOption({ label: 'P1 · Paracetamol 500 mg' });
   await form.getByLabel('Batch number').fill(batch);
@@ -16,7 +16,7 @@ test('LB-06: a breakdown takes equipment out of service until QA releases it', a
 
   await logIn(page, 'eng1');
   await openLogbook(page, code);
-  await page.getByRole('button', { name: '+ Maintenance / breakdown' }).click();
+  await newEntry(page, 'Breakdown');
   const form = page.getByRole('dialog');
   await form.getByLabel('Type').selectOption('breakdown');
   await form.getByLabel('Failure category').selectOption('electrical');

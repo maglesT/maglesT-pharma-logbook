@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { approveSettings, logIn, newEquipment, openLogbook } from './helpers.js';
+import { approveSettings, logIn, newEquipment, openLogbook, newEntry } from './helpers.js';
 
 // The speech service is mocked by e2e/server.ts; no real API calls (D-26).
 test.beforeAll(async () => {
@@ -10,7 +10,7 @@ test('LB-20: a voice note becomes entry text only after the speaker signs the En
   const { code } = await newEquipment({ name: 'Granulator' });
   await logIn(page, 'op1');
   await openLogbook(page, code);
-  await page.getByRole('button', { name: '+ General equipment log' }).click();
+  await newEntry(page, 'Others (general log)');
   const form = page.getByRole('dialog');
   await form.getByLabel('Voice language for notes').selectOption('hi-IN');
   await form.getByRole('button', { name: '🎤 Record voice note' }).click();
@@ -48,7 +48,7 @@ test('LB-26: when the speech service fails, the user sees why and types the entr
       : route.continue());
   await logIn(page, 'op1');
   await openLogbook(page, code);
-  await page.getByRole('button', { name: '+ General equipment log' }).click();
+  await newEntry(page, 'Others (general log)');
   const form = page.getByRole('dialog');
   await form.getByRole('button', { name: '🎤 Record voice note' }).click();
   await page.waitForTimeout(800);

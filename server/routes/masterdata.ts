@@ -90,6 +90,16 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
     return reply.code(201).send(view((await logbookItem(sql, app.master, id))!));
   });
 
+  // Owner 2026-11-12: the item's protocols in the Qualification system, for a requalification entry pulled from one.
+  app.get<{ Params: { id: string } }>('/api/equipment/:id/protocols', anyUser, async (req, reply) => {
+    const id = parseId(req.params.id);
+    if (id === null) return reply.code(400).send({ error: 'invalid_request' });
+    const item = await logbookItem(sql, app.master, id);
+    if (!item) return reply.code(404).send({ error: 'not_found' });
+    if (!app.qualification) return { linked: false, protocols: [] };
+    return { linked: true, protocols: await app.qualification.protocols(item.itemId) };
+  });
+
   app.patch<{ Params: { id: string } }>('/api/equipment/:id', admin, async (req, reply) => {
     const id = parseId(req.params.id);
     const body = itemSettings.safeParse(req.body);

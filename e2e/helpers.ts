@@ -108,3 +108,9 @@ export const localTime = (page: Page, minutesAgo: number) =>
     const d = new Date(Date.now() - m * 60_000);
     return new Date(d.getTime() - d.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
   }, minutesAgo);
+
+// Owner 2026-11-12 (slide 3): a new entry starts from the Activity dropdown.
+export async function newEntry(page: Page, activity: string) {
+  await page.getByLabel('Activity').selectOption({ label: activity });
+  await page.getByRole('button', { name: '+ New entry' }).click();
+}

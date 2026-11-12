@@ -49,7 +49,7 @@ export function plantTime(iso: string | null): string {
   return `${s} IST`;
 }
 
-export interface Equipment {
+export interface Equipment extends Care {
   id: number;
   code: string;
   name: string;
@@ -57,13 +57,38 @@ export interface Equipment {
   location: string;
   sterile: boolean;
   classified: boolean;
-  cleanHoldHours: number | null;
   needsCalibration: boolean;
   active: boolean;
   // Master data (D-29 3).
   make: string | null;
   model: string | null;
   serial: string | null;
+}
+
+// Platform D-24: maintenance, cleaning and requalification parameters, master data's (read only here).
+export interface Care {
+  cleanHoldHours: number | null;
+  dirtyHoldHours: number | null;
+  cleaningBasis: 'operation' | 'frequency' | null;
+  cleaningFrequencyHours: number | null;
+  pmFrequencyDays: number | null;
+  calibrationFrequencyDays: number | null;
+  requalificationFrequencyMonths: number | null;
+}
+export interface Candidate extends Care {
+  itemId: string; code: string; name: string; kind: Equipment['kind']; location: string; make: string | null; model: string | null; serial: string | null;
+  qualification: string | null; nextReviewDue: string | null; selectable: boolean;
+}
+export const QUAL_LABEL: Record<string, string> = {
+  qualified: 'Qualified', qualified_conditions: 'Qualified with conditions', requalification_needed: 'Requalification needed',
+  not_qualified: 'Not qualified', not_in_qualification: 'Not in the Qualification system',
+};
+// Cleaning in words: "Dirty hold 8 h · clean hold 72 h", "Every 24 h (frequency-based room)".
+export function cleaningText(c: Care & { kind: Equipment['kind'] }): string {
+  if (c.kind === 'area' && c.cleaningBasis === 'frequency') return c.cleaningFrequencyHours ? `Every ${c.cleaningFrequencyHours} h (frequency-based room)` : 'Frequency-based room';
+  const parts = [c.dirtyHoldHours ? `dirty hold ${c.dirtyHoldHours} h` : '', c.cleanHoldHours ? `clean hold ${c.cleanHoldHours} h` : ''].filter(Boolean).join(' · ');
+  const text = parts ? parts.charAt(0).toUpperCase() + parts.slice(1) : '—';
+  return c.kind === 'area' ? `${text} (operation-based room)` : text;
 }
 
 export interface Product {
@@ -163,6 +188,8 @@ export const TYPE_LABEL: Record<string, string> = {
   calibration: 'Calibration / check',
   area_cleaning: 'Area cleaning',
   general_log: 'General equipment log',
+  change_over: 'Change over',
+  requalification: 'Requalification',
   steriliser_cycle: 'Sterilisation cycle',
   steriliser_test: 'Steriliser test',
   glove_integrity: 'Glove integrity',
@@ -170,7 +197,7 @@ export const TYPE_LABEL: Record<string, string> = {
 };
 
 // Mirrors the server (D-16): these types are signed by the performer.
-export const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test']);
+export const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test', 'change_over', 'requalification']);
 
 export interface EquipmentStatus {
   equipmentId: number;
@@ -180,11 +207,40 @@ export interface EquipmentStatus {
   inUse: { entryId: number; productId: number | null; batch: string | null; stage: string; since: string } | null;
   cleanUntil: string | null;
   calibrationDue: string | null;
+  schedule: 'hold' | 'frequency' | null;
+  dirtyUntil: string | null;
+  deadline: CleaningDeadline | null;
+  dues: Due[];
+  qualification: string | null;
+}
+export interface CleaningDeadline { kind: 'dirty_hold' | 'clean_hold' | 'frequency'; at: string; hours: number; soon: boolean; overdue: boolean }
+export interface Due { kind: 'pm' | 'calibration' | 'requalification'; due: string; frequency: string; soon: boolean; overdue: boolean }
+export const DEADLINE_LABEL: Record<CleaningDeadline['kind'], string> = { dirty_hold: 'Dirty hold', clean_hold: 'Clean hold', frequency: 'Scheduled cleaning' };
+export const DUE_LABEL: Record<Due['kind'], string> = { pm: 'Preventive maintenance', calibration: 'Calibration', requalification: 'Requalification' };
+// Time left until (or past) a moment, in words: "2 h 15 min", "3 days 4 h".
+export function timeLeft(iso: string, now = Date.now()): string {
+  const m = Math.round(Math.abs(new Date(iso).getTime() - now) / 60_000);
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h} h${m % 60 ? ` ${m % 60} min` : ''}`;
+  return `${Math.floor(h / 24)} days${h % 24 ? ` ${h % 24} h` : ''}`;
+}
+// Days until (or past) a plant date, in words.
+export function daysLeft(date: string): string {
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const d = Math.round((Date.parse(date) - Date.parse(today)) / 86_400_000);
+  return d === 0 ? 'today' : d > 0 ? `in ${d} day${d === 1 ? '' : 's'}` : `${-d} day${d === -1 ? '' : 's'} overdue`;
 }
 
 export const STATE_LABEL: Record<string, [string, string]> = {
   in_use: ['In use', 'chip-info'],
+  in_change_over: ['Change over', 'chip-info'],
   dirty: ['Dirty', 'chip-warn'],
+  dirty_expired: ['Dirty hold expired', 'chip-bad'],
+  cleaning_due: ['Cleaning overdue', 'chip-bad'],
+  pm_overdue: ['PM overdue', 'chip-bad'],
+  requalification_overdue: ['Requalification overdue', 'chip-bad'],
+  not_qualified: ['Not qualified', 'chip-bad'],
   clean: ['Clean', 'chip-ok'],
   clean_expired: ['Clean expired', 'chip-warn'],
   out_of_service: ['Out of service', 'chip-bad'],
