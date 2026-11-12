@@ -103,16 +103,20 @@ describe('automatic deviations for missed cleaning limits (D-34)', () => {
     expect(mine[0]!.title).toBe(`Scheduled cleaning missed: ${room.code} (every 24 h)`);
   });
 
-  it('LB-07: an expired clean hold or a dirty hold still running raises nothing', async () => {
+  it('LB-07: an expired clean hold raises a deviation (D-35); a dirty hold still running raises nothing', async () => {
     const { sink, reports } = fakeSink();
     const held = await newItem({ cleanHoldHours: 24 });
     await clean(held.id);
-    await age(held.id, 30);                                  // clean hold expired: clean again before use, no deviation
+    await age(held.id, 30);
     const running = await newItem({ dirtyHoldHours: 8 });
     await clean(running.id);
     await useAndEnd(running.id);                            // dirty hold still running
     await raiseOverdueDeviations(t.sql, sink);
-    expect(reports.filter((r) => [held.code, running.code].includes(r.equipment))).toHaveLength(0);
+    const mine = reports.filter((r) => r.equipment === held.code);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]!.title).toBe(`Clean hold expired: ${held.code} not used or re-cleaned within 24 h of cleaning`);
+    expect((await rows(held.id))[0]).toMatchObject({ kind: 'clean_hold', deviation_number: expect.stringMatching(/^DEV-/) });
+    expect(reports.filter((r) => r.equipment === running.code)).toHaveLength(0);
   });
 
   it('LB-07: when the Deviations system cannot take the report, the error is kept and the report is retried', async () => {

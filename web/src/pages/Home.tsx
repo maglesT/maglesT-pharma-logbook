@@ -56,7 +56,7 @@ function Ring({ counts, total }: { counts: { key: string; color: string; n: numb
 function DeadlineRow({ item: { eq, st }, onOpen }: { item: Item; onOpen: (id: number) => void }) {
   const d = st.deadline!;
   const auto = useContext(AutoDevs);
-  const dev = auto.enabled && d.overdue && d.kind !== 'clean_hold'
+  const dev = auto.enabled && d.overdue
     ? auto.items.find((a) => a.equipmentId === eq.id && a.kind === d.kind && Date.parse(a.deadlineAt) === Date.parse(d.at)) ?? null : undefined;
   const rule = d.kind === 'frequency' ? `${DEADLINE_LABEL[d.kind]} (every ${d.hours} h)` : `${DEADLINE_LABEL[d.kind]} (${d.hours} h)`;
   const used = Math.min(1, Math.max(0, 1 - (Date.parse(d.at) - Date.now()) / (d.hours * 3_600_000)));

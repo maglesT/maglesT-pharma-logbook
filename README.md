@@ -107,7 +107,7 @@ when a dirty hold runs out or a scheduled cleaning is missed:
    `DEVIATIONS_PUBLIC_URL` for the link people open) and restart the app.
 The Logbook checks every 5 minutes. Each missed limit is reported once, as an unplanned deviation with its impact "not known"
 for QA to classify; the number is shown on Home. A report the Deviations system does not take is retried, and the reason is
-shown. An expired clean hold is not reported: the item is cleaned again before its next use.
+shown. An expired clean hold is reported too (D-35).
 
 **Backups (LB-23).** Run `ops/backup.sh` daily, e.g. from cron on the host:
 `15 1 * * * DATABASE_URL=postgres://logbook_owner:...@localhost/logbook BACKUP_DIR=/srv/backups /opt/logbook/ops/backup.sh`.
