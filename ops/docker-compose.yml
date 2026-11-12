@@ -21,6 +21,13 @@ services:
       SARVAM_API_KEY: ${SARVAM_API_KEY:-}
       # Breakdown suggestions (D-27): GEMINI_API_KEY in ops/.env. Unset = only related breakdowns are listed.
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      # Automatic deviations for missed cleaning limits (D-34): the Deviations system's address and its user for
+      # automatic reports, in ops/.env. Unset = off.
+      DEVIATIONS_URL: ${DEVIATIONS_URL:-}
+      DEVIATIONS_USERNAME: ${DEVIATIONS_USERNAME:-}
+      DEVIATIONS_PASSWORD: ${DEVIATIONS_PASSWORD:-}
+      DEVIATIONS_AREA: ${DEVIATIONS_AREA:-Cleaning (Logbook)}
+      DEVIATIONS_PUBLIC_URL: ${DEVIATIONS_PUBLIC_URL:-}
     ports: ["3000:3000"]
     depends_on: { db: { condition: service_healthy } }
 volumes:

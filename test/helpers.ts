@@ -42,7 +42,7 @@ export interface TestApp extends TestDb {
   app: FastifyInstance;
 }
 
-export async function freshApp(opts: Pick<AppOptions, 'speech' | 'advisor'> = {}): Promise<TestApp> {
+export async function freshApp(opts: Pick<AppOptions, 'speech' | 'advisor' | 'deviationsUrl'> = {}): Promise<TestApp> {
   const db = await freshDb();
   const app = await buildApp({ sql: db.sql, webRoot: '/nonexistent', ...opts });
   return {

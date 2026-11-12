@@ -26,6 +26,15 @@ const schema = z.object({
   GEMINI_TIMEOUT_MS: z.coerce.number().int().positive().default(90_000),
   // A voice-note translation waits at most this long before Sarvam's own translation is used.
   GEMINI_TRANSLATE_TIMEOUT_MS: z.coerce.number().int().positive().default(25_000),
+  // S16b (D-34): automatic deviations for missed cleaning limits, reported to the site's Deviations system as its user
+  // for automatic reports (role "user"), in the named area. Without the URL, user and password the feature is off.
+  DEVIATIONS_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
+  DEVIATIONS_USERNAME: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional()),
+  DEVIATIONS_PASSWORD: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(1).optional()),
+  DEVIATIONS_AREA: z.string().default('Cleaning (Logbook)'),
+  // The address people open (shown with each deviation number); defaults to DEVIATIONS_URL.
+  DEVIATIONS_PUBLIC_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
+  DEVIATIONS_TIMEOUT_MS: z.coerce.number().int().positive().default(20_000),
 });
 
 export type Config = z.infer<typeof schema>;

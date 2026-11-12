@@ -299,6 +299,8 @@ table.register { font-size: 0.86rem; }
 .dl-rule { font-size: 0.82rem; color: var(--muted); line-height: 1.35; }
 .when { font-weight: 700; white-space: nowrap; color: var(--warn); font-size: 0.95rem; padding-top: 1px; }
 .deadline.overdue .when { color: var(--bad); }
+.dl-dev { grid-column: 2 / -1; font-size: 0.82rem; font-weight: 600; color: var(--bad); }
+.dl-dev a { color: var(--brand); font-weight: 700; }
 .dl-bar { position: absolute; left: 14px; right: 14px; bottom: 6px; height: 3px; border-radius: 99px; background: rgba(0, 0, 0, 0.06); overflow: hidden; }
 .dl-bar i { display: block; height: 100%; background: #e0a800; border-radius: 99px; }
 .deadline.overdue .dl-bar i { background: var(--bad); }

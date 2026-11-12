@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 import { api, DEADLINE_LABEL, plantTime, timeLeft, TYPE_LABEL, type Alert, type Entry, type Equipment, type EquipmentStatus, type Me } from '../api.js';
 import { StatusChip } from '../components/StatusChip.js';
 
@@ -17,6 +17,10 @@ type GroupKey = (typeof GROUPS)[number]['key'];
 const groupOf = (state: string): GroupKey => GROUPS.find((g) => (g.states as readonly string[]).includes(state))?.key ?? 'ready';
 
 interface Item { eq: Equipment; st: EquipmentStatus }
+// S16b (D-34): deviations raised automatically for missed cleaning limits.
+interface AutoDeviation { equipmentId: number; kind: string; deadlineAt: string; deviationNumber: string | null; lastError: string | null }
+interface AutoDeviations { enabled: boolean; deviationsUrl: string | null; items: AutoDeviation[] }
+const AutoDevs = createContext<AutoDeviations>({ enabled: false, deviationsUrl: null, items: [] });
 const isDue = (i: Item) => Boolean(i.st.deadline && (i.st.deadline.soon || i.st.deadline.overdue));
 // Plant time, short: "7:17 pm" today, "13 Nov, 7:17 pm" another day.
 const day = (d: Date) => d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata' });
@@ -51,18 +55,29 @@ function Ring({ counts, total }: { counts: { key: string; color: string; n: numb
 
 function DeadlineRow({ item: { eq, st }, onOpen }: { item: Item; onOpen: (id: number) => void }) {
   const d = st.deadline!;
+  const auto = useContext(AutoDevs);
+  const dev = auto.enabled && d.overdue && d.kind !== 'clean_hold'
+    ? auto.items.find((a) => a.equipmentId === eq.id && a.kind === d.kind && Date.parse(a.deadlineAt) === Date.parse(d.at)) ?? null : undefined;
   const rule = d.kind === 'frequency' ? `${DEADLINE_LABEL[d.kind]} (every ${d.hours} h)` : `${DEADLINE_LABEL[d.kind]} (${d.hours} h)`;
   const used = Math.min(1, Math.max(0, 1 - (Date.parse(d.at) - Date.now()) / (d.hours * 3_600_000)));
   return (
-    <button className={d.overdue ? 'deadline overdue' : 'deadline'} onClick={() => onOpen(eq.id)}>
+    <div role="button" tabIndex={0} className={d.overdue ? 'deadline overdue' : 'deadline'} onClick={() => onOpen(eq.id)}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(eq.id); } }}>
       <span className="dl-tag">{d.overdue ? 'Overdue' : 'Due soon'}</span>
       <span className="dl-main">
         <strong className="dl-name">{eq.code} <span>{eq.name}</span></strong>
         <span className="dl-rule">{rule} · {d.overdue ? 'ended' : 'ends'} {shortTime(d.at)} IST</span>
       </span>
       <span className="when">{d.overdue ? `Overdue by ${timeLeft(d.at)}` : `Ends in ${timeLeft(d.at)}`}</span>
+      {dev !== undefined && (
+        <span className="dl-dev">
+          {dev?.deviationNumber ? (
+            <>Deviation <a href={auto.deviationsUrl ?? '#'} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>{dev.deviationNumber}</a> raised automatically</>
+          ) : dev?.lastError ? `Deviation not reported yet (retrying): ${dev.lastError}` : 'Raising a deviation…'}
+        </span>
+      )}
       <span className="dl-bar" aria-hidden="true"><i style={{ width: `${used * 100}%` }} /></span>
-    </button>
+    </div>
   );
 }
 
@@ -130,6 +145,7 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
   const [statuses, setStatuses] = useState<EquipmentStatus[]>([]);
   const [updated, setUpdated] = useState<string | null>(null);
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [autoDevs, setAutoDevs] = useState<AutoDeviations>({ enabled: false, deviationsUrl: null, items: [] });
   const watches = me.roles.includes('admin') || me.roles.includes('qa');
 
   const loadStatus = async (background = false) => {
@@ -139,6 +155,7 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
     ]);
     setStatuses(s);
     setEquipment(e);
+    setAutoDevs(await api<AutoDeviations>('GET', '/api/auto-deviations', undefined, background));
     setUpdated(new Date().toISOString());
   };
   useEffect(() => {
@@ -199,11 +216,13 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
         <div className="kpi info"><b>{inUse}</b><span>In use</span></div>
         <div className="kpi ok"><b>{ready}<small> / {items.length}</small></b><span>Ready for use</span></div>
       </div>
+      <AutoDevs.Provider value={autoDevs}>
       <div className="dash">
         <Part title="Equipment and instruments" icon="⚙" items={machines} onOpen={onOpen} note="dirty hold after use, clean hold after cleaning" />
         <Part title="Areas (rooms)" icon="▦" items={areas} onOpen={onOpen}
           note={`${areas.length - frequencyRooms} operation-based, ${frequencyRooms} frequency-based`} />
       </div>
+      </AutoDevs.Provider>
       <section className="dash-panel">
         <div className="dash-sub"><h3>Open items</h3>{open.length > 0 && <span className="count info">{open.length}</span>}</div>
         {open.length === 0 ? (
