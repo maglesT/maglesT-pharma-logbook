@@ -10,6 +10,8 @@ const schema = z.object({
   MASTER_DATA_DATABASE_URL: z.string().url(),
   // Owner 2026-11-12: the Qualification product's database through the platform link (qualification_v1, protocol_v1).
   QUAL_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
+  // D-37: the Deviations product's database through the platform link (deviation_v1: numbers of raised deviations).
+  DEVIATIONS_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   // Sign-on through Medhanta core (D-29), written by the platform's apply.
   OIDC_ISSUER: z.string().url(),
   OIDC_CLIENT_ID: z.string().default('logbook'),
