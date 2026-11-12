@@ -3,9 +3,8 @@ import { audit } from './audit.js';
 import { allStatuses, PLANT_TZ } from './status.js';
 
 // S16b (D-34, owner request): a cleaning that misses its time limit raises a deviation in the site's Deviations system
-// on its own. Which misses: the dirty hold after a use (the cleaning is late) and a frequency-based room's scheduled
-// cleaning (a scheduled cleaning was missed). A clean hold that runs out is not a deviation: the item is simply cleaned
-// again before its next use, and the status blocks the use until then.
+// on its own. Which misses: the dirty hold after a use (the cleaning is late), the clean hold after a cleaning (D-35,
+// owner: the item stood clean longer than validated), and a frequency-based room's scheduled cleaning (missed).
 // The report goes in through the Deviations system's own reporting route, as its user for automatic reports, so it is
 // numbered, audited and classified by QA there like any other report. Each missed limit is reported once.
 
@@ -71,7 +70,7 @@ export async function raiseOverdueDeviations(sql: Sql, sink: DeviationSink): Pro
   let detected = 0;
   for (const s of statuses) {
     const d = s.deadline;
-    if (!d?.overdue || (d.kind !== 'dirty_hold' && d.kind !== 'frequency')) continue;
+    if (!d?.overdue) continue;
     const [row] = await sql`
       insert into auto_deviations (equipment_id, kind, deadline_at)
       select ${s.equipmentId}, ${d.kind}, ${d.at} where exists (select 1 from equipment where id = ${s.equipmentId} and active)
@@ -79,10 +78,10 @@ export async function raiseOverdueDeviations(sql: Sql, sink: DeviationSink): Pro
     if (row) detected++;
   }
 
-  const pending = await sql<{ id: number; equipment_id: number; kind: 'dirty_hold' | 'frequency'; deadline_at: Date; code: string; name: string;
-    item_kind: string; location: string; dirty_hold_hours: number | null; cleaning_frequency_hours: number | null }[]>`
+  const pending = await sql<{ id: number; equipment_id: number; kind: 'dirty_hold' | 'clean_hold' | 'frequency'; deadline_at: Date; code: string; name: string;
+    item_kind: string; location: string; dirty_hold_hours: number | null; clean_hold_hours: number | null; cleaning_frequency_hours: number | null }[]>`
     select a.id::int, a.equipment_id::int, a.kind, a.deadline_at, q.code, q.name, q.kind as item_kind, q.location,
-      q.dirty_hold_hours, q.cleaning_frequency_hours
+      q.dirty_hold_hours, q.clean_hold_hours, q.cleaning_frequency_hours
     from auto_deviations a join equipment q on q.id = a.equipment_id
     where a.deviation_number is null and a.attempts < ${MAX_ATTEMPTS} order by a.id`;
   const raised: string[] = [];
@@ -106,6 +105,16 @@ export async function raiseOverdueDeviations(sql: Sql, sink: DeviationSink): Pro
         eventAt: p.deadline_at.toISOString(),
         immediateAction: `The Logbook blocks any use of ${p.code} until a cleaning is recorded and verified. No action recorded yet: this report was raised automatically when the dirty hold ran out.`,
         impactNotes: 'Automatic report from the Pharma Logbook: QA to assess the impact (cleaning validation of the hold time, residue and microbial risk, the batch last made).',
+      }
+      : p.kind === 'clean_hold'
+      ? {
+        title: `Clean hold expired: ${p.code} not used or re-cleaned within ${p.clean_hold_hours ?? '?'} h of cleaning`,
+        description: `${what} ${p.code} (${p.name}${p.location ? `, ${p.location}` : ''}) was cleaned and verified, and its clean hold of ${p.clean_hold_hours ?? '?'} hours `
+          + `ran out ${plant(p.deadline_at)} before it was used or cleaned again: it stood clean longer than the validated clean hold time. Raised automatically by the Pharma Logbook.`,
+        equipment: p.code,
+        eventAt: p.deadline_at.toISOString(),
+        immediateAction: `The Logbook blocks any use of ${p.code} until it is cleaned again and the cleaning verified. No action recorded yet: this report was raised automatically when the clean hold ran out.`,
+        impactNotes: 'Automatic report from the Pharma Logbook: QA to assess (clean hold time validation, microbial risk; the item was not used after the hold ran out, the Logbook blocks it).',
       }
       : {
         title: `Scheduled cleaning missed: ${p.code} (every ${p.cleaning_frequency_hours ?? '?'} h)`,
