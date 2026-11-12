@@ -37,7 +37,7 @@ id of each person in its records, and its audit trail. From B1-3 equipment, inst
 `report.*_v1` views with the Logbook's own login (platform PL-08; no local copy, D-02). A cut link shows "Connection to
 master data is off" and stops the feature. Before an entry refers to an item or product, the Logbook reads it and refuses
 an unknown or inactive one (A11 5). Each entry version keeps the master values it was made with (`entry_master_values`,
-platform PL-07). Its tests: `test/accounts.test.ts` (PL-01, PL-05, LB-18, LB-20, LB-21), `test/settings.test.ts`
+platform PL-07). Its tests: `test/accounts.test.ts` (PL-01, PL-05, LB-18, LB-20, LB-21), `test/backchannel.test.ts` (PL-01: sign-out at core ends the Logbook session at once, D-32), `test/settings.test.ts`
 (PL-05, PL-08), `test/entries.test.ts` (PL-07, PL-08) and `test/platform.test.ts` (PL-08 with real database rights).
 
 ## A. Product rules
