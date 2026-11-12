@@ -120,7 +120,7 @@ export function proofFor(username: string, at?: number, meanings: string[] = [..
 }
 export const sig = (username: string) => ({ proof: proofFor(username) });
 
-export async function freshApp(opts: Pick<AppOptions, 'speech' | 'advisor' | 'qualification'> = {}): Promise<TestApp> {
+export async function freshApp(opts: Pick<AppOptions, 'speech' | 'advisor' | 'qualification' | 'deviations'> = {}): Promise<TestApp> {
   const db = await freshDb();
   const master = fakeMaster();
   const app = await buildApp({ sql: db.sql, signOn: fakeSignOn(), proofKey: TEST_PROOF_KEY, master, webRoot: '/nonexistent', ...opts });

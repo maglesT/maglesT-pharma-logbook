@@ -169,11 +169,40 @@ function DueCard({ eq, d, onOpen }: { eq: Equipment; d: Due; onOpen: (id: number
   );
 }
 
+// Owner 2026-11-12 (D-37): every missed limit raises a deviation in the Deviations product; its number shows here.
+interface OverdueEvent { id: number; equipmentId: number; code: string; name: string; label: string; dueAt: string; detectedAt: string;
+  deviation: { number: string; status: string } | null }
+const DEV_STEP: Record<string, string> = { classification: 'awaiting QA classification', approval: 'awaiting approval', investigation: 'under investigation',
+  closure: 'awaiting closure', closed: 'closed', rejected: 'rejected' };
+function Raised({ data, onOpen }: { data: { linked: boolean; events: OverdueEvent[] } | null; onOpen: (id: number) => void }) {
+  if (!data || data.events.length === 0) return null;
+  return (
+    <section className="dash-panel" aria-label="Deviations raised">
+      <div className="dash-sub"><h3>Deviations raised for missed limits</h3><span className="count bad">{data.events.length}</span></div>
+      <table className="plain-table">
+        <thead><tr><th>Item</th><th>Missed limit</th><th>Ran out</th><th>Deviation</th></tr></thead>
+        <tbody>
+          {data.events.map((e) => (
+            <tr key={e.id} className="clickable" onClick={() => onOpen(e.equipmentId)}>
+              <td><strong>{e.code}</strong> {e.name}</td>
+              <td>{e.label}</td>
+              <td>{plantTime(e.dueAt)}</td>
+              <td>{e.deviation ? <><strong>{e.deviation.number}</strong> · {DEV_STEP[e.deviation.status] ?? e.deviation.status}</>
+                : data.linked ? <span className="muted">being raised in Deviations…</span> : <span className="muted">Deviations not linked</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
 export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => void }) {
   const [open, setOpen] = useState<Entry[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [statuses, setStatuses] = useState<EquipmentStatus[]>([]);
   const [updated, setUpdated] = useState<string | null>(null);
+  const [raised, setRaised] = useState<{ linked: boolean; events: OverdueEvent[] } | null>(null);
 
   const load = async (background = false) => {
     const [s, e, o] = await Promise.all([
@@ -184,6 +213,7 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
     setStatuses(s);
     setEquipment(e);
     setOpen(o);
+    setRaised(await api<{ linked: boolean; events: OverdueEvent[] }>('GET', '/api/overdue', undefined, background).catch(() => null));
     setUpdated(new Date().toISOString());
   };
   useEffect(() => {
@@ -231,6 +261,7 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
         <Part title="Operation-based rooms" icon="▦" items={part('area', 'operation')} onOpen={onOpen} note="processing rooms: dirty hold after use, clean hold after cleaning" />
         <Part title="Frequency-based rooms" icon="↻" items={part('area', 'frequency')} onOpen={onOpen} note="cleaned on a schedule (daily, weekly…)" />
       </div>
+      <Raised data={raised} onOpen={onOpen} />
       <section className="dash-panel" aria-label="In use">
         <div className="dash-sub"><h3>In use</h3>{inProgress.length > 0 && <span className="count info">{inProgress.length}</span>}</div>
         {inProgress.length === 0 ? (

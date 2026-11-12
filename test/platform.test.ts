@@ -96,7 +96,7 @@ describe('Logbook on a platform database (D-29)', () => {
   it('LB-21 the report views are published in the platform schema report, owned by the database owner', async () => {
     const views = await su<{ viewname: string; viewowner: string }[]>`
       select viewname, viewowner from pg_views where schemaname = 'report' order by 1`;
-    expect(views.map((v) => v.viewname)).toEqual(['calibration_v1', 'entry_v1', 'equipment_v1', 'logbook_sop_v1']);
+    expect(views.map((v) => v.viewname)).toEqual(['calibration_v1', 'entry_v1', 'equipment_v1', 'logbook_sop_v1', 'overdue_v1']);
     expect(new Set(views.map((v) => v.viewowner))).toEqual(new Set([OWNER]));
   });
 
