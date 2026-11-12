@@ -78,6 +78,9 @@ async function checksum(q: Sql | Tx, table: string, cols: string[], skip: string
 const pin = (q: Tx) => q.unsafe(`set local datestyle = 'ISO, YMD'; set local intervalstyle = 'postgres'; set local bytea_output = 'hex';
   set local extra_float_digits = 1; set local timezone = 'UTC'`);
 
+// Tables whose rows a migration writes on each installation (the platform keeps its own): never moved.
+const MIGRATION_ROWS = new Set(['overdue_since']);
+
 export async function moveToPlatform(o: MoveOptions): Promise<MoveResult> {
   const problems: string[] = [];
   const rows: MoveRow[] = [];
@@ -92,6 +95,7 @@ export async function moveToPlatform(o: MoveOptions): Promise<MoveResult> {
     const to = await tables(o.logbook);
     const copy: [string, string[]][] = [];
     for (const [t, cols] of from) {
+      if (MIGRATION_ROWS.has(t)) continue;
       const target = to.get(t);
       if (!target) { problems.push(`table ${t} is not in the platform's logbook database`); continue; }
       const lost = cols.filter((c) => !target.includes(c));

@@ -105,6 +105,8 @@ export async function recordOverdue(sql: Sql, master: Master, qualification: Qua
   }
   const items = new Map((await logbookItems(sql, master)).filter((i) => i.active).map((i) => [i.id, i]));
   const statuses = await allStatuses(sql, ctx);
+  // Only limits that ran out after the feature was installed (migration 0019).
+  const since = (await sql<{ since: Date }[]>`select since from overdue_since`)[0]?.since ?? new Date();
   let added = 0;
   for (const s of statuses) {
     const i = items.get(s.equipmentId);
@@ -116,6 +118,7 @@ export async function recordOverdue(sql: Sql, master: Master, qualification: Qua
       found.push({ kind: d.kind, at: await endOfPlantDay(sql, d.due), due: d.due });
     }
     for (const f of found) {
+      if (f.at < since) continue;
       const [exists] = await sql`select 1 from overdue_events where equipment_id = ${i.id} and kind = ${f.kind} and due_at = ${f.at}`;
       if (exists) continue;
       const r = await report(sql, f.kind, i, s, f.at, f.due);
