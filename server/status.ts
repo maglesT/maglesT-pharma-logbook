@@ -48,11 +48,13 @@ export interface Due {
   frequency: string;                // in words, e.g. "every 90 days"
   soon: boolean;
   overdue: boolean;
+  dueFrom: string;                  // plant date from which it counts as due (85 % of the allowed time, D-41)
 }
-// Owner (point 8): pending activities show from 15 days before they are due.
+// Owner (point 8): pending activities show from 15 days before they are due (where no start is known; D-41: 85 %).
 export const DUES_WARN_DAYS = 15;
-export const WARN_FRACTION = 0.25;
-export const WARN_MIN_HOURS = 1;
+// D-41: a cleaning is due once 85 % of its hold or interval has passed.
+export const WARN_FRACTION = 1 - 0.85;
+export const WARN_MIN_HOURS = 0;
 export function deadline(kind: CleaningDeadline['kind'], from: Date, hours: number, now: number): CleaningDeadline {
   const at = new Date(from.getTime() + hours * 3_600_000);
   const left = at.getTime() - now;
@@ -69,8 +71,14 @@ const addMonths = (date: string, months: number) => {
   if (d.getUTCDate() < day) d.setUTCDate(0);
   return d.toISOString().slice(0, 10);
 };
-function dueOf(kind: Due['kind'], due: string, today: string, frequency: string): Due {
-  return { kind, due, frequency, overdue: due < today, soon: due >= today && due <= addDays(today, DUES_WARN_DAYS) };
+// Owner 2026-11-13 (D-41): an activity is due once 85 % of its allowed time has passed (PM, calibration, requalification:
+// from the last one to the next due date). Without a known start, DUES_WARN_DAYS before the due date.
+export const DUE_AT_FRACTION = 0.85;
+const daysBetween = (a: string, b: string) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 86_400_000);
+function dueOf(kind: Due['kind'], due: string, today: string, frequency: string, start: string | null = null): Due {
+  const span = start ? daysBetween(start, due) : 0;
+  const window = span > 0 ? Math.ceil(span * (1 - DUE_AT_FRACTION)) : DUES_WARN_DAYS;
+  return { kind, due, frequency, overdue: due < today, soon: due >= today && due <= addDays(today, window), dueFrom: addDays(due, -window) };
 }
 
 /** What the status needs from master data and the Qualification product, by local item id (platform D-24). */
@@ -348,25 +356,28 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   let duesState: StatusCode | null = null;
   if (c.pmFrequencyDays) {
     const from = f.last_pm_end ?? c.addedAt;
-    const d = dueOf('pm', addDays(plantDate(from), c.pmFrequencyDays), f.today, `every ${c.pmFrequencyDays} days`);
+    const d = dueOf('pm', addDays(plantDate(from), c.pmFrequencyDays), f.today, `every ${c.pmFrequencyDays} days`, plantDate(from));
     dues.push(d);
     if (d.overdue) { blockers.push(`Preventive maintenance overdue since ${d.due}: do the PM before use.`); duesState ??= 'pm_overdue'; }
   }
   if (calibrationDue && (c.calibrationFrequencyDays || f.care.needsCalibration)) {
-    dues.push(dueOf('calibration', calibrationDue, f.today, c.calibrationFrequencyDays ? `every ${c.calibrationFrequencyDays} days` : 'per certificate'));
+    dues.push(dueOf('calibration', calibrationDue, f.today, c.calibrationFrequencyDays ? `every ${c.calibrationFrequencyDays} days` : 'per certificate',
+      f.last_cal_pass_at ? plantDate(f.last_cal_pass_at) : null));
   }
   // A requalification written in the Logbook gives the due date where the Qualification product has none.
   const requalDue = f.qual?.nextReviewDue ?? f.last_requal_due
     ?? (f.last_requal_at && c.requalificationFrequencyMonths ? addMonths(plantDate(f.last_requal_at), c.requalificationFrequencyMonths) : null);
   if (requalDue && !f.qual?.nextReviewDue) {
-    const d = dueOf('requalification', requalDue, f.today, c.requalificationFrequencyMonths ? `every ${c.requalificationFrequencyMonths} months` : 'per requalification report');
+    const d = dueOf('requalification', requalDue, f.today, c.requalificationFrequencyMonths ? `every ${c.requalificationFrequencyMonths} months` : 'per requalification report',
+      f.last_requal_at ? plantDate(f.last_requal_at) : null);
     dues.push(d);
     if (d.overdue) { blockers.push(`Requalification overdue since ${d.due}: requalify before use.`); duesState ??= 'requalification_overdue'; }
   }
   if (f.qual) {
     if (f.qual.nextReviewDue) {
       const d = dueOf('requalification', f.qual.nextReviewDue, f.today,
-        c.requalificationFrequencyMonths ? `every ${c.requalificationFrequencyMonths} months` : 'per qualification report');
+        c.requalificationFrequencyMonths ? `every ${c.requalificationFrequencyMonths} months` : 'per qualification report',
+        c.requalificationFrequencyMonths ? addMonths(f.qual.nextReviewDue, -c.requalificationFrequencyMonths) : (f.last_requal_at ? plantDate(f.last_requal_at) : null));
       dues.push(d);
       if (d.overdue) { blockers.push(`Requalification overdue since ${d.due}: requalify before use.`); duesState ??= 'requalification_overdue'; }
     }

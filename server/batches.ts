@@ -22,7 +22,18 @@ export interface Batches {
   get(batchNumber: string): Promise<Batch | null>;
   /** Batch numbers Batchwright records as using one of these equipment or room codes. */
   usedOn(codes: string[]): Promise<Set<string>>;
+  /** Owner 2026-11-13: only the abnormal records of the batch records, of the last `days` days (and every open one). */
+  abnormal(days: number): Promise<Abnormal>;
 }
+export interface BatchException {
+  batchNumber: string; exceptionId: string; type: string; category: string; severity: string; step: string | null; stepTitle: string | null;
+  description: string | null; status: string; disposition: string | null; disposedAt: string | null; raisedAt: string;
+}
+export interface IpcAbnormal { batchNumber: string; step: string | null; stepTitle: string | null; checkKind: string; item: string | null; instrumentCode: string | null;
+  value: string | null; unit: string | null; lower: string | null; upper: string | null; result: string; recordedAt: string }
+export interface ProcessAbnormal { batchNumber: string; step: string | null; tag: string; value: string | null; unit: string | null; lower: string | null; upper: string | null; recordedAt: string }
+export interface AlarmAbnormal { code: string; source: string; subject: string | null; batchNumbers: string[]; raisedAt: string }
+export interface Abnormal { exceptions: BatchException[]; ipc: IpcAbnormal[]; process: ProcessAbnormal[]; alarms: AlarmAbnormal[] }
 
 export const BATCHWRIGHT_OFF = 'Connection to Batchwright (batch records) is off. Ask your administrator.';
 export class BatchwrightOff extends ConnectionOff {
@@ -59,5 +70,30 @@ export function sqlBatches(q: Sql, schema = 'report'): Batches {
       select distinct batch_number from ${v('equipment_use_v1')}
       where upper(equipment_code) = any(${codes.map((c) => c.toUpperCase())}) or upper(room_code) = any(${codes.map((c) => c.toUpperCase())})`)
       .map((r) => r.batch_number))),
+    abnormal: (days) => read(() => q.begin('read only', async (tx) => {
+      await tx`set local statement_timeout = '15s'`;
+      const since = tx`now() - make_interval(days => ${days})`;
+      const exceptions = (await tx<Record<string, string | null>[]>`
+        select batch_number, exception_id::text, exception_type, category, severity, step, step_title, description, status, disposition,
+          disposed_at::text, raised_at::text
+        from ${v('exception_detail_v1')} where status <> 'DISPOSITIONED' or raised_at > ${since} order by raised_at desc limit 1000`).map((r) => ({
+        batchNumber: r.batch_number!, exceptionId: r.exception_id!, type: r.exception_type!, category: r.category ?? '', severity: r.severity ?? '',
+        step: r.step, stepTitle: r.step_title, description: r.description, status: r.status ?? '', disposition: r.disposition, disposedAt: r.disposed_at,
+        raisedAt: r.raised_at! }));
+      const ipc = (await tx<Record<string, string | null>[]>`
+        select batch_number, step, step_title, check_kind, item, instrument_code, value_text, unit, lower_text, upper_text, result, recorded_at::text
+        from ${v('ipc_result_v1')} where result in ('FAIL', 'ALERT') and recorded_at > ${since} order by recorded_at desc limit 500`).map((r) => ({
+        batchNumber: r.batch_number!, step: r.step, stepTitle: r.step_title, checkKind: r.check_kind ?? '', item: r.item, instrumentCode: r.instrument_code,
+        value: r.value_text, unit: r.unit, lower: r.lower_text, upper: r.upper_text, result: r.result!, recordedAt: r.recorded_at! }));
+      const process = (await tx<Record<string, string | null>[]>`
+        select batch_number, step, tag, value_text, unit, lower_text, upper_text, recorded_at::text
+        from ${v('process_actual_v1')} where within_limits = false and recorded_at > ${since} order by recorded_at desc limit 500`).map((r) => ({
+        batchNumber: r.batch_number!, step: r.step, tag: r.tag ?? '', value: r.value_text, unit: r.unit, lower: r.lower_text, upper: r.upper_text, recordedAt: r.recorded_at! }));
+      const alarms = (await tx<{ alarm_code: string; source: string; subject_code: string | null; batch_numbers: string[] | null; raised_at: string }[]>`
+        select alarm_code, source, subject_code, batch_numbers, raised_at::text from ${v('alarm_v1')}
+        where gmp_critical and acked_at is null order by raised_at desc limit 200`).map((r) => ({
+        code: r.alarm_code, source: r.source, subject: r.subject_code, batchNumbers: r.batch_numbers ?? [], raisedAt: r.raised_at }));
+      return { exceptions, ipc, process, alarms } as Abnormal;
+    })),
   };
 }

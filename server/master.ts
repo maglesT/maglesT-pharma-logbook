@@ -19,6 +19,8 @@ export interface MasterItem {
   model: string | null;
   serial: string | null;
   needsCalibration: boolean;    // master's default for a new instrument
+  // Owner 2026-11-13: a room's area (department), for the dashboard's grouping; null for equipment and instruments.
+  area?: string | null;
   // Platform D-24: maintenance, cleaning and requalification parameters, kept once in master data (null: not set).
   care: Care;
 }
@@ -74,6 +76,7 @@ export function sqlMaster(md: Sql): Master {
     room: (r.room_code as string | null) ?? null, make: (r.make as string | null) ?? null, model: (r.model as string | null) ?? null,
     serial: (r.serial as string | null) ?? null, needsCalibration: Boolean(r.needs_calibration),
     care: careOf(r.j as Record<string, unknown> | null, kind),
+    area: kind === 'area' ? ((r.j as Record<string, unknown> | null)?.area as string | null) ?? null : null,
   });
   return {
     items: () => read(async () => [

@@ -90,7 +90,7 @@ function ScanBox({ onOpen }: { onOpen: (id: number) => void }) {
 }
 
 // Owner 2026-11-12 (point 8): everything pending, shown as soon as someone signs in: PM, calibration and requalification
-// overdue or due within 15 days (due date - 15 days), and cleanings overdue. Hidden for the session on request.
+// overdue or due (85 % of the allowed time passed, D-41), and cleanings overdue. Hidden for the session on request.
 function PendingBanner({ onOpen }: { onOpen: (id: number) => void }) {
   const [rows, setRows] = useState<{ id: number; text: string; overdue: boolean; sort: string }[]>([]);
   const [hidden, setHidden] = useState(() => { try { return sessionStorage.getItem('pending-hidden') === '1'; } catch { return false; } });
@@ -115,7 +115,7 @@ function PendingBanner({ onOpen }: { onOpen: (id: number) => void }) {
   return (
     <div className={overdue ? 'pending-banner' : 'pending-banner soon'} role="alert">
       <div className="pb-head">
-        <strong>⚠ Pending activities: {overdue > 0 && `${overdue} overdue`}{overdue > 0 && rows.length > overdue && ', '}{rows.length > overdue && `${rows.length - overdue} due within 15 days`}</strong>
+        <strong>⚠ Pending activities: {overdue > 0 && `${overdue} overdue`}{overdue > 0 && rows.length > overdue && ', '}{rows.length > overdue && `${rows.length - overdue} due`}</strong>
         <button className="link dark" onClick={() => setOpen(!open)}>{open ? 'Hide the list' : 'Show the list'}</button>
         <button className="link" onClick={() => { setHidden(true); try { sessionStorage.setItem('pending-hidden', '1'); } catch { /* private window */ } }}>Dismiss for this session</button>
       </div>
