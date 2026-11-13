@@ -7,24 +7,24 @@ import { StatusChip } from '../components/StatusChip.js';
 // counts (a count opens its items; "due soon" is counted, point 1) and its cleaning deadlines, overdue and due soon
 // (point 2); then what is in use (point 3). Every row opens the item.
 
-// Owner 2026-11-12: the graph also shows change over, breakdown, requalification needed and PM due, each item in one
-// group, the first that applies in this order: in use, change over, breakdown, requalification, PM, cleaning overdue,
-// other out of service (calibration), dirty, due soon, ready.
+// Owner 2026-11-12/13: the graph shows each kind of due on its own row: cleaning due (overdue or due soon), PM due,
+// calibration due, requalification due (overdue, due within 15 days, not qualified or marked for requalification);
+// and change over, breakdown. Each item counts once, in the first group that applies in this order: in use, change
+// over, breakdown, requalification, calibration, PM, cleaning due, dirty, ready.
 const GROUPS = [
   { key: 'ready', label: 'Clean / ready', color: '#17803d' },
-  { key: 'soon', label: 'Due soon', color: '#f0b429' },
+  { key: 'cleaning', label: 'Cleaning due', color: '#f0b429' },
   { key: 'in_use', label: 'In use', color: '#1f63b8' },
   { key: 'change_over', label: 'Change over', color: '#6b4fbb' },
   { key: 'dirty', label: 'Dirty', color: '#b7791f' },
-  { key: 'late', label: 'Cleaning overdue', color: '#c0352b' },
   { key: 'pm', label: 'PM due', color: '#d9622b' },
-  { key: 'requal', label: 'Requalification needed', color: '#a3195b' },
+  { key: 'cal', label: 'Calibration due', color: '#0f8a8a' },
+  { key: 'requal', label: 'Requalification due', color: '#a3195b' },
   { key: 'breakdown', label: 'Breakdown', color: '#7a1f1f' },
-  { key: 'out', label: 'Out of service (calibration)', color: '#5f5f5f' },
 ] as const;
 type GroupKey = (typeof GROUPS)[number]['key'];
 const CLEANING_LATE = ['dirty_expired', 'clean_expired', 'cleaning_due'];
-const OUT = ['calibration_overdue', 'calibration_failed', 'not_calibrated'];
+const CAL = ['calibration_overdue', 'calibration_failed', 'not_calibrated'];
 const dueOf = (s: EquipmentStatus, kind: Due['kind']) => s.dues.find((d) => d.kind === kind && (d.overdue || d.soon));
 function groupOf(s: EquipmentStatus): GroupKey {
   if (s.state === 'in_use') return 'in_use';
@@ -32,13 +32,15 @@ function groupOf(s: EquipmentStatus): GroupKey {
   if (s.state === 'out_of_service') return 'breakdown';
   if (s.state === 'requalification_overdue' || s.state === 'not_qualified' || s.qualification === 'requalification_needed'
     || dueOf(s, 'requalification')) return 'requal';
+  if (CAL.includes(s.state) || dueOf(s, 'calibration')) return 'cal';
   if (s.state === 'pm_overdue' || dueOf(s, 'pm')) return 'pm';
-  if (CLEANING_LATE.includes(s.state) || s.deadline?.overdue) return 'late';
-  if (OUT.includes(s.state)) return 'out';
+  // Cleaning due: the cleaning deadline (dirty hold, clean hold, schedule) is overdue or in its last quarter.
+  if (CLEANING_LATE.includes(s.state) || s.deadline?.overdue || s.deadline?.soon) return 'cleaning';
   if (s.state === 'dirty') return 'dirty';
-  if (s.deadline?.soon || s.dues.some((d) => d.soon)) return 'soon';
   return 'ready';
 }
+// Ready for use: nothing blocks a new use (a clean hold running out soon still allows it).
+const usable = (s: EquipmentStatus) => s.blockers.length === 0 && !['in_use', 'in_change_over'].includes(s.state);
 const isOverdue = (s: EquipmentStatus) => Boolean(s.deadline?.overdue) || s.dues.some((d) => d.overdue)
   || [...CLEANING_LATE, 'pm_overdue', 'requalification_overdue', 'calibration_overdue'].includes(s.state);
 
@@ -51,10 +53,9 @@ function shortTime(iso: string): string {
   return day(d) === day(new Date()) ? `today ${time}` : `${d.toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short' })}, ${time}`;
 }
 
-function Ring({ counts, total }: { counts: { key: string; color: string; n: number }[]; total: number }) {
+function Ring({ counts, total, ready }: { counts: { key: string; color: string; n: number }[]; total: number; ready: number }) {
   const r = 50;
   const c = 2 * Math.PI * r;
-  const ready = counts.filter((x) => x.key === 'ready' || x.key === 'soon').reduce((a, x) => a + x.n, 0);
   let offset = 0;
   return (
     <svg className="ring" viewBox="0 0 128 128" role="img" aria-label={`${total} items, ${ready} ready`}>
@@ -108,7 +109,7 @@ function Part({ title, icon, items, note, onOpen }: { title: string; icon: strin
         </div>
       </header>
       <div className="dash-chart">
-        <Ring counts={counts} total={items.length} />
+        <Ring counts={counts} total={items.length} ready={items.filter((i) => usable(i.st)).length} />
         <ul className="legend">
           {counts.map((g) => (
             <li key={g.key} className={open === g.key ? 'on' : ''}>
@@ -249,7 +250,7 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
   const overdue = items.filter((i) => isOverdue(i.st)).length;
   const soon = items.filter((i) => !isOverdue(i.st) && (Boolean(i.st.deadline?.soon) || i.st.dues.some((d) => d.soon))).length;
   const inUse = items.filter((i) => groupOf(i.st) === 'in_use' || groupOf(i.st) === 'change_over').length;
-  const ready = items.filter((i) => groupOf(i.st) === 'ready' || groupOf(i.st) === 'soon').length;
+  const ready = items.filter((i) => usable(i.st)).length;
   const hour = new Date().getHours();
   // Point 3: "In use" lists what occupies an item now: uses, change overs and repairs in progress.
   const inProgress = open.filter((e) => e.inProgress);
