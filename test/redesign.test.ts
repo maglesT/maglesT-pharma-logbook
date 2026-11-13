@@ -110,7 +110,7 @@ describe('dues from master data and the Qualification product (owner, slide 4 an
   it('LB-06: preventive maintenance is due its frequency after the last verified PM (from the day the item was added before the first)', async () => {
     const id = await item({ pmFrequencyDays: 30 });
     let s = await status(id);
-    expect(s.dues.filter((d: { kind: string }) => d.kind === 'pm')).toEqual([{ kind: 'pm', due: day(30), frequency: 'every 30 days', soon: false, overdue: false }]);
+    expect(s.dues.filter((d: { kind: string }) => d.kind === 'pm')).toEqual([{ kind: 'pm', due: day(30), frequency: 'every 30 days', soon: false, overdue: false, dueFrom: day(25) }]);
     await t.owner`update equipment set created_at = now() - interval '40 days' where id = ${id}`;
     s = await status(id);
     expect(s.dues[0]).toMatchObject({ due: day(-10), overdue: true });
@@ -123,10 +123,12 @@ describe('dues from master data and the Qualification product (owner, slide 4 an
     expect(s.blockers.join(' ')).not.toMatch(/Preventive maintenance/);
   });
 
-  it('LB-06: a PM due within 15 days is "due soon"', async () => {
+  it('LB-06: an activity is "due" once 85 % of its allowed time has passed (owner 2026-11-13, D-41)', async () => {
     const id = await item({ pmFrequencyDays: 30 });
-    await t.owner`update equipment set created_at = now() - interval '20 days' where id = ${id}`;
-    expect((await status(id)).dues[0]).toMatchObject({ due: day(10), soon: true, overdue: false });
+    await t.owner`update equipment set created_at = now() - interval '20 days' where id = ${id}`;   // 67 % passed
+    expect((await status(id)).dues[0]).toMatchObject({ due: day(10), soon: false, overdue: false, dueFrom: day(5) });
+    await t.owner`update equipment set created_at = now() - interval '26 days' where id = ${id}`;   // 87 % passed
+    expect((await status(id)).dues[0]).toMatchObject({ due: day(4), soon: true, overdue: false });
   });
 
   it('LB-05: with a calibration frequency the item needs calibration, and the next one is due that long after the last verified pass', async () => {
@@ -137,7 +139,7 @@ describe('dues from master data and the Qualification product (owner, slide 4 an
     await verify(cal);
     const s = await status(id);
     expect(s.calibrationDue).toBe(day(30));                                       // the frequency comes first
-    expect(s.dues.filter((d: { kind: string }) => d.kind === 'calibration')).toEqual([{ kind: 'calibration', due: day(30), frequency: 'every 30 days', soon: false, overdue: false }]);
+    expect(s.dues.filter((d: { kind: string }) => d.kind === 'calibration')).toEqual([{ kind: 'calibration', due: day(30), frequency: 'every 30 days', soon: false, overdue: false, dueFrom: day(25) }]);
   });
 
   it('LB-05: requalification due and status come from the Qualification product; overdue or not qualified blocks use', async () => {
@@ -146,7 +148,7 @@ describe('dues from master data and the Qualification product (owner, slide 4 an
     await clean(id);
     qualify(m, 'qualified', day(10));
     let s = await status(id);
-    expect(s.dues).toEqual([{ kind: 'requalification', due: day(10), frequency: 'every 12 months', soon: true, overdue: false }]);
+    expect(s.dues).toEqual([expect.objectContaining({ kind: 'requalification', due: day(10), frequency: 'every 12 months', soon: true, overdue: false })]);
     expect(s.qualification).toBe('qualified');
     qualify(m, 'qualified', day(-1));
     s = await status(id);
@@ -219,7 +221,7 @@ describe('activities (owner, slides 1-3): change over, requalification, one acti
     expect(ok.statusCode, ok.body).toBe(201);
     expect((await status(id)).dues.some((d: { kind: string }) => d.kind === 'requalification')).toBe(false);   // not verified yet
     await verify(ok.json().id);
-    expect((await status(id)).dues).toContainEqual({ kind: 'requalification', due: day(200), frequency: 'every 12 months', soon: false, overdue: false });
+    expect((await status(id)).dues).toContainEqual(expect.objectContaining({ kind: 'requalification', due: day(200), frequency: 'every 12 months', soon: false, overdue: false }));
   });
 });
 

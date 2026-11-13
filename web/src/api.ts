@@ -219,7 +219,7 @@ export interface EquipmentStatus {
   qualification: string | null;
 }
 export interface CleaningDeadline { kind: 'dirty_hold' | 'clean_hold' | 'frequency'; at: string; hours: number; soon: boolean; overdue: boolean }
-export interface Due { kind: 'pm' | 'calibration' | 'requalification'; due: string; frequency: string; soon: boolean; overdue: boolean }
+export interface Due { kind: 'pm' | 'calibration' | 'requalification'; due: string; frequency: string; soon: boolean; overdue: boolean; dueFrom?: string }
 export const DEADLINE_LABEL: Record<CleaningDeadline['kind'], string> = { dirty_hold: 'Dirty hold', clean_hold: 'Clean hold', frequency: 'Scheduled cleaning' };
 export const DUE_LABEL: Record<Due['kind'], string> = { pm: 'Preventive maintenance', calibration: 'Calibration', requalification: 'Requalification' };
 // Time left until (or past) a moment, in words: "2 h 15 min", "3 days 4 h".

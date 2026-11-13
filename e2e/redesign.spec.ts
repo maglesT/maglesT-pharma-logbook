@@ -31,26 +31,28 @@ test('LB-06: PM due within 15 days shows in Dues and in the sign-in banner; scan
   const item = await newEquipment({ name: 'Rapid mixer granulator', pmFrequencyDays: 30 });
   await cleanVerified(item.id);
   const db = owner();
-  await db`update equipment set created_at = now() - interval '20 days' where id = ${item.id}`;   // PM due in 10 days
+  await db`update equipment set created_at = now() - interval '27 days' where id = ${item.id}`;   // PM due in 3 days (90 % of 30 days passed)
   await db.end();
   await logIn(page, 'sup1');
   const banner = page.locator('.pending-banner');
   await expect(banner).toContainText('Pending activities');
   await banner.getByRole('button', { name: 'Show the list' }).click();
   await expect(banner).toContainText(`${item.code} · Preventive maintenance due`);
-  const dues = page.getByRole('region', { name: 'Dues' });
-  await expect(dues.locator('.due-card').filter({ hasText: item.code })).toContainText('in 10 days');
-  // Owner 2026-11-12: the graph has its own row for PM due (and change over, breakdown, requalification needed).
-  const legend = page.getByRole('region', { name: 'Equipment' }).locator('.legend');
-  for (const g of ['Cleaning due', 'Change over', 'PM due', 'Calibration due', 'Requalification due', 'Breakdown']) await expect(legend).toContainText(g);
-  await expect(legend.getByRole('button', { name: /PM due/ })).toBeEnabled();
+  const dues = page.locator('[aria-label="Preventive maintenance dues"]');
+  await expect(dues.locator('.due-row').filter({ hasText: item.code })).toContainText('in 3 days');
+  // Owner 2026-11-13 (D-41): three parts; the graph has four sections and zooms into lifecycle management.
+  for (const t of ['Compliance', 'Workflow', 'Quality']) await expect(page.getByRole('tab', { name: new RegExp(t) })).toBeVisible();
+  const graph = page.getByRole('region', { name: 'Status of the plant' });
+  for (const g of ['Cleaning status', 'Lifecycle management', 'Change over', 'In use']) await expect(graph).toContainText(g);
+  await graph.locator('.section-card').filter({ hasText: 'Lifecycle management' }).click();
+  await expect(graph.locator('.zoom')).toContainText('PM due');
   await page.screenshot({ path: 'test-results/redesign-home.png', fullPage: true });
   await page.getByLabel('Scan or type the item ID').fill(item.code.toLowerCase());
   await page.getByLabel('Scan or type the item ID').press('Enter');
   await expect(page.getByRole('heading', { level: 1 })).toContainText(item.code);
   const check = page.getByRole('list', { name: 'Before use' });
   await expect(check).toContainText('Preventive maintenance');
-  await expect(check.locator('li.warn')).toContainText('in 10 days');
+  await expect(check.locator('li.warn')).toContainText('in 3 days');
   await expect(check.locator('li.ok').first()).toContainText('Cleaning status');
 });
 

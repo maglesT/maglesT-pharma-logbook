@@ -25,6 +25,7 @@ import type { Qualification } from './qualification.js';
 import type { Deviations } from './overdue.js';
 import type { Batches } from './batches.js';
 import { batchRoutes } from './routes/batches.js';
+import { dashboardRoutes } from './routes/dashboard.js';
 import { overdueRoutes } from './routes/overdue.js';
 import { statusContext, type StatusContext } from './status.js';
 
@@ -103,6 +104,7 @@ export async function buildApp({ sql, signOn, master, qualification = null, devi
   adviceRoutes(app, sql, advisor);
   overdueRoutes(app, sql);
   batchRoutes(app, sql);
+  dashboardRoutes(app, sql);
 
   // In production the built web UI is served from the same process.
   const root = webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');
