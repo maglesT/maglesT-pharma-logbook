@@ -16,6 +16,7 @@ export const PERMISSIONS = {
   'logbook.entry.correct_others': 'Correct entries made by others',
   'logbook.entry.verify': 'Verify entries (second person)',
   'logbook.breakdown.release': 'Release equipment after a breakdown',
+  'logbook.exception.decide': 'Decide the route of a problem (Deviations or a Logbook exception) and approve Logbook exceptions',
   'logbook.review.read': 'See period reviews, the batch view and exports',
   'logbook.review.sign': 'Sign period reviews',
   'logbook.audit.read': 'Read the audit trail and run the integrity check',
@@ -38,7 +39,7 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   supervisor: [...OPERATOR, 'logbook.entry.correct_others', 'logbook.entry.verify', 'logbook.review.read'],
   engineering: ['logbook.entry.record_general', 'logbook.entry.record_maintenance', 'logbook.entry.record_calibration', 'logbook.entry.record_requalification',
     'logbook.entry.record_steriliser_test', 'logbook.voice_note.record', 'logbook.advice.ask'],
-  qa: ['logbook.entry.verify', 'logbook.breakdown.release', 'logbook.review.read', 'logbook.review.sign', 'logbook.audit.read',
+  qa: ['logbook.entry.verify', 'logbook.breakdown.release', 'logbook.exception.decide', 'logbook.review.read', 'logbook.review.sign', 'logbook.audit.read',
     'logbook.settings.approve', 'logbook.advice.ask'],
   admin: ['logbook.audit.read', 'logbook.settings.draft', 'logbook.site.manage'],
 };

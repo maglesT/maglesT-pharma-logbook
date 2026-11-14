@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, cleaningText, daysLeft, type Due, can, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
+import { api, cleaningText, daysLeft, type Due, can, ApiError, ATTACHMENT_TYPES, MEANING_LABEL, plantTime, TYPE_LABEL, untilDay, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
+import { ProblemsPanel } from '../components/ProblemsPanel.js';
+import { AttachDialog, AttachmentLinks } from '../components/Attachments.js';
 import { SignDialog } from '../components/SignDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
@@ -92,6 +94,8 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
   const [voice, setVoice] = useState<VoiceConfig | undefined>(undefined);
   const [listening, setListening] = useState<number | null>(null);
   const [advising, setAdvising] = useState<number | null>(null);
+  // D-44: adding a document to an entry saved earlier.
+  const [attaching, setAttaching] = useState<Entry | null>(null);
   useEffect(() => {
     void api<VoiceConfig>('GET', '/api/voice-notes/config').then(setVoice).catch(() => setVoice(undefined));
   }, []);
@@ -158,6 +162,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
         </div>
       )}
       {status && <UseCheck status={status} />}
+      <ProblemsPanel me={me} equipment={equipment} reload={load} />
       <div className="subtabs">
         <button className={tab === 'log' ? 'on' : ''} onClick={() => setTab('log')}>Logbook</button>
         <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>History card</button>
@@ -195,6 +200,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
                 {e.batch && <>{productName(e.productId)} · batch {e.batch}<br /></>}
                 <Summary e={e} />
                 <VoiceLinks e={e} onOpen={setListening} />
+                <AttachmentLinks e={e} />
                 {e.change === 'corrected' && <><br /><span className="muted">Corrected (version {e.version}): {e.correctionReason}</span></>}
               </td>
               <td>{e.enteredBy}</td>
@@ -222,6 +228,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
                     <button onClick={() => setReleasing(e)}>Release to service</button>
                   )}
                 {e.mayCorrect && !e.inProgress && <button onClick={() => setForm({ type: e.logbookType, correcting: e })}>Correct</button>}
+                {ATTACHMENT_TYPES.has(e.logbookType) && mayRecord(e.logbookType) && (e.attachments?.length ?? 0) < 10 && <button onClick={() => setAttaching(e)}>Attach document</button>}
                 {e.version > 1 && <button onClick={async () => setHistory(await api<Entry[]>('GET', `/api/entries/${e.id}/versions`))}>History</button>}
               </td>
             </tr>
@@ -277,6 +284,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
         </SignDialog>
       )}
       {listening !== null && <VoiceNoteDialog id={listening} onClose={() => setListening(null)} />}
+      {attaching && <AttachDialog entry={attaching} code={equipment.code} onCancel={() => setAttaching(null)} onDone={async () => { setAttaching(null); await load(); }} />}
       {advising !== null && <AdviceDialog versionId={advising} code={equipment.code} onClose={() => setAdvising(null)} />}
       {history && (
         <div className="overlay" role="dialog" aria-modal="true">
@@ -286,7 +294,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
               <div key={v.id} className="version">
                 <strong>Version {v.version}</strong> · {v.change} by {v.enteredBy}, entered {plantTime(v.enteredAt)}
                 {v.correctionReason && <> · reason: {v.correctionReason}</>}
-                <div><Summary e={v} full /> <VoiceLinks e={v} onOpen={setListening} /></div>
+                <div><Summary e={v} full /> <VoiceLinks e={v} onOpen={setListening} /><AttachmentLinks e={v} full /></div>
                 <div className="muted">{v.signatures.map((s) => `${MEANING_LABEL[s.meaning]}: ${s.printedName}, ${plantTime(s.signedAt)}`).join(' · ')}</div>
               </div>
             ))}
@@ -324,18 +332,20 @@ function UseCheck({ status: s }: { status: EquipmentStatus }) {
   const line = (label: string, bad: boolean, warn: boolean, text: string) => (
     <li className={bad ? 'bad' : warn ? 'warn' : 'ok'}><span aria-hidden="true">{bad ? '✕' : warn ? '!' : '✓'}</span><b>{label}</b><span>{text}</span></li>
   );
-  const dueText = (d: Due | undefined, none: string) => (d ? `${d.overdue ? 'Overdue since' : 'Due'} ${d.due} (${daysLeft(d.due)})` : none);
+  // D-43: an approved exception allows use although the due is overdue: shown as a warning, not a block.
+  const dueText = (d: Due | undefined, none: string) => (d ? `${d.overdue ? 'Overdue since' : 'Due'} ${d.due} (${daysLeft(d.due)})${d.waived ? ` · use allowed under exception ${d.waived.number}, until ${untilDay(d.waived.until)} (end of day)` : ''}` : none);
   const pm = due('pm');
   const cal = due('calibration');
   const rq = due('requalification');
+  const blocked = (d: Due | undefined) => Boolean(d?.overdue && !d.waived);
   const cleaningBad = has(/^(Dirty|Clean-hold|Cleaning overdue)/);
   return (
     <ul className="use-check" aria-label="Before use">
       {line('Cleaning status', cleaningBad, Boolean(s.deadline?.soon), cleaningBad ? s.blockers.find((b) => /^(Dirty|Clean-hold|Cleaning overdue)/.test(b))!
         : s.deadline ? `${s.deadline.kind === 'dirty_hold' ? 'Dirty hold ends' : s.schedule === 'frequency' ? 'Next cleaning due' : 'Clean until'} ${plantTime(s.deadline.at)}` : 'Clean')}
-      {line('Preventive maintenance', Boolean(pm?.overdue), Boolean(pm?.soon), dueText(pm, 'No PM schedule in master data'))}
-      {line('Calibration', has(/^(Calibration|Not calibrated|Re-calibration)/), Boolean(cal?.soon), has(/^(Calibration|Not calibrated|Re-calibration)/) ? s.blockers.find((b) => /^(Calibration|Not calibrated|Re-calibration)/.test(b))! : dueText(cal, 'Not calibrated in the Logbook'))}
-      {line('Requalification', Boolean(rq?.overdue) || has(/^(Not qualified|Requalification needed)/), Boolean(rq?.soon),
+      {line('Preventive maintenance', blocked(pm), Boolean(pm?.soon || pm?.waived), dueText(pm, 'No PM schedule in master data'))}
+      {line('Calibration', has(/^(Calibration|Not calibrated|Re-calibration)/), Boolean(cal?.soon || cal?.waived), has(/^(Calibration|Not calibrated|Re-calibration)/) ? s.blockers.find((b) => /^(Calibration|Not calibrated|Re-calibration)/.test(b))! : dueText(cal, 'Not calibrated in the Logbook'))}
+      {line('Requalification', blocked(rq) || has(/^(Not qualified|Requalification needed)/), Boolean(rq?.soon || rq?.waived),
         has(/^(Not qualified|Requalification needed)/) ? s.blockers.find((b) => /^(Not qualified|Requalification needed)/.test(b))! : dueText(rq, 'No requalification date'))}
       {line('Breakdown (QA released)', has(/^Out of service/), false, has(/^Out of service/) ? 'A breakdown is not released by QA' : 'No open breakdown')}
     </ul>

@@ -6,6 +6,8 @@ import { addItem, asReport, call, freshApp, login, proofFor, seedUser, type Test
 
 // Owner 2026-11-12 (D-37): a missed limit (dirty hold, clean hold, scheduled cleaning, PM, calibration, requalification)
 // is recorded once, with the report Deviations files, in report.overdue_v1; the deviation number is read back.
+// D-43: since 2026-11-14 a record waits for QA's route decision first; it is published once QA sends it to Deviations
+// (test/problems.test.ts). Records made before D-43 (no problem row) are published as before.
 
 let t: TestApp;
 const c: Record<string, string> = {};
@@ -23,6 +25,12 @@ const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toLoc
 const record = () => recordOverdue(t.sql, t.master, fakeQualification);
 const events = (id: number) => t.owner<{ id: number; kind: string; due_at: Date; title: string; description: string }[]>`
   select id::int, kind, due_at, title, description from overdue_events where equipment_id = ${id} order by id`;
+// QA sends the item's waiting problems to Deviations (D-43).
+async function sendToDeviations(equipmentId: number) {
+  const open = (await call(t.app, c.qa!, 'GET', `/api/equipment/${equipmentId}/problems`)).json().problems.filter((p: { decision: unknown }) => !p.decision);
+  for (const p of open) expect((await call(t.app, c.qa!, 'POST', `/api/problems/${p.id}/decide`, { route: 'deviation', contentHash: p.contentHash, signature: sig('qa1') })).statusCode).toBe(201);
+  return open.map((p: { id: number }) => p.id) as number[];
+}
 let n = 0;
 async function item(care: object, kind: 'equipment' | 'instrument' | 'area' = 'equipment') {
   const code = `OD-${++n}`;
@@ -84,10 +92,14 @@ describe('missed limits are recorded for Deviations (owner 2026-11-12, D-37)', (
     expect(audit).toHaveLength(1);
 
     await t.owner.unsafe(`grant usage on schema ${t.reportSchema.replace(/_report$/, '')} to logbook_report`);
-    const v = await asReport(t.owner, `select event_id, equipment_code, equipment_name, location, kind, due_at, title, description, immediate_action, impact_notes
-      from ${t.reportSchema}.overdue_v1 where equipment_code = '${a.code}'`);
+    const query = `select event_id, equipment_code, equipment_name, location, kind, due_at, title, description, immediate_action, impact_notes
+      from ${t.reportSchema}.overdue_v1 where equipment_code = '${a.code}'`;
+    // D-43: published once QA sends it to Deviations, under the problem's id.
+    expect((await asReport(t.owner, query)).rows).toEqual([]);
+    const [problemId] = await sendToDeviations(a.id);
+    const v = await asReport(t.owner, query);
     expect(v.error).toBeUndefined();
-    expect(v.rows).toEqual([expect.objectContaining({ event_id: String(ev[0]!.id), equipment_name: `Item ${a.code}`, location: 'GRAN-1', kind: 'pm' })]);
+    expect(v.rows).toEqual([expect.objectContaining({ event_id: String(problemId), equipment_name: `Item ${a.code}`, location: 'GRAN-1', kind: 'pm', title: ev[0]!.title })]);
     expect((await asReport(t.owner, `insert into ${t.reportSchema}.overdue_v1 (kind) values ('pm')`)).error).toBeDefined();
     expect((await t.sql`update overdue_events set title = 'x' where id = ${ev[0]!.id}`.catch((e) => e)).code).toBe('42501');   // insert-only
   });
@@ -115,16 +127,31 @@ describe('missed limits are recorded for Deviations (owner 2026-11-12, D-37)', (
     expect(await events(a.id)).toHaveLength(0);
   });
 
+  it('LB-06: a record made before D-43 (no problem row) stays published under its event id, as Deviations already filed it', async () => {
+    const a = await item({ pmFrequencyDays: 5 });
+    await t.owner`update equipment set created_at = now() - interval '8 days' where id = ${a.id}`;
+    await record();
+    const [ev] = await events(a.id);
+    await t.owner`delete from audit_log where object_type = 'problem' and object_id in (select id::text from problems where overdue_event_id = ${ev!.id})`;
+    await t.owner`delete from problems where overdue_event_id = ${ev!.id}`;   // as before D-43
+    const v = await asReport(t.owner, `select event_id, kind from ${t.reportSchema}.overdue_v1 where equipment_code = '${a.code}'`);
+    expect(v.rows).toEqual([{ event_id: String(ev!.id), kind: 'pm' }]);
+    raised.set(`${SOURCE_PREFIX}${ev!.id}`, { number: 'DEV-2026-0007', status: 'closed' });
+    const list = (await call(t.app, c.op1!, 'GET', '/api/overdue')).json();
+    expect(list.events.find((e: { id: number }) => e.id === ev!.id)).toMatchObject({ route: 'deviation', problemId: null, deviation: { number: 'DEV-2026-0007' } });
+  });
+
   it('LB-06: the overdue list shows the deviation number once Deviations has filed the record', async () => {
     const a = await item({ pmFrequencyDays: 5 });
     await t.owner`update equipment set created_at = now() - interval '8 days' where id = ${a.id}`;
     await record();
     const [ev] = await events(a.id);
     expect(ev!.kind).toBe('pm');
+    const [problemId] = await sendToDeviations(a.id);
     const before = (await call(t.app, c.op1!, 'GET', '/api/overdue')).json();
     expect(before.linked).toBe(true);
-    expect(before.events.find((e: { id: number }) => e.id === ev!.id)).toMatchObject({ code: a.code, label: 'Preventive maintenance overdue', deviation: null });
-    raised.set(`${SOURCE_PREFIX}${ev!.id}`, { number: 'DEV-2026-0042', status: 'classification' });
+    expect(before.events.find((e: { id: number }) => e.id === ev!.id)).toMatchObject({ code: a.code, label: 'Preventive maintenance overdue', route: 'deviation', deviation: null });
+    raised.set(`${SOURCE_PREFIX}${problemId}`, { number: 'DEV-2026-0042', status: 'classification' });
     const after = (await call(t.app, c.op1!, 'GET', '/api/overdue')).json();
     expect(after.events.find((e: { id: number }) => e.id === ev!.id).deviation).toEqual({ number: 'DEV-2026-0042', status: 'classification' });
   });

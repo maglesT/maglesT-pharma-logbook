@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { explainException, explainReading } from './explain.js';
+import { ExceptionDecisions } from '../components/ExceptionDecisions.js';
 import { api, daysLeft, DEADLINE_LABEL, plantTime, timeLeft, TYPE_LABEL, type Due, type Entry, type Equipment, type EquipmentStatus, type Me } from '../api.js';
 
 // Owner 2026-11-13 (D-41): the home dashboard in three parts.
@@ -636,6 +637,7 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
 
       {tab === 'compliance' && (
         <>
+          <ExceptionDecisions onOpen={onOpen} />
           <OnTime c={compliance} />
           <DueColumns items={items} onOpen={onOpen} />
           <StatusGraph items={items} onOpen={onOpen} />

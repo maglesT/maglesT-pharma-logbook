@@ -3,11 +3,14 @@ import { audit } from './audit.js';
 import { logbookItems, type LogbookItem, type Master } from './master.js';
 import { QualificationOff, type Qualification } from './qualification.js';
 import { allStatuses, PLANT_TZ, statusContext, type EquipmentStatus } from './status.js';
+import { recordOverdueProblem } from './problems.js';
 
 // Owner 2026-11-12 (D-37): a missed limit raises a deviation on its own. The Logbook records each overdue cleaning
 // (dirty hold, clean hold, scheduled cleaning), preventive maintenance, calibration and requalification once, with the
 // report Deviations files for it (report.overdue_v1). Deviations reads the records through its platform link and files
 // each one; the Logbook reads the deviation numbers back from Deviations' report.deviation_v1 (source_ref).
+// Owner 2026-11-14 (D-43): a new record first waits for QA's route decision (server/problems.ts); it is published to
+// Deviations only when QA sends it there. Records made before D-43 (no problem row) stay published as they were.
 
 export type OverdueKind = 'dirty_hold' | 'clean_hold' | 'frequency' | 'pm' | 'calibration' | 'requalification';
 export const OVERDUE_LABEL: Record<OverdueKind, string> = {
@@ -127,8 +130,11 @@ export async function recordOverdue(sql: Sql, master: Master, qualification: Qua
           insert into overdue_events (equipment_id, kind, due_at, code, name, item_kind, location, title, description, immediate_action, impact_notes)
           values (${i.id}, ${f.kind}, ${f.at}, ${i.code}, ${i.name}, ${i.kind}, ${i.room ?? ''}, ${r.title}, ${r.description}, ${r.immediateAction}, ${r.impactNotes})
           on conflict (equipment_id, kind, due_at) do nothing returning id::int`;
-        if (e) await audit(tx, { actorId: null, action: 'overdue.recorded', objectType: 'equipment', objectId: i.id,
-          new: { event: e.id, kind: f.kind, dueAt: f.at.toISOString() } });
+        if (e) {
+          await audit(tx, { actorId: null, action: 'overdue.recorded', objectType: 'equipment', objectId: i.id,
+            new: { event: e.id, kind: f.kind, dueAt: f.at.toISOString() } });
+          await recordOverdueProblem(tx, { id: e.id, equipmentId: i.id, kind: f.kind, code: i.code, name: i.name, itemKind: i.kind, location: i.room ?? '', title: r.title });
+        }
         return e;
       });
       if (row) added++;
@@ -145,7 +151,7 @@ export function scheduleOverdue(sql: Sql, master: Master, qualification: Qualifi
     running = true;
     try {
       const n = await recordOverdue(sql, master, qualification);
-      if (n) log(`overdue: ${n} new missed limit(s) recorded for Deviations`);
+      if (n) log(`overdue: ${n} new missed limit(s) recorded; waiting for a QA route decision`);
     } catch (e) {
       log(`overdue check could not run: ${(e as Error).message}`);
     } finally {
