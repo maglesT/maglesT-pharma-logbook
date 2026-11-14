@@ -7,7 +7,7 @@ import { logbookItem } from '../master.js';
 import { SignError, authenticateSigner, proofOnly, sign } from '../signatures.js';
 import { SOURCE_PREFIX } from '../overdue.js';
 import {
-  DECISION_COLS, PROBLEM_COLS, SEVERITIES, SEVERITY_LABEL, USE_ALLOWED_MAX_DAYS, decisionContent, decisionHash, endOfPlantDay, isWaivable,
+  DECISION_COLS, PROBLEM_COLS, SEVERITIES, SEVERITY_LABEL, decisionContent, decisionHash, endOfPlantDay, isWaivable,
   nextExceptionNumber, plantToday, problemHash, problemLabel, type DecisionRow, type ProblemRow,
 } from '../problems.js';
 
@@ -155,8 +155,7 @@ export function problemRoutes(app: FastifyInstance, sql: Sql) {
                 : 'Continued use is decided for an overdue PM, calibration or requalification only; a reported problem does not block use.');
             } else {
               const today = await plantToday(tx);
-              const last = new Date(Date.parse(`${today}T00:00:00Z`) + USE_ALLOWED_MAX_DAYS * 86_400_000).toISOString().slice(0, 10);
-              if (b.useAllowedUntil < today || b.useAllowedUntil > last) problems.push(`Use may be allowed until a date between today and ${last} (at most ${USE_ALLOWED_MAX_DAYS} days).`);
+              if (b.useAllowedUntil < today) problems.push('Use may be allowed until today or a later date (QA chooses how long).');
               else until = await endOfPlantDay(tx, b.useAllowedUntil);
             }
           }

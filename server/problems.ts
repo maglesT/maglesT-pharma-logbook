@@ -7,12 +7,12 @@ import { PLANT_TZ } from './status.js';
 // Owner 2026-11-14 (D-43): two routes for a problem. A missed limit (D-37) or a problem someone reports on an item
 // waits for a QA decision: (1) send it to Deviations (published in report.overdue_v1, filed there as before), or
 // (2) handle it here as a Logbook exception EXC-YYYY-NNNN, approved with an e-signature, optionally allowing continued
-// use of the item until a date (at most 7 days) when an overdue PM, calibration or requalification blocks it. A cleaning
+// use of the item until a date QA chooses when an overdue PM, calibration or requalification blocks it. A cleaning
 // limit is never waived; a critical problem always goes to Deviations.
 
 export const SEVERITIES = ['minor', 'major', 'critical'] as const;
 export type Severity = (typeof SEVERITIES)[number];
-export const USE_ALLOWED_MAX_DAYS = 7;
+// Owner 2026-11-14: QA chooses how long continued use is allowed (no fixed maximum); the date must not be in the past.
 // The lifecycle dues whose block an approved exception may lift for a while. Cleaning is still required.
 export const WAIVABLE: OverdueKind[] = ['pm', 'calibration', 'requalification'];
 export const isWaivable = (kind: string | null) => WAIVABLE.includes(kind as OverdueKind);

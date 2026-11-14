@@ -6,7 +6,7 @@ import { addItem, addProduct, asReport, call, freshApp, login, proofFor, seedUse
 
 // Owner 2026-11-14 (D-43): two routes for a problem. A missed limit or a reported problem waits for QA, who sends it to
 // Deviations (then published in report.overdue_v1) or handles it here as a Logbook exception EXC-YYYY-NNNN, signed,
-// optionally allowing continued use for an overdue PM, calibration or requalification (at most 7 days). Cleaning is
+// optionally allowing continued use for an overdue PM, calibration or requalification (until a date QA chooses). Cleaning is
 // never waived; a critical problem always goes to Deviations.
 
 let t: TestApp;
@@ -122,7 +122,7 @@ describe('a missed limit waits for QA, then goes to Deviations or becomes a Logb
 
   it('LB-06: exception numbers are gapless per year; a refused decision does not use one up', async () => {
     const a = await pmOverdueItem();
-    expect((await decide('qa', a.problem.id, exception({ useAllowedUntil: day(8) }), a.problem.contentHash)).statusCode).toBe(400);   // more than 7 days: no number spent
+    expect((await decide('qa', a.problem.id, exception({ useAllowedUntil: day(-1) }), a.problem.contentHash)).statusCode).toBe(400);   // a date in the past: no number spent
     expect((await decide('qa', a.problem.id, exception(), a.problem.contentHash)).json().exceptionNumber).toBe(`EXC-${year}-0002`);
     const b = await pmOverdueItem();
     expect((await decide('qa', b.problem.id, exception({ useAllowedUntil: today() }), b.problem.contentHash)).json().exceptionNumber).toBe(`EXC-${year}-0003`);
@@ -211,12 +211,12 @@ describe('a person reports a problem on an item (D-43)', () => {
     expect((await t.sql`update problem_decisions set use_allowed_until = now() + interval '30 days'`.catch((e) => e)).code).toBe('42501');
     expect((await t.sql`delete from problem_decisions`.catch((e) => e)).code).toBe('42501');
     expect((await asReport(t.owner, `update ${t.reportSchema}.overdue_v1 set title = 'x'`)).error).toBeDefined();
-    // The database caps continued use: no decision may allow use for more than 8 days from the decision.
+    // QA chooses how long (owner 14 Nov): 30 days is accepted by the database; a date before the decision is not.
     const id = await addItem(t, { code: `PR-${++n}`, location: 'GRAN-1', pmFrequencyDays: 10 });
     await t.owner`update equipment set created_at = now() - interval '12 days' where id = ${id}`;
     await record();
     const [w] = await waiting(id);
     await expect(t.owner`insert into problem_decisions (problem_id, route, exception_number, justification, impact_assessment, action, use_allowed_until, decided_by)
-      values (${w.id}, 'exception', 'EXC-1999-0003', 'x', 'x', 'x', now() + interval '30 days', (select id from users where username = 'qa1'))`).rejects.toMatchObject({ code: '23514' });
+      values (${w.id}, 'exception', 'EXC-1999-0003', 'x', 'x', 'x', now() - interval '1 day', (select id from users where username = 'qa1'))`).rejects.toMatchObject({ code: '23514' });
   });
 });

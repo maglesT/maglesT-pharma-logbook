@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { apiAs, cleanVerified, logIn, logOut, newEquipment, openLogbook, owner, sign } from './helpers.js';
 
 // Owner 2026-11-14 (D-43): a missed limit or a reported problem waits for QA, who sends it to Deviations or handles it
-// here as a Logbook exception; an approved exception may allow continued use for an overdue PM for up to 7 days.
+// here as a Logbook exception; an approved exception may allow continued use for an overdue PM until a date QA chooses.
 
 const panel = (page: import('@playwright/test').Page) => page.getByRole('region', { name: 'Problems and exceptions' });
 
@@ -31,7 +31,7 @@ test('LB-06: QA handles an overdue PM as a Logbook exception with continued use;
   await dialog.getByLabel('Action', { exact: true }).fill('PM booked for tomorrow (WO-9001).');
   await dialog.getByRole('checkbox', { name: /Allow use of/ }).check();
   const until = new Date(Date.now() + 2 * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
-  await dialog.getByLabel('Until (end of day, at most 7 days)').fill(until);
+  await dialog.getByLabel("Until (end of day, QA's choice)").fill(until);
   await page.screenshot({ path: 'test-results/problems-decide.png', fullPage: true });
   await sign(dialog, 'qa1', 'Sign and save');
   await expect(dialog).toHaveCount(0);

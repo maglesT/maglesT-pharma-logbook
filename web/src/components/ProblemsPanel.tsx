@@ -3,7 +3,7 @@ import { api, ApiError, can, getSignProof, plantDay, plantTime, SEVERITY_LABEL, 
 
 // Owner 2026-11-14 (D-43): "Problems and exceptions" on an item's page. A missed limit or a reported problem waits for QA,
 // who either sends it to Deviations or handles it here as a Logbook exception (justification, impact assessment, action,
-// e-signature; for an overdue PM, calibration or requalification optionally continued use until a date, at most 7 days).
+// e-signature; for an overdue PM, calibration or requalification optionally continued use until a date QA chooses).
 
 interface Data { mayDecide: boolean; linked: boolean; problems: Problem[] }
 const DEV_STEP: Record<string, string> = { classification: 'awaiting QA classification', approval: 'awaiting approval', investigation: 'under investigation', closure: 'awaiting closure', closed: 'closed', rejected: 'rejected' };
@@ -141,7 +141,6 @@ function DecideDialog({ problem: p, equipment, onCancel, onDone }: { problem: Pr
   const [action, setAction] = useState('');
   const [allowUse, setAllowUse] = useState(false);
   const today = plantDay(new Date().toISOString());
-  const last = new Date(Date.parse(`${today}T00:00:00Z`) + 7 * 86_400_000).toISOString().slice(0, 10);
   const [until, setUntil] = useState(today);
   const [problems, setProblems] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
@@ -200,7 +199,7 @@ function DecideDialog({ problem: p, equipment, onCancel, onDone }: { problem: Pr
               <fieldset className="checklist">
                 <legend>Continued use</legend>
                 <label className="check"><input type="checkbox" checked={allowUse} onChange={(e) => setAllowUse(e.target.checked)} />Allow use of {equipment.code} although the {p.label.toLowerCase().replace(' overdue', '')} is overdue</label>
-                {allowUse && <label>Until (end of day, at most 7 days)<input type="date" value={until} min={today} max={last} onChange={(e) => setUntil(e.target.value)} required /></label>}
+                {allowUse && <label>Until (end of day, QA's choice)<input type="date" value={until} min={today} onChange={(e) => setUntil(e.target.value)} required /></label>}
                 <p className="muted">While the exception is valid the item shows "Use allowed under exception {'EXC-…'}, until …". The due stays open: do the {p.label.toLowerCase().replace(' overdue', '')} and record it.</p>
               </fieldset>
             ) : p.source === 'overdue' ? (
