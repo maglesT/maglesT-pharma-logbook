@@ -63,6 +63,11 @@ export interface Equipment extends Care {
   make: string | null;
   model: string | null;
   serial: string | null;
+  // D-42: the master-data type (rooms: their area) and where it sits in the classification (shared/taxonomy.ts).
+  type: string | null;
+  paths: string[][];
+  facilities: string[];
+  grade: string | null;
 }
 
 // Platform D-24: maintenance, cleaning and requalification parameters, master data's (read only here).

@@ -3,7 +3,8 @@ import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
 import { parseId, requirePermission } from '../auth.js';
-import { addToLogbook, needsCalibrationOf, logbookItem, logbookItems, logbookProducts, type LogbookItem } from '../master.js';
+import { addToLogbook, needsCalibrationOf, logbookItem, logbookItems, logbookProducts, type LogbookItem, type MasterItem } from '../master.js';
+import { classify } from '../../shared/taxonomy.js';
 
 const siteBody = z.object({ name: z.string().trim().min(1).max(120), code: z.string().trim().min(1).max(20), reason: z.string().trim().min(1).max(500) });
 
@@ -44,10 +45,23 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
   });
 
   // Items and products are read live from master data (D-29); a cut link answers "connection off".
-  const view = (i: LogbookItem) => ({ id: i.id, itemId: i.itemId, code: i.code, name: i.name, kind: i.kind, location: i.room ?? '',
-    make: i.make, model: i.model, serial: i.serial, version: i.version, active: i.active, sterile: i.sterile, classified: i.classified,
-    ...i.care, needsCalibration: needsCalibrationOf(i) });
-  app.get('/api/equipment', anyUser, async () => (await logbookItems(sql, app.master)).map(view));
+  // Owner 2026-11-14 (D-42): `type`, `paths`, `facilities` and `grade` place the item in the classification
+  // (shared/taxonomy.ts) for the Logbooks page's filter; a bench instrument stands where its room is and an item takes
+  // its room's facility, so the rooms (area, name) are passed along.
+  type Rooms = Map<string, { area: string | null; name: string }>;
+  const roomsOf = (all: MasterItem[]): Rooms => new Map(all.filter((m) => m.kind === 'area').map((m) => [m.code, { area: m.area ?? null, name: m.name }]));
+  const view = (i: LogbookItem, rooms: Rooms = new Map()) => {
+    const room = i.room ? rooms.get(i.room) : undefined;
+    return { id: i.id, itemId: i.itemId, code: i.code, name: i.name, kind: i.kind, location: i.room ?? '',
+      make: i.make, model: i.model, serial: i.serial, version: i.version, active: i.active, sterile: i.sterile, classified: i.classified,
+      ...i.care, needsCalibration: needsCalibrationOf(i),
+      ...classify({ kind: i.kind, type: i.type, name: i.name, grade: i.grade, roomArea: room?.area ?? null, roomName: room?.name ?? null }) };
+  };
+  app.get('/api/equipment', anyUser, async () => {
+    const all = await app.master.items();
+    const rooms = roomsOf(all);
+    return (await logbookItems(sql, app.master, all)).map((i) => view(i, rooms));
+  });
 
   // The master items that can be added: not in the Logbook yet, active, and (with the Qualification link) qualified.
   app.get('/api/equipment/candidates', admin, async () => {

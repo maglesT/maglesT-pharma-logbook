@@ -21,6 +21,10 @@ export interface MasterItem {
   needsCalibration: boolean;    // master's default for a new instrument
   // Owner 2026-11-13: a room's area (department), for the dashboard's grouping; null for equipment and instruments.
   area?: string | null;
+  // Owner 2026-11-14 (D-42): the master-data type that places the item in the classification (shared/taxonomy.ts):
+  // equipment and instruments their `type`, rooms their `area`; a room's cleanroom `grade` is its step.
+  type?: string | null;
+  grade?: string | null;
   // Platform D-24: maintenance, cleaning and requalification parameters, kept once in master data (null: not set).
   care: Care;
 }
@@ -77,6 +81,8 @@ export function sqlMaster(md: Sql): Master {
     serial: (r.serial as string | null) ?? null, needsCalibration: Boolean(r.needs_calibration),
     care: careOf(r.j as Record<string, unknown> | null, kind),
     area: kind === 'area' ? ((r.j as Record<string, unknown> | null)?.area as string | null) ?? null : null,
+    type: ((r.j as Record<string, unknown> | null)?.[kind === 'area' ? 'area' : 'type'] as string | null) ?? null,
+    grade: kind === 'area' ? ((r.j as Record<string, unknown> | null)?.grade as string | null) ?? null : null,
   });
   return {
     items: () => read(async () => [
@@ -100,9 +106,10 @@ export interface LogbookItem extends MasterItem {
  * The items of the Logbook: those added to it (owner 2026-11-12, point 4: an item is chosen by its ID, the rest comes
  * from master data), read live from master data with the Logbook's own settings (sterile, classified). Name, location,
  * hold times, frequencies and whether it needs calibration are master data's (platform D-24): the Logbook keeps no copy.
+ * `fetched`: the master items when the caller has read them already (one read per request).
  */
-export async function logbookItems(sql: Sql | Tx, master: Master): Promise<LogbookItem[]> {
-  const items = await master.items();
+export async function logbookItems(sql: Sql | Tx, master: Master, fetched?: MasterItem[]): Promise<LogbookItem[]> {
+  const items = fetched ?? await master.items();
   const local = new Map((await sql<{ id: number; item_id: string; sterile: boolean; classified: boolean; created_at: Date }[]>`
     select id::int, item_id::text, sterile, classified, created_at from equipment where item_id is not null`)
     .map((r) => [r.item_id, r]));

@@ -63,7 +63,7 @@ export function fakeMaster(): FakeMaster {
 
 export interface ItemBody extends Partial<Care> {
   code: string; name?: string; kind?: Kind; location?: string; make?: string; model?: string; serial?: string;
-  sterile?: boolean; classified?: boolean; needsCalibration?: boolean;
+  sterile?: boolean; classified?: boolean; needsCalibration?: boolean; type?: string; grade?: string;
 }
 // Adds an item to master data as core would (with its parameters, platform D-24), then to the Logbook; returns its local id.
 export async function addItem(t: TestApp, b: ItemBody): Promise<number> {
@@ -72,7 +72,7 @@ export async function addItem(t: TestApp, b: ItemBody): Promise<number> {
   for (const k of Object.keys(NO_CARE) as (keyof Care)[]) if (b[k] !== undefined) (care as unknown as Record<string, unknown>)[k] = b[k];
   const m: MasterItem = { itemId: randomUUID(), code: b.code, name: b.name ?? `Item ${b.code}`, version: 1, active: true, kind,
     room: kind === 'area' ? null : (b.location || null), make: b.make ?? null, model: b.model ?? null, serial: b.serial ?? null,
-    needsCalibration: b.needsCalibration ?? kind === 'instrument', care };
+    needsCalibration: b.needsCalibration ?? kind === 'instrument', care, type: b.type ?? null, grade: b.grade ?? null, area: kind === 'area' ? b.type ?? null : null };
   t.master.items_.set(b.code, m);
   return (await addToLogbook(t.sql, m, { sterile: b.sterile ?? false, classified: b.classified ?? false }))!;
 }

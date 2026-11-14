@@ -7,6 +7,8 @@ import { HistoryCard } from './HistoryCard.js';
 import { VoiceNoteDialog } from '../components/VoiceNote.js';
 import { AdviceDialog } from '../components/AdviceDialog.js';
 import { Fields } from '../fields.js';
+import { inSelection, LogbookFilter, rememberSelection, rememberedSelection } from '../components/LogbookFilter.js';
+import type { Selection } from '../../../shared/taxonomy.js';
 
 const CORE_TYPES = ['equipment_use', 'equipment_cleaning', 'change_over', 'maintenance', 'calibration', 'requalification', 'area_cleaning', 'general_log',
   'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading'];
@@ -47,6 +49,9 @@ const APPLIES: Record<string, Equipment['kind'][]> = {
 export function EquipmentPage({ me, openId }: { me: Me; openId?: number }) {
   const [items, setItems] = useState<Equipment[]>([]);
   const [filter, setFilter] = useState('');
+  // D-42: the classification chosen on the page (kind → dosage form → process → step), remembered in the URL hash.
+  const [selection, setSelection] = useState<Selection>(rememberedSelection);
+  useEffect(() => rememberSelection(selection), [selection]);
   const [selected, setSelected] = useState<number | undefined>(openId);
   const [statuses, setStatuses] = useState<EquipmentStatus[] | null>(null);
   useEffect(() => {
@@ -58,19 +63,22 @@ export function EquipmentPage({ me, openId }: { me: Me; openId?: number }) {
   const eq = items.find((i) => i.id === selected);
   if (eq) return <Logbook me={me} equipment={eq} onBack={() => setSelected(undefined)} />;
 
-  const shown = items.filter((i) => i.active && `${i.code} ${i.name} ${i.location}`.toLowerCase().includes(filter.toLowerCase()));
+  const active = items.filter((i) => i.active);
+  const chosen = inSelection(active, selection);
+  const shown = chosen.filter((i) => `${i.code} ${i.name} ${i.location} ${i.type ?? ''}`.toLowerCase().includes(filter.toLowerCase()));
   return (
     <>
       <h1>Equipment and areas</h1>
-      <input className="search" placeholder="Search by ID, name or location" value={filter} onChange={(e) => setFilter(e.target.value)} />
-      <p className="muted">{shown.length} of {items.filter((i) => i.active).length} logbooks</p>
+      <LogbookFilter items={active} value={selection} onChange={setSelection} />
+      <input className="search" placeholder="Search by ID, name or location" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Search by ID, name or location" />
+      <p className="muted">{shown.length} of {active.length} logbooks{chosen.length !== active.length ? ` (${chosen.length} in the selection)` : ''}</p>
       {statuses === null && <p className="muted">Loading status…</p>}
       <div className="tiles">
         {shown.map((i) => (
           <button key={i.id} className={`tile state-${statuses?.find((x) => x.equipmentId === i.id)?.state ?? 'loading'}`} onClick={() => setSelected(i.id)}>
             <strong>{i.code} <StatusChip status={statuses?.find((x) => x.equipmentId === i.id)} /></strong>
             <span>{i.name}</span>
-            <span className="muted">{i.location}</span>
+            <span className="muted">{i.location}{i.type ? `${i.location ? ' · ' : ''}${i.type}` : ''}</span>
           </button>
         ))}
       </div>
