@@ -610,3 +610,7 @@ td .batch-link { font-size: .95rem; }
 .skel-page .dash-panel { margin-bottom: 14px; }
 .slim-ok { margin: 0 0 14px; }
 @media (prefers-reduced-motion: reduce) { .skel { animation: none; } }
+/* owner 2026-11-14: full names in dues cards — ID on the first line, the name below it (wraps), then when */
+.due-row { grid-template-columns: 1fr; }
+.due-row .due-code { white-space: normal; }
+.due-row .due-name { white-space: normal; overflow: visible; text-overflow: clip; font-size: .86rem; line-height: 1.3; }
