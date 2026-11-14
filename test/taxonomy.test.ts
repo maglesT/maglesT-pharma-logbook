@@ -121,7 +121,7 @@ describe('taxonomy: the tree and the type table (D-42)', () => {
     const rows0 = filterRows(items, NO_SELECTION);
     expect(rows0.map((r) => r.key)).toEqual(['kind', 'facility:', 'form:']);                 // no process row before a form is chosen
     const kind = rows0[0]!;
-    expect(kind.options.map((o) => [o.id, o.count])).toEqual([['equipment', 4], ['instrument', 1], ['area', 1]]);
+    expect(kind.options.map((o) => [o.id, o.count])).toEqual([['equipment', 4], ['instrument', 1], ['area', 1], ['system', 0]]);
     expect(rows0[2]!.options.map((o) => o.id)).toEqual(['osd', 'injection', 'biologics', 'qc']);   // empty forms hidden (the lyophiliser also serves biologics)
     expect(filterRows(items, NO_SELECTION, true)[2]!.options.map((o) => o.id)).toEqual(FORMS.map((f) => f.id));
 
@@ -184,5 +184,17 @@ describe('GET /api/equipment carries the classification (D-42)', () => {
     expect(by['TX-HT']!.paths).toEqual([['instrument', 'osd.tablet', 'compression.ipc']]);
     expect(by['TX-UNKNOWN']).toMatchObject({ type: 'Flux capacitor', paths: [['equipment', 'other']], facilities: ['general'] });
     expect(by['TX-NOTYPE']).toMatchObject({ type: 'Leak tester', paths: [['instrument', 'osd', 'packing.leak'], ['instrument', 'liquid', 'packing.leak']] });
+  });
+});
+
+describe('engineering systems (owner 14 Nov)', () => {
+  it('LB-21: utility systems (HVAC, water, steam, gases, cooling, power, effluent) form their own group next to equipment, instruments and areas', async () => {
+    const { classify } = await import('../shared/taxonomy.js');
+    for (const type of ['Purified water system', 'Air handling unit', 'Pure steam generator', 'Chiller', 'Diesel generator']) {
+      const c = classify({ kind: 'equipment', type, name: type });
+      expect(c.group, type).toBe('system');
+      expect(c.paths.every((p) => p[0] === 'system'), type).toBe(true);
+    }
+    expect(classify({ kind: 'equipment', type: 'Rapid mixer granulator', name: 'RMG' }).group).toBe('equipment');
   });
 });

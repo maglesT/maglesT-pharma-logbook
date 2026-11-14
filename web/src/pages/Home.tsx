@@ -122,7 +122,8 @@ function ItemList({ items, onOpen, note }: { items: Item[]; onOpen: (id: number)
 
 const SCOPES: { key: string; label: string; test: (e: Equipment) => boolean }[] = [
   { key: 'all', label: 'All', test: () => true },
-  { key: 'equipment', label: 'Equipment', test: (e) => e.kind === 'equipment' },
+  { key: 'equipment', label: 'Equipment', test: (e) => (e.group ?? e.kind) === 'equipment' },
+  { key: 'system', label: 'Engineering systems', test: (e) => e.group === 'system' },
   { key: 'instrument', label: 'Instruments', test: (e) => e.kind === 'instrument' },
   { key: 'operation', label: 'Operation-based rooms', test: (e) => e.kind === 'area' && e.cleaningBasis !== 'frequency' },
   { key: 'frequency', label: 'Frequency-based rooms', test: (e) => e.kind === 'area' && e.cleaningBasis === 'frequency' },
@@ -206,10 +207,11 @@ function StatusGraph({ items, onOpen }: { items: Item[]; onOpen: (id: number) =>
 
 // ---- dues in four columns ----
 // Owner 2026-11-14: dues divided by equipment, instruments and areas (a filter on top, groups inside each column).
-const KINDS: { key: 'equipment' | 'instrument' | 'area'; label: string }[] = [
-  { key: 'equipment', label: 'Equipment' }, { key: 'instrument', label: 'Instruments' }, { key: 'area', label: 'Areas' }];
+const KINDS: { key: 'equipment' | 'instrument' | 'area' | 'system'; label: string }[] = [
+  { key: 'equipment', label: 'Equipment' }, { key: 'instrument', label: 'Instruments' }, { key: 'area', label: 'Areas' }, { key: 'system', label: 'Engineering systems' }];
+const groupOfEq = (e: Equipment) => e.group ?? e.kind;
 function DueColumns({ items, onOpen }: { items: Item[]; onOpen: (id: number) => void }) {
-  const [kind, setKind] = useState<'all' | 'equipment' | 'instrument' | 'area'>('all');
+  const [kind, setKind] = useState<'all' | 'equipment' | 'instrument' | 'area' | 'system'>('all');
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const cleaning = items.filter((i) => i.st.deadline && (i.st.deadline.overdue || i.st.deadline.soon))
     .map((i) => ({ i, over: i.st.deadline!.overdue, when: i.st.deadline!.at, text: `${DEADLINE_LABEL[i.st.deadline!.kind]} · ${i.st.deadline!.overdue ? `overdue by ${timeLeft(i.st.deadline!.at)}` : `ends in ${timeLeft(i.st.deadline!.at)}`}` }));
@@ -220,7 +222,7 @@ function DueColumns({ items, onOpen }: { items: Item[]; onOpen: (id: number) => 
     { key: 'cal', title: 'Calibration', rows: col('calibration') }, { key: 'rq', title: 'Requalification', rows: col('requalification') },
   ];
   const all = cols.flatMap((c) => c.rows);
-  const n = (k: string) => all.filter((r) => k === 'all' || r.i.eq.kind === k).length;
+  const n = (k: string) => all.filter((r) => k === 'all' || groupOfEq(r.i.eq) === k).length;
   const row = (r: (typeof cleaning)[number], key: string) => (
     <button key={key} className={r.over ? 'due-row over' : 'due-row'} onClick={() => onOpen(r.i.eq.id)}>
       <span className="due-code">{r.i.eq.code}</span><span className="due-name">{r.i.eq.name}</span><span className="due-when">{r.text}</span>
@@ -236,9 +238,9 @@ function DueColumns({ items, onOpen }: { items: Item[]; onOpen: (id: number) => 
         </div></div>
       <div className="due-cols">
         {cols.map((c) => {
-          const rows = [...c.rows].filter((r) => kind === 'all' || r.i.eq.kind === kind).sort((a, b) => Number(b.over) - Number(a.over) || a.when.localeCompare(b.when));
+          const rows = [...c.rows].filter((r) => kind === 'all' || groupOfEq(r.i.eq) === kind).sort((a, b) => Number(b.over) - Number(a.over) || a.when.localeCompare(b.when));
           const over = rows.filter((r) => r.over).length;
-          const groups = KINDS.filter((k) => kind === 'all' || k.key === kind).map((k) => ({ ...k, rows: rows.filter((r) => r.i.eq.kind === k.key) })).filter((g) => g.rows.length);
+          const groups = KINDS.filter((k) => kind === 'all' || k.key === kind).map((k) => ({ ...k, rows: rows.filter((r) => groupOfEq(r.i.eq) === k.key) })).filter((g) => g.rows.length);
           return (
             <div key={c.key} className="due-col" aria-label={`${c.title} dues`}>
               <div className="due-col-head"><h3>{c.title}</h3>

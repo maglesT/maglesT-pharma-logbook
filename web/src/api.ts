@@ -65,6 +65,8 @@ export interface Equipment extends Care {
   code: string;
   name: string;
   kind: 'equipment' | 'instrument' | 'area';
+  // Owner 2026-11-14: equipment, instrument, area, or an engineering system (utilities), from the classification.
+  group?: 'equipment' | 'instrument' | 'area' | 'system';
   location: string;
   sterile: boolean;
   classified: boolean;

@@ -59,10 +59,16 @@ export const IPC = 'ipc';
 export interface Node { id: string; label: string; children?: Node[] }
 const n = (id: string, label: string, children?: Node[]): Node => (children ? { id, label, children } : { id, label });
 
-export const KINDS: { id: Kind; label: string }[] = [
-  { id: 'equipment', label: 'Equipment' }, { id: 'instrument', label: 'Instruments' }, { id: 'area', label: 'Areas' },
+// Owner 2026-11-14: "Engineering systems" is a fourth group next to equipment, instruments and areas: the plant's
+// utility systems (HVAC, water, steam, gases and vacuum, cooling and heating media, power, effluent). Master data keeps
+// them as equipment; the Logbook groups them by their place in this classification (to move to master data, D-42).
+export type Group = Kind | 'system';
+export const SYSTEM_PROCESSES = new Set(['hvac', 'water', 'steam', 'gases', 'cooling', 'power', 'effluent']);
+export const KINDS: { id: Group; label: string }[] = [
+  { id: 'equipment', label: 'Equipment' }, { id: 'instrument', label: 'Instruments' }, { id: 'area', label: 'Areas' }, { id: 'system', label: 'Engineering systems' },
 ];
-export const KIND_LABEL: Record<Kind, string> = { equipment: 'Equipment', instrument: 'Instruments', area: 'Areas' };
+export const KIND_LABEL: Record<Group, string> = { equipment: 'Equipment', instrument: 'Instruments', area: 'Areas', system: 'Engineering systems' };
+const isSystemPath = (p: Path) => p[0] === 'equipment' && p.length >= 3 && SYSTEM_PROCESSES.has(p[2]!.split('.')[0]!);
 
 export const FACILITIES: Node[] = [
   n('general', 'General (non-dedicated)'),
@@ -394,7 +400,8 @@ export const EQUIPMENT_TYPES: Record<string, Specs> = {
   'Cyclotron': ['radiopharma.pet cyclotron'], 'Radiosynthesis module': ['radiopharma.pet radiosynthesis'], 'Hot cell': ['radiopharma hot_cell'],
   'Shielded dispensing isolator': ['radiopharma shielded_dispensing'], 'Tc-99m generator shield': ['radiopharma.spect shielded_dispensing'], 'Decay storage cabinet': ['radiopharma decay_storage'],
   // Common and utilities
-  'AHU': ['common hvac.ahu'], 'Dehumidifier': ['common hvac.dehumidifier'], 'Dust extractor': ['common hvac.exhaust'], 'Building management system': ['common hvac.bms'],
+  'AHU': ['common hvac.ahu'], 'Air handling unit': ['common hvac.ahu'], 'Diesel generator': ['common power.dg'], 'Air compressor': ['common gases.compressed_air'],
+  'Vacuum pump': ['common gases.vacuum'], 'Thermic fluid heater': ['common cooling.hot_oil'], 'Dehumidifier': ['common hvac.dehumidifier'], 'Dust extractor': ['common hvac.exhaust'], 'Building management system': ['common hvac.bms'],
   'Water system': ['common water.pw'], 'Purified water system': ['common water.pw'], 'RO-EDI purified water system': ['common water.pw.ro_edi'], 'WFI generator': ['common water.wfi.mcd'],
   'Vapour compression distiller': ['common water.wfi.vc'], 'Water distribution loop': ['common water.distribution'],
   'Boiler': ['common steam.boiler'], 'Pure steam generator': ['common steam.pure_steam'], 'Compressor': ['common gases.compressed_air'], 'Nitrogen generator': ['common gases.nitrogen'],
@@ -563,7 +570,7 @@ export function pathsOf(item: Classifiable): Path[] {
     }
   }
   if (!own) return [[item.kind, OTHER]];
-  return dedupe(own.flatMap((s) => expandSpec(item.kind, s)));
+  return dedupe(own.flatMap((s) => expandSpec(item.kind, s)).map((p) => (isSystemPath(p) ? ['system', ...p.slice(1)] : p)));
 }
 
 /** The facilities of an item: from its name, else its room's name, else the default of its form(s). */
@@ -578,10 +585,11 @@ export function facilitiesOf(item: Classifiable, paths: Path[] = pathsOf(item)):
 }
 
 /** Everything the filter needs about one item. */
-export interface Classification { type: string | null; paths: Path[]; facilities: string[]; grade: string | null }
+export interface Classification { type: string | null; paths: Path[]; facilities: string[]; grade: string | null; group: Group }
 export function classify(item: Classifiable): Classification {
   const paths = pathsOf(item);
-  return { type: typeOf(item), paths, facilities: facilitiesOf(item, paths), grade: item.kind === 'area' ? ((item.grade ?? '').trim() || null) : null };
+  const group: Group = paths.length > 0 && paths.every((p) => p[0] === 'system') ? 'system' : item.kind;
+  return { type: typeOf(item), paths, facilities: facilitiesOf(item, paths), grade: item.kind === 'area' ? ((item.grade ?? '').trim() || null) : null, group };
 }
 
 /* ---- Trees and labels ---- */
@@ -603,7 +611,7 @@ export function processLabel(id: string): string {
 export const gradeLabel = (g: string) => (g.toUpperCase() === 'CNC' ? 'CNC (unclassified)' : `Grade ${g}`);
 
 /* ---- Selection and matching ---- */
-export interface Selection { kind: Kind | null; facility: string | null; form: string | null; process: string | null; grade: string | null }
+export interface Selection { kind: Group | null; facility: string | null; form: string | null; process: string | null; grade: string | null }
 export const NO_SELECTION: Selection = { kind: null, facility: null, form: null, process: null, grade: null };
 export type Dimension = keyof Selection;
 
