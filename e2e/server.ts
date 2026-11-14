@@ -37,13 +37,13 @@ const sql = connect(TEST_DATABASE_URL, { role: 'logbook_app', searchPath: E2E_SC
 // which the specs fill (e2e/helpers.ts newEquipment).
 const setup = connect(TEST_DATABASE_URL, { searchPath: E2E_SCHEMA });
 await setup`create table e2e_master_items (item_id uuid primary key default gen_random_uuid(), code text, name text, kind text,
-  room text, active boolean default true, version int default 1, is_product boolean default false, care jsonb not null default '{}')`;
+  room text, active boolean default true, version int default 1, is_product boolean default false, care jsonb not null default '{}', type text, grade text)`;
 await setup`insert into e2e_master_items (code, name, is_product) values ('P1', 'Paracetamol 500 mg', true)`;
 const master: Master = {
-  items: async () => (await setup<{ item_id: string; code: string; name: string; kind: 'equipment' | 'instrument' | 'area'; room: string | null; active: boolean; version: number; care: Partial<Care> }[]>`
+  items: async () => (await setup<{ item_id: string; code: string; name: string; kind: 'equipment' | 'instrument' | 'area'; room: string | null; active: boolean; version: number; care: Partial<Care>; type: string | null; grade: string | null }[]>`
     select * from e2e_master_items where not is_product`).map((r) => ({ itemId: r.item_id, code: r.code, name: r.name, kind: r.kind, room: r.room,
       active: r.active, version: r.version, make: null, model: null, serial: null, needsCalibration: r.kind === 'instrument',
-      care: { ...NO_CARE, cleaningBasis: r.kind === 'area' ? 'operation' : null, ...r.care } })),
+      care: { ...NO_CARE, cleaningBasis: r.kind === 'area' ? 'operation' : null, ...r.care }, type: r.type, grade: r.grade, area: r.kind === 'area' ? r.type : null })),
   products: async () => (await setup<{ item_id: string; code: string; name: string; active: boolean; version: number }[]>`
     select * from e2e_master_items where is_product`).map((r) => ({ itemId: r.item_id, code: r.code, name: r.name, active: r.active, version: r.version })),
 };
