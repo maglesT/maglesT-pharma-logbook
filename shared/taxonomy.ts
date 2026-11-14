@@ -63,7 +63,7 @@ const n = (id: string, label: string, children?: Node[]): Node => (children ? { 
 // utility systems (HVAC, water, steam, gases and vacuum, cooling and heating media, power, effluent). Master data keeps
 // them as equipment; the Logbook groups them by their place in this classification (to move to master data, D-42).
 export type Group = Kind | 'system';
-export const SYSTEM_PROCESSES = new Set(['hvac', 'water', 'steam', 'gases', 'cooling', 'power', 'effluent']);
+export const SYSTEM_PROCESSES = new Set(['hvac', 'water', 'steam', 'gases', 'cooling', 'power', 'effluent', 'fire']);
 export const KINDS: { id: Group; label: string }[] = [
   { id: 'equipment', label: 'Equipment' }, { id: 'instrument', label: 'Instruments' }, { id: 'area', label: 'Areas' }, { id: 'system', label: 'Engineering systems' },
 ];
@@ -213,16 +213,17 @@ export const PROCESSES: Node[] = [
   n('isolation', 'Isolation', [n('isolation.centrifuge', 'Centrifuge', [n('isolation.centrifuge.peeler', 'Peeler'), n('isolation.centrifuge.pusher', 'Pusher')]), n('isolation.anfd', 'Agitated nutsche filter dryer'), n('isolation.nutsche', 'Nutsche filter'), n('isolation.filter_press', 'Filter press')]),
   n('sterile_api', 'Sterile API', [n('sterile_api.sterile_filtration', 'Sterile filtration'), n('sterile_api.aseptic_crystallisation', 'Aseptic crystallisation'), n('sterile_api.sterile_drying', 'Sterile drying'), n('sterile_api.sterile_packing', 'Sterile packing')]),
   n('solvent_recovery', 'Solvent recovery', [n('solvent_recovery.distillation', 'Distillation'), n('solvent_recovery.storage', 'Solvent tank farm')]),
-  n('effluent', 'Effluent and emissions', [n('effluent.scrubber', 'Scrubber'), n('effluent.etp', 'Effluent treatment plant')]),
+  n('effluent', 'Effluent and emissions', [n('effluent.scrubber', 'Scrubber'), n('effluent.etp', 'Effluent treatment plant'), n('effluent.stp', 'Sewage treatment plant'), n('effluent.zld', 'Zero liquid discharge (evaporator)')]),
   // Radiopharmaceuticals
   n('cyclotron', 'Cyclotron'), n('radiosynthesis', 'Radiosynthesis module'), n('hot_cell', 'Hot cell'), n('shielded_dispensing', 'Shielded dispensing'), n('decay_storage', 'Decay storage'),
   // Common and utilities
   n('hvac', 'HVAC', [n('hvac.ahu', 'Air handling unit'), n('hvac.dehumidifier', 'Dehumidifier'), n('hvac.exhaust', 'Exhaust and dust extraction'), n('hvac.bms', 'Building management system'), n('hvac.monitoring', 'Monitoring')]),
-  n('water', 'Water systems', [n('water.pw', 'Purified water', [n('water.pw.ro_edi', 'RO-EDI')]), n('water.wfi', 'Water for injection', [n('water.wfi.mcd', 'Multi-column distillation'), n('water.wfi.vc', 'Vapour compression')]), n('water.distribution', 'Distribution loop')]),
+  n('water', 'Water systems', [n('water.raw', 'Raw water treatment', [n('water.raw.softener', 'Softener'), n('water.raw.storage', 'Raw water storage')]), n('water.pw', 'Purified water', [n('water.pw.ro_edi', 'RO-EDI')]), n('water.wfi', 'Water for injection', [n('water.wfi.mcd', 'Multi-column distillation'), n('water.wfi.vc', 'Vapour compression')]), n('water.distribution', 'Distribution loop')]),
   n('steam', 'Steam', [n('steam.boiler', 'Boiler'), n('steam.pure_steam', 'Pure steam generator')]),
   n('gases', 'Compressed air, gases and vacuum', [n('gases.compressed_air', 'Compressed air'), n('gases.nitrogen', 'Nitrogen'), n('gases.vacuum', 'Vacuum system')]),
   n('cooling', 'Cooling and heating media', [n('cooling.chiller', 'Chiller'), n('cooling.cooling_tower', 'Cooling tower'), n('cooling.brine', 'Brine plant'), n('cooling.hot_oil', 'Hot oil / thermic fluid')]),
-  n('power', 'Power', [n('power.dg', 'Diesel generator'), n('power.ups', 'UPS')]),
+  n('power', 'Power', [n('power.transformer', 'Transformer and HT/LT panels'), n('power.dg', 'Diesel generator'), n('power.ups', 'UPS'), n('power.solar', 'Solar plant')]),
+  n('fire', 'Fire and safety systems', [n('fire.hydrant', 'Hydrant and sprinkler'), n('fire.detection', 'Fire detection and alarm'), n('fire.suppression', 'Gas suppression')]),
   n('warehouse', 'Warehouse', [n('warehouse.storage', 'Storage'), n('warehouse.sampling', 'Sampling booth'), n('warehouse.cold_room', 'Cold room'), n('warehouse.quarantine', 'Quarantine')]),
   n('engineering', 'Engineering', [n('engineering.workshop', 'Workshop'), n('engineering.calibration', 'Calibration laboratory')]),
   // QC laboratory, by technique
@@ -265,7 +266,7 @@ export const FAMILY_PROCESSES: Record<string, string[]> = {
   liquid: ['dispensing', 'water', 'syrup_prep', 'compounding', 'transfer', 'filtration', 'filling', 'sachet_filling', 'inspection', 'packing', 'cip', 'gowning'],
   api: ['dispensing', 'reaction', 'workup', 'purification', 'isolation', 'drying', 'milling', 'blending', 'sterile_api', 'solvent_recovery', 'effluent', 'packing', 'gowning'],
   radiopharma: ['cyclotron', 'radiosynthesis', 'hot_cell', 'shielded_dispensing', 'components', 'filtration', 'filling', 'radio_qc', 'decay_storage', 'gowning'],
-  common: ['hvac', 'water', 'steam', 'gases', 'cooling', 'power', 'warehouse', 'engineering', 'cip', 'gowning'],
+  common: ['hvac', 'water', 'steam', 'gases', 'cooling', 'power', 'fire', 'effluent', 'warehouse', 'engineering', 'cip', 'gowning'],
   qc: ['chromatography', 'mass_spec', 'spectroscopy', 'solid_state', 'dissolution', 'physical', 'titration', 'weighing', 'ph', 'moisture', 'water_testing', 'particulates', 'ccit', 'microbiology', 'stability', 'environmental', 'radio_qc', 'spray_testing', 'general', 'gowning'],
 };
 
@@ -400,7 +401,9 @@ export const EQUIPMENT_TYPES: Record<string, Specs> = {
   'Cyclotron': ['radiopharma.pet cyclotron'], 'Radiosynthesis module': ['radiopharma.pet radiosynthesis'], 'Hot cell': ['radiopharma hot_cell'],
   'Shielded dispensing isolator': ['radiopharma shielded_dispensing'], 'Tc-99m generator shield': ['radiopharma.spect shielded_dispensing'], 'Decay storage cabinet': ['radiopharma decay_storage'],
   // Common and utilities
-  'AHU': ['common hvac.ahu'], 'Air handling unit': ['common hvac.ahu'], 'Diesel generator': ['common power.dg'], 'Air compressor': ['common gases.compressed_air'],
+  'AHU': ['common hvac.ahu'], 'Air handling unit': ['common hvac.ahu'], 'Transformer': ['common power.transformer'], 'LT panel': ['common power.transformer'], 'Solar plant': ['common power.solar'],
+  'Fire hydrant system': ['common fire.hydrant'], 'Fire detection system': ['common fire.detection'], 'Gas suppression system': ['common fire.suppression'], 'Water softener': ['common water.raw.softener'],
+  'Raw water tank': ['common water.raw.storage'], 'Sewage treatment plant': ['common effluent.stp'], 'ZLD evaporator': ['common effluent.zld'], 'Exhaust fan system': ['common hvac.exhaust'], 'Environmental monitoring system': ['common hvac.monitoring'], 'Diesel generator': ['common power.dg'], 'Air compressor': ['common gases.compressed_air'],
   'Vacuum pump': ['common gases.vacuum'], 'Thermic fluid heater': ['common cooling.hot_oil'], 'Dehumidifier': ['common hvac.dehumidifier'], 'Dust extractor': ['common hvac.exhaust'], 'Building management system': ['common hvac.bms'],
   'Water system': ['common water.pw'], 'Purified water system': ['common water.pw'], 'RO-EDI purified water system': ['common water.pw.ro_edi'], 'WFI generator': ['common water.wfi.mcd'],
   'Vapour compression distiller': ['common water.wfi.vc'], 'Water distribution loop': ['common water.distribution'],
