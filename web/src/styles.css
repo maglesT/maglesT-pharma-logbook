@@ -494,3 +494,4 @@ table.register { font-size: 0.86rem; }
 .due-col { background: linear-gradient(180deg, #fff, #fcfaf8); }
 .due-col-head h3 { font-size: .95rem; }
 .home-head h1 { margin-bottom: 2px; }
+.due-row { grid-template-columns: auto minmax(0, 1fr); } .due-row .due-name { min-width: 0; }

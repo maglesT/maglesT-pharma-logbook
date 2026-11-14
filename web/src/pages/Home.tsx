@@ -415,7 +415,7 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
   const tabs: { key: Tab; title: string; value: string; sub: string; tone: string }[] = [
     { key: 'compliance', title: 'Compliance', value: pct === null || pct === undefined ? '—' : `${pct}%`, sub: 'on-time logbook completion', tone: pct === null || pct === undefined ? '' : pct >= 95 ? 'ok' : pct >= 85 ? 'warn' : 'bad' },
     { key: 'review', title: 'Workflow', value: String(pending ? pending.forMe.length : '—'), sub: `pending review and approval${pending?.others ? ` · ${pending.total} in all` : ''}`, tone: pending?.forMe.some((p) => p.late) ? 'warn' : 'info' },
-    { key: 'exceptions', title: 'Quality', value: exc?.linked && exc.analysis ? String(exc.analysis.open) : '—', sub: 'open exceptions and abnormalities', tone: exc?.analysis?.open ? 'bad' : 'ok' },
+    { key: 'exceptions', title: 'Open exceptions and abnormalities', value: exc?.linked && exc.analysis ? String(exc.analysis.open) : '—', sub: 'from the batch records', tone: exc?.analysis?.open ? 'bad' : 'ok' },
   ];
 
   return (
