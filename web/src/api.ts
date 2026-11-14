@@ -11,7 +11,18 @@ export class ApiError extends Error {
 }
 
 // background: polls that must not keep an idle session alive (server checks this header).
-export async function api<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT', url: string, body?: object, background = false): Promise<T> {
+// Owner 2026-11-14 (speed): two parts of a screen asking for the same data at the same moment share one request.
+const inFlight = new Map<string, Promise<unknown>>();
+export function api<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT', url: string, body?: object, background = false): Promise<T> {
+  if (method !== 'GET') return request<T>(method, url, body, background);
+  const key = url;
+  const running = inFlight.get(key);
+  if (running) return running as Promise<T>;
+  const p = request<T>(method, url, body, background).finally(() => inFlight.delete(key));
+  inFlight.set(key, p);
+  return p;
+}
+async function request<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT', url: string, body?: object, background = false): Promise<T> {
   const res = await fetch(url, {
     method,
     headers: {

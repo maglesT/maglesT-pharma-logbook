@@ -10,6 +10,8 @@ export function ExceptionDecisions({ onOpen, limit = 8 }: { onOpen: (equipmentId
     void api<{ mayDecide: boolean; problems: Problem[] }>('GET', '/api/problems', undefined, true).then(setData).catch(() => setData({ mayDecide: false, problems: [] }));
   }, []);
   if (!data) return null;
+  // Nothing waiting: one slim line, not a big empty panel.
+  if (data.problems.length === 0) return <p className="all-good slim-ok"><span aria-hidden="true">✓</span> Nothing is waiting for a QA decision.</p>;
   const shown = all ? data.problems : data.problems.slice(0, limit);
   return (
     <section className="dash-panel" aria-label="Waiting for a QA decision">

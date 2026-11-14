@@ -600,3 +600,13 @@ td .batch-link { font-size: .95rem; }
 .due-row .due-when { white-space: normal; }
 .due-more { justify-self: start; font-size: .84rem; min-height: 0; padding: 2px 4px; }
 .show-more { text-align: center; margin: 16px 0; }
+/* owner 2026-11-14: loading placeholders instead of empty values */
+.skel { background: linear-gradient(90deg, #efe9e4 0%, #f8f4f1 40%, #efe9e4 80%); background-size: 200% 100%; animation: shimmer 1.2s ease-in-out infinite; border-radius: 8px; }
+@keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.skel-num { display: block; width: 90px; height: 2.3rem; margin: 4px 0; }
+.skel-line { height: 18px; margin-bottom: 14px; } .w30 { width: 30%; } .w40 { width: 40%; }
+.skel-block { height: 120px; } .skel-block.tall { height: 220px; }
+.skel-cols { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; } .skel-col { height: 160px; }
+.skel-page .dash-panel { margin-bottom: 14px; }
+.slim-ok { margin: 0 0 14px; }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none; } }

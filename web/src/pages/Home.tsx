@@ -594,13 +594,20 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
   const [updated, setUpdated] = useState<string | null>(null);
   const [batch, setBatch] = useState<string | null>(null);
 
+  // Owner 2026-11-14 (speed): every read starts at once and each part shows as soon as its data is in; until the plant
+  // status is in, placeholders are shown, never a false "Nothing due" or "—".
+  const [ready, setReady] = useState(false);
   const load = async (background = false) => {
     const get = <T,>(u: string) => api<T>('GET', u, undefined, background);
-    const [s, e, o] = await Promise.all([get<EquipmentStatus[]>('/api/equipment/status'), get<Equipment[]>('/api/equipment'), get<Entry[]>('/api/entries/open')]);
-    setStatuses(s); setEquipment(e); setOpen(o);
-    const [c, p, x, r] = await Promise.all([get<Compliance>('/api/dashboard/compliance').catch(() => null), get<PendingData>('/api/dashboard/pending').catch(() => null),
-      get<ExcData>('/api/dashboard/exceptions').catch(() => ({ linked: true, error: true }) as unknown as ExcData), get<Overdue>('/api/overdue').catch(() => null)]);
-    setCompliance(c); setPending(p); setExc(x); setRaised(r);
+    const main = Promise.all([get<EquipmentStatus[]>('/api/equipment/status'), get<Equipment[]>('/api/equipment'), get<Entry[]>('/api/entries/open')])
+      .then(([s, e, o]) => { setStatuses(s); setEquipment(e); setOpen(o); setReady(true); });
+    const rest = [
+      get<Compliance>('/api/dashboard/compliance').then(setCompliance).catch(() => setCompliance(null)),
+      get<PendingData>('/api/dashboard/pending').then(setPending).catch(() => setPending(null)),
+      get<ExcData>('/api/dashboard/exceptions').then(setExc).catch(() => setExc({ linked: true, error: true } as unknown as ExcData)),
+      get<Overdue>('/api/overdue').then(setRaised).catch(() => setRaised(null)),
+    ];
+    await Promise.all([main, ...rest]);
     setUpdated(new Date().toISOString());
   };
   useEffect(() => {
@@ -615,10 +622,10 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
   const inProgress = open.filter((e) => e.inProgress);
   const hour = new Date().getHours();
   const pct = compliance?.percent;
-  const tabs: { key: Tab; title: string; value: string; sub: string; tone: string }[] = [
-    { key: 'compliance', title: 'Compliance', value: pct === null || pct === undefined ? '—' : `${pct}%`, sub: 'on-time logbook completion', tone: pct === null || pct === undefined ? '' : pct >= 95 ? 'ok' : pct >= 85 ? 'warn' : 'bad' },
-    { key: 'review', title: 'Workflow', value: String(pending ? pending.forMe.length : '—'), sub: `pending review and approval${pending?.others ? ` · ${pending.total} in all` : ''}`, tone: pending?.forMe.some((p) => p.late) ? 'warn' : 'info' },
-    { key: 'exceptions', title: 'Open exceptions and abnormalities', value: exc?.linked && exc.analysis ? String(exc.analysis.open) : '—', sub: 'from the batch records', tone: exc?.analysis?.open ? 'bad' : 'ok' },
+  const tabs: { key: Tab; title: string; value: string; sub: string; tone: string; loading?: boolean }[] = [
+    { key: 'compliance', title: 'Compliance', value: pct === null || pct === undefined ? '—' : `${pct}%`, sub: 'on-time logbook completion', loading: compliance === null && !updated, tone: pct === null || pct === undefined ? '' : pct >= 95 ? 'ok' : pct >= 85 ? 'warn' : 'bad' },
+    { key: 'review', title: 'Workflow', value: String(pending ? pending.forMe.length : '—'), sub: `pending review and approval${pending?.others ? ` · ${pending.total} in all` : ''}`, loading: pending === null && !updated, tone: pending?.forMe.some((p) => p.late) ? 'warn' : 'info' },
+    { key: 'exceptions', title: 'Open exceptions and abnormalities', value: exc?.linked && exc.analysis ? String(exc.analysis.open) : '—', sub: 'from the batch records', loading: exc === null, tone: exc?.analysis?.open ? 'bad' : 'ok' },
   ];
 
   return (
@@ -633,12 +640,19 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
       <div className="part-tabs" role="tablist">
         {tabs.map((t) => (
           <button key={t.key} role="tab" aria-selected={tab === t.key} className={`part-tab ${t.tone} ${tab === t.key ? 'on' : ''}`} onClick={() => setTab(t.key)}>
-            <span className="pt-title">{t.title}</span><b>{t.value}</b><span className="pt-sub">{t.sub}</span>
+            <span className="pt-title">{t.title}</span>{t.loading ? <b className="skel skel-num" aria-label="Loading" /> : <b>{t.value}</b>}<span className="pt-sub">{t.sub}</span>
           </button>
         ))}
       </div>
 
-      {tab === 'compliance' && (
+      {tab === 'compliance' && !ready && (
+        <div className="skel-page" aria-label="Loading the plant status">
+          <div className="dash-panel"><div className="skel skel-line w40" /><div className="skel skel-block" /></div>
+          <div className="dash-panel"><div className="skel skel-line w30" /><div className="skel-cols">{[0, 1, 2, 3].map((i) => <div key={i} className="skel skel-col" />)}</div></div>
+          <div className="dash-panel"><div className="skel skel-line w30" /><div className="skel skel-block tall" /></div>
+        </div>
+      )}
+      {tab === 'compliance' && ready && (
         <>
           <ExceptionDecisions onOpen={onOpen} />
           <OnTime c={compliance} />
