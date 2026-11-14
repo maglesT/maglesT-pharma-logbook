@@ -547,7 +547,9 @@ export function expandSpec(kind: Kind, spec: string): Path[] {
   return list.map((f) => [kind, f, ...(process ? [process] : [])]);
 }
 
-export interface Classifiable { kind: Kind; type?: string | null; name?: string | null; grade?: string | null; roomArea?: string | null; roomName?: string | null }
+export interface Classifiable { kind: Kind; type?: string | null; name?: string | null; grade?: string | null; roomArea?: string | null; roomName?: string | null;
+  // Platform D-26: master data's equipment category; when given it decides the group (engineering system or not).
+  equipmentClass?: string | null }
 
 /** The master-data type of a record: its own, else the one its name hints at (stop-gap for untyped records). */
 export function typeOf(item: Classifiable): string | null {
@@ -569,8 +571,10 @@ export function pathsOf(item: Classifiable): Path[] {
       if (placed.length) return placed;
     }
   }
-  if (!own) return [[item.kind, OTHER]];
-  return dedupe(own.flatMap((s) => expandSpec(item.kind, s)).map((p) => (isSystemPath(p) ? ['system', ...p.slice(1)] : p)));
+  // Master data's category decides when it is given (platform D-26); without it the type's place decides (stop-gap).
+  const sys = (p: Path) => (item.equipmentClass ? item.kind === 'equipment' && item.equipmentClass === 'engineering_system' : isSystemPath(p));
+  if (!own) return [[sys([item.kind, OTHER]) ? 'system' : item.kind, OTHER]];
+  return dedupe(own.flatMap((s) => expandSpec(item.kind, s)).map((p) => (sys(p) ? ['system', ...p.slice(1)] : p)));
 }
 
 /** The facilities of an item: from its name, else its room's name, else the default of its form(s). */

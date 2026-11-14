@@ -25,6 +25,8 @@ export interface MasterItem {
   // equipment and instruments their `type`, rooms their `area`; a room's cleanroom `grade` is its step.
   type?: string | null;
   grade?: string | null;
+  // Owner 2026-11-14 (platform D-26): master data's category of equipment (process / engineering_system); null if not given.
+  equipmentClass?: string | null;
   // Platform D-24: maintenance, cleaning and requalification parameters, kept once in master data (null: not set).
   care: Care;
 }
@@ -83,6 +85,7 @@ export function sqlMaster(md: Sql): Master {
     area: kind === 'area' ? ((r.j as Record<string, unknown> | null)?.area as string | null) ?? null : null,
     type: ((r.j as Record<string, unknown> | null)?.[kind === 'area' ? 'area' : 'type'] as string | null) ?? null,
     grade: kind === 'area' ? ((r.j as Record<string, unknown> | null)?.grade as string | null) ?? null : null,
+    equipmentClass: kind === 'equipment' ? ((r.j as Record<string, unknown> | null)?.equipment_class as string | null) ?? null : null,
   });
   return {
     items: () => read(async () => [

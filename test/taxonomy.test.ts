@@ -198,3 +198,12 @@ describe('engineering systems (owner 14 Nov)', () => {
     expect(classify({ kind: 'equipment', type: 'Rapid mixer granulator', name: 'RMG' }).group).toBe('equipment');
   });
 });
+
+describe('engineering systems from master data (platform D-26)', () => {
+  it('LB-21: master data\'s equipment category decides the group; without it the type decides', async () => {
+    const { classify } = await import('../shared/taxonomy.js');
+    expect(classify({ kind: 'equipment', type: 'Rapid mixer granulator', name: 'RMG', equipmentClass: 'engineering_system' }).group).toBe('system');
+    expect(classify({ kind: 'equipment', type: 'Chiller', name: 'Chiller', equipmentClass: 'process' }).group).toBe('equipment');
+    expect(classify({ kind: 'equipment', type: 'Chiller', name: 'Chiller' }).group).toBe('system');
+  });
+});

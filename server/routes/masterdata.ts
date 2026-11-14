@@ -55,7 +55,7 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
     return { id: i.id, itemId: i.itemId, code: i.code, name: i.name, kind: i.kind, location: i.room ?? '',
       make: i.make, model: i.model, serial: i.serial, version: i.version, active: i.active, sterile: i.sterile, classified: i.classified,
       ...i.care, needsCalibration: needsCalibrationOf(i),
-      ...classify({ kind: i.kind, type: i.type, name: i.name, grade: i.grade, roomArea: room?.area ?? null, roomName: room?.name ?? null }) };
+      ...classify({ kind: i.kind, type: i.type, name: i.name, grade: i.grade, equipmentClass: i.equipmentClass ?? null, roomArea: room?.area ?? null, roomName: room?.name ?? null }) };
   };
   app.get('/api/equipment', anyUser, async () => {
     const all = await app.master.items();
