@@ -109,6 +109,24 @@ export function dashboardRoutes(app: FastifyInstance, sql: Sql) {
     return { lateAfterHours: LATE_AFTER_HOURS, total: all.length, forMe, mine, others, byDepartment };
   });
 
+  // Owner 2026-11-14: everything known about one batch: Batchwright's record (equipment, exceptions, checks, process values),
+  // the deviations naming it, and the Logbook's own entries for it.
+  app.get<{ Params: { number: string } }>('/api/dashboard/batches/:number', anyUser, async (req, reply) => {
+    if (!app.batches) return reply.code(404).send({ error: 'not_linked' });
+    const number = String(req.params.number).slice(0, 60);
+    const d = await app.batches.detail(number);
+    if (!d) return reply.code(404).send({ error: 'not_found' });
+    const deviations = app.deviations?.byBatch ? await app.deviations.byBatch(number).catch(() => null) : null;
+    const items = await logbookItems(sql, app.master);
+    const byId = new Map(items.map((i) => [i.id, i]));
+    const logbook = (await sql<{ id: number; equipment_id: number; logbook_type: string; activity_start: Date; activity_end: Date | null; by_name: string }[]>`
+      select e.id::int, e.equipment_id::int, e.logbook_type, e.activity_start, e.activity_end, u.full_name as by_name from entries e join users u on u.id = e.entered_by
+      where e.batch = ${number} and not exists (select 1 from entries x where x.supersedes = e.id) order by e.activity_start`)
+      .map((e) => ({ id: e.id, equipmentId: e.equipment_id, code: byId.get(e.equipment_id)?.code ?? '?', name: byId.get(e.equipment_id)?.name ?? '',
+        what: TYPE_LABEL[e.logbook_type] ?? e.logbook_type, start: e.activity_start, end: e.activity_end, by: e.by_name }));
+    return { ...d, deviations, logbook };
+  });
+
   app.get('/api/dashboard/exceptions', anyUser, async () => {
     if (!app.batches) return { linked: false };
     const a = await app.batches.abnormal(ABNORMAL_DAYS);
@@ -138,16 +156,17 @@ export function analyse(a: Abnormal) {
     .map((r) => { const [type, step] = r.key.split('|'); return { type: type!, step: step!, n: r.n, batches: [...new Set(a.exceptions.filter((e) => e.type === type && (e.stepTitle ?? e.step ?? '') === step).map((e) => e.batchNumber))] }; });
   const now = Date.now();
   const oldOpen = open.filter((e) => now - Date.parse(e.raisedAt) > 3 * 86_400_000).sort((x, y) => x.raisedAt.localeCompare(y.raisedAt));
-  const insights: { level: 'high' | 'medium' | 'info'; text: string }[] = [];
+  type Filter = { kind: 'open' | 'severity' | 'type' | 'repeat' | 'ipc' | 'process' | 'old' | 'category'; value?: string; step?: string };
+  const insights: { level: 'high' | 'medium' | 'info'; text: string; batches?: string[]; filter?: Filter }[] = [];
   const severe = open.filter((e) => /CRITICAL|ACTION|MAJOR/i.test(e.severity));
-  if (severe.length) insights.push({ level: 'high', text: `${severe.length} open exception(s) of severity ${[...new Set(severe.map((e) => e.severity))].join('/')}: ${severe.slice(0, 3).map((e) => `${e.batchNumber} (${typeWords(e.type)}${e.stepTitle ? `, ${e.stepTitle}` : ''})`).join('; ')}. Decide the disposition and whether a deviation is needed before the batch moves on.` });
+  if (severe.length) insights.push({ level: 'high', text: `${severe.length} open exception(s) of severity ${[...new Set(severe.map((e) => e.severity))].join('/')}: ${severe.slice(0, 3).map((e) => `${e.batchNumber} (${typeWords(e.type)}${e.stepTitle ? `, ${e.stepTitle}` : ''})`).join('; ')}. Decide the disposition and whether a deviation is needed before the batch moves on.`, batches: [...new Set(severe.map((e) => e.batchNumber))], filter: { kind: 'open' } });
   const fails = a.ipc.filter((i) => i.result === 'FAIL');
-  if (fails.length) insights.push({ level: 'high', text: `${fails.length} in-process check(s) failed: ${fails.slice(0, 3).map((i) => `${i.batchNumber} ${i.item ?? i.checkKind}${i.value ? ` = ${i.value}${i.unit ? ` ${i.unit}` : ''}` : ''}${i.lower || i.upper ? ` (limits ${i.lower ?? '–'} to ${i.upper ?? '–'})` : ''}`).join('; ')}. Check the product impact and the equipment settings at those steps.` });
-  if (a.process.length) insights.push({ level: 'medium', text: `${a.process.length} process value(s) outside their limits (e.g. ${a.process[0]!.tag} in ${a.process[0]!.batchNumber}). Check whether the limits or the equipment set-up need attention.` });
-  for (const r of repeats.slice(0, 3)) insights.push({ level: 'medium', text: `Repeat: ${r.n} ${typeWords(r.type)}${r.step ? ` at "${r.step}"` : ''} in ${r.batches.length} batch(es) (${r.batches.slice(0, 4).join(', ')}). A repeat usually has a common cause: check the instrument or interface used at that step, or the instruction.` });
+  if (fails.length) insights.push({ level: 'high', text: `${fails.length} in-process check(s) failed: ${fails.slice(0, 3).map((i) => `${i.batchNumber} ${i.item ?? i.checkKind}${i.value ? ` = ${i.value}${i.unit ? ` ${i.unit}` : ''}` : ''}${i.lower || i.upper ? ` (limits ${i.lower ?? '–'} to ${i.upper ?? '–'})` : ''}`).join('; ')}. Check the product impact and the equipment settings at those steps.`, batches: [...new Set(fails.map((i) => i.batchNumber))], filter: { kind: 'ipc' } });
+  if (a.process.length) insights.push({ level: 'medium', text: `${a.process.length} process value(s) outside their limits (e.g. ${a.process[0]!.tag} in ${a.process[0]!.batchNumber}). Check whether the limits or the equipment set-up need attention.`, batches: [...new Set(a.process.map((p) => p.batchNumber))], filter: { kind: 'process' } });
+  for (const r of repeats.slice(0, 3)) insights.push({ level: 'medium', text: `Repeat: ${r.n} ${typeWords(r.type)}${r.step ? ` at "${r.step}"` : ''} in ${r.batches.length} batch(es) (${r.batches.slice(0, 4).join(', ')}). A repeat usually has a common cause: check the instrument or interface used at that step, or the instruction.`, batches: r.batches, filter: { kind: 'repeat', value: r.type, step: r.step } });
   const manual = a.exceptions.filter((e) => e.category === 'MANUAL_ENTRY').length;
-  if (a.exceptions.length >= 5 && manual / a.exceptions.length > 0.5) insights.push({ level: 'medium', text: `${Math.round((manual / a.exceptions.length) * 100)} % of the exceptions are manual entries where an instrument should have sent the value. Fixing the instrument connections removes most exceptions and the data-integrity risk of typed values.` });
-  if (oldOpen.length) insights.push({ level: 'medium', text: `${oldOpen.length} exception(s) open for more than 3 days (oldest ${oldOpen[0]!.batchNumber}, raised ${plantDay(oldOpen[0]!.raisedAt)}). Open exceptions hold up batch review and release.` });
+  if (a.exceptions.length >= 5 && manual / a.exceptions.length > 0.5) insights.push({ level: 'medium', text: `${Math.round((manual / a.exceptions.length) * 100)} % of the exceptions are manual entries where an instrument should have sent the value. Fixing the instrument connections removes most exceptions and the data-integrity risk of typed values.`, filter: { kind: 'category', value: 'MANUAL_ENTRY' } });
+  if (oldOpen.length) insights.push({ level: 'medium', text: `${oldOpen.length} exception(s) open for more than 3 days (oldest ${oldOpen[0]!.batchNumber}, raised ${plantDay(oldOpen[0]!.raisedAt)}). Open exceptions hold up batch review and release.`, batches: [...new Set(oldOpen.map((e) => e.batchNumber))], filter: { kind: 'old' } });
   if (a.alarms.length) insights.push({ level: 'high', text: `${a.alarms.length} GMP-critical alarm(s) not acknowledged.` });
   if (!insights.length) insights.push({ level: 'info', text: 'Nothing abnormal needs attention in the batch records.' });
   return { open: open.length + a.alarms.length, openExceptions: open.length, abnormalReadings: a.ipc.length + a.process.length, bySeverity, byCategory, byType, byBatch, repeats, oldOpen: oldOpen.length, insights };

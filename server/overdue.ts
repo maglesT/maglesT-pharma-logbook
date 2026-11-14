@@ -160,7 +160,11 @@ export function scheduleOverdue(sql: Sql, master: Master, qualification: Qualifi
 // ---- The deviation numbers, read back from Deviations (report.deviation_v1, platform link).
 
 export interface RaisedDeviation { number: string; status: string }
-export interface Deviations { bySource(prefix: string): Promise<Map<string, RaisedDeviation>> }
+export interface Deviations {
+  bySource(prefix: string): Promise<Map<string, RaisedDeviation>>;
+  /** Owner 2026-11-14: the deviations that name a batch (deviation_v1.batch). */
+  byBatch?(batch: string): Promise<{ number: string; status: string; title: string | null; openedAt: string | null; closedAt: string | null }[]>;
+}
 
 export function sqlDeviations(q: Sql): Deviations {
   return {
@@ -169,6 +173,11 @@ export function sqlDeviations(q: Sql): Deviations {
         select distinct on (source_ref) source_ref, number, status from report.deviation_v1
         where source_ref like ${prefix + '%'} order by source_ref, number`;
       return new Map(rows.map((r) => [r.source_ref, { number: r.number, status: r.status }]));
+    },
+    async byBatch(batch) {
+      return (await q<{ number: string; status: string; title: string | null; opened_at: string | null; closed_at: string | null }[]>`
+        select distinct on (number) number, status, title, opened_at::text, closed_at::text from report.deviation_v1
+        where batch = ${batch} order by number`).map((r) => ({ number: r.number, status: r.status, title: r.title, openedAt: r.opened_at, closedAt: r.closed_at }));
     },
   };
 }

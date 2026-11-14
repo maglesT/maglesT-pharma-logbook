@@ -56,6 +56,7 @@ export function App() {
           <button className="link" onClick={logout}>Log out</button>
         </span>
       </header>
+      {/^(.*;\s*)?lb_preview=1/.test(document.cookie) && <a className="preview-badge" href="/__preview/off" title="Leave the preview copy">PREVIEW copy · leave</a>}
       <PendingBanner onOpen={(id) => { setOpenId(id); setPage('equipment'); }} />
       <main className="page">
         {page === 'home' && <Home me={me} onOpen={(id) => { setOpenId(id); setPage('equipment'); }} />}

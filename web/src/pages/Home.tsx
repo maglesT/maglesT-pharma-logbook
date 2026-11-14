@@ -23,7 +23,8 @@ interface ExcData { linked: boolean; days?: number; exceptions?: Exc[];
   process?: { batchNumber: string; step: string | null; tag: string; value: string | null; unit: string | null; lower: string | null; upper: string | null; recordedAt: string }[];
   alarms?: { code: string; source: string; subject: string | null; raisedAt: string }[];
   analysis?: { open: number; openExceptions: number; abnormalReadings: number; bySeverity: { key: string; n: number }[]; byCategory: { key: string; n: number }[];
-    byType: { key: string; n: number }[]; byBatch: { key: string; n: number }[]; oldOpen: number; insights: { level: 'high' | 'medium' | 'info'; text: string }[] } }
+    byType: { key: string; n: number }[]; byBatch: { key: string; n: number }[]; oldOpen: number;
+    insights: { level: 'high' | 'medium' | 'info'; text: string; batches?: string[]; filter?: { kind: string; value?: string; step?: string } }[] } }
 interface Overdue { linked: boolean; events: { id: number; equipmentId: number; code: string; name: string; label: string; dueAt: string; deviation: { number: string; status: string } | null }[] }
 
 const C = { ready: '#17803d', dirty: '#b7791f', due: '#f0b429', over: '#c0352b', life: '#a3195b', co: '#6b4fbb', use: '#1f63b8', grey: '#8a8f96' };
@@ -323,57 +324,214 @@ function Review({ d, onOpen }: { d: PendingData | null; onOpen: (id: number) => 
 }
 
 // ---- exceptions from the batch records ----
+// Owner 2026-11-14: everything is clickable: a batch number opens what happened to that batch; a card, a bar or a
+// suggestion filters the lists to the records behind it.
 const SEV_COLOR = (s: string) => (/CRITICAL/i.test(s) ? C.over : /ACTION|MAJOR/i.test(s) ? '#d9622b' : C.due);
 const words = (s: string) => s.toLowerCase().replaceAll('_', ' ');
-function Exceptions({ d }: { d: ExcData | null }) {
+type ExFilter = { kind: 'open' | 'severity' | 'type' | 'repeat' | 'ipc' | 'process' | 'old' | 'category' | 'batch' | 'readings' | 'alarms'; value?: string; step?: string; label?: string };
+const isOpen = (e: Exc) => e.status !== 'DISPOSITIONED' && e.status !== 'CLOSED';
+const OLD_MS = 3 * 86_400_000;
+function BatchLink({ n, onBatch }: { n: string; onBatch: (b: string) => void }) {
+  return <button className="batch-link" onClick={(e) => { e.stopPropagation(); onBatch(n); }}>{n}</button>;
+}
+function filterLabel(f: ExFilter): string {
+  switch (f.kind) {
+    case 'open': return 'Open exceptions';
+    case 'old': return 'Open more than 3 days';
+    case 'ipc': return 'Failed in-process checks';
+    case 'process': return 'Process values out of limits';
+    case 'readings': return 'Abnormal readings';
+    case 'alarms': return 'GMP alarms not acknowledged';
+    case 'severity': return `Severity: ${words(f.value ?? '')}`;
+    case 'category': return `Category: ${words(f.value ?? '')}`;
+    case 'type': return `Type: ${words(f.value ?? '')}`;
+    case 'repeat': return `Repeat: ${words(f.value ?? '')}${f.step ? ` at "${f.step}"` : ''}`;
+    case 'batch': return `Batch ${f.value}`;
+  }
+}
+
+function Exceptions({ d, onBatch }: { d: ExcData | null; onBatch: (b: string) => void }) {
+  const [f, setF] = useState<ExFilter | null>(null);
   if (!d) return null;
   if (!d.linked) return <section className="dash-panel"><p className="muted">The batch records (Batchwright) are not linked on this site.</p></section>;
   const a = d.analysis!;
-  const open = d.exceptions!.filter((e) => e.status !== 'DISPOSITIONED' && e.status !== 'CLOSED');
+  const now = Date.now();
+  const pick = (x: ExFilter | null) => { setF(x); setTimeout(() => document.getElementById('ex-lists')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); };
+  const exMatch = (e: Exc) => {
+    if (!f) return isOpen(e);
+    switch (f.kind) {
+      case 'open': return isOpen(e);
+      case 'old': return isOpen(e) && now - Date.parse(e.raisedAt) > OLD_MS;
+      case 'severity': return e.severity === f.value;
+      case 'category': return e.category === f.value;
+      case 'type': return e.type === f.value;
+      case 'repeat': return e.type === f.value && (e.stepTitle ?? e.step ?? '') === (f.step ?? '');
+      case 'batch': return e.batchNumber === f.value;
+      default: return false;
+    }
+  };
+  const showReadings = !f || ['ipc', 'process', 'readings', 'batch'].includes(f.kind);
+  const ipc = d.ipc!.filter((r) => !f || f.kind === 'ipc' || f.kind === 'readings' || (f.kind === 'batch' && r.batchNumber === f.value));
+  const proc = d.process!.filter((r) => !f || f.kind === 'process' || f.kind === 'readings' || (f.kind === 'batch' && r.batchNumber === f.value));
+  const exs = d.exceptions!.filter(exMatch);
+  const showEx = !f || !['ipc', 'process', 'readings', 'alarms'].includes(f.kind);
+  const card = (cls: string, n: number, label: string, x: ExFilter) => (
+    <button className={`kpi ${cls} kpi-btn${f?.kind === x.kind ? ' on' : ''}`} onClick={() => pick(f?.kind === x.kind ? null : x)}><b>{n}</b><span>{label}</span></button>
+  );
   return (
     <>
       <div className="kpis">
-        <div className={a.openExceptions ? 'kpi bad' : 'kpi ok'}><b>{a.openExceptions}</b><span>Open exceptions</span></div>
-        <div className={a.abnormalReadings ? 'kpi warn' : 'kpi ok'}><b>{a.abnormalReadings}</b><span>Abnormal readings ({d.days} days)</span></div>
-        <div className={d.alarms!.length ? 'kpi bad' : 'kpi ok'}><b>{d.alarms!.length}</b><span>GMP alarms not acknowledged</span></div>
-        <div className={a.oldOpen ? 'kpi warn' : 'kpi ok'}><b>{a.oldOpen}</b><span>Open more than 3 days</span></div>
+        {card(a.openExceptions ? 'bad' : 'ok', a.openExceptions, 'Open exceptions', { kind: 'open' })}
+        {card(a.abnormalReadings ? 'warn' : 'ok', a.abnormalReadings, `Abnormal readings (${d.days} days)`, { kind: 'readings' })}
+        {card(d.alarms!.length ? 'bad' : 'ok', d.alarms!.length, 'GMP alarms not acknowledged', { kind: 'alarms' })}
+        {card(a.oldOpen ? 'warn' : 'ok', a.oldOpen, 'Open more than 3 days', { kind: 'old' })}
       </div>
       <section className="dash-panel" aria-label="Analysis">
-        <div className="panel-head"><h2>Analysis and suggestions</h2><span className="muted">fixed rules over the abnormal records only</span></div>
-        <ul className="insights">{a.insights.map((x, n) => <li key={n} className={x.level}><span className="ins-tag">{x.level === 'high' ? 'Act now' : x.level === 'medium' ? 'Look into' : 'OK'}</span>{x.text}</li>)}</ul>
+        <div className="panel-head"><h2>Analysis and suggestions</h2><span className="muted">fixed rules over the abnormal records only · click one to see its records</span></div>
+        <ul className="insights">{a.insights.map((x, n) => (
+          <li key={n} className={`${x.level}${x.filter ? ' clickable' : ''}`} onClick={() => x.filter && pick(x.filter as ExFilter)}>
+            <span className="ins-tag">{x.level === 'high' ? 'Act now' : x.level === 'medium' ? 'Look into' : 'OK'}</span>{x.text}
+            {x.batches && x.batches.length > 0 && <span className="ins-batches">{x.batches.slice(0, 8).map((b) => <BatchLink key={b} n={b} onBatch={onBatch} />)}</span>}
+          </li>))}</ul>
         <div className="three-col">
-          <div><h4>By category</h4><Bars rows={a.byCategory.map((r) => ({ key: r.key, label: words(r.key), n: r.n, color: C.life }))} /></div>
-          <div><h4>By severity</h4><Bars rows={a.bySeverity.map((r) => ({ key: r.key, label: words(r.key), n: r.n, color: SEV_COLOR(r.key) }))} /></div>
-          <div><h4>Batches with most abnormal records</h4><Bars rows={a.byBatch.map((r) => ({ key: r.key, label: r.key, n: r.n, color: C.use }))} /></div>
+          <div><h4>By category</h4><Bars rows={a.byCategory.map((r) => ({ key: r.key, label: words(r.key), n: r.n, color: C.life }))} onPick={(k) => pick({ kind: 'category', value: k })} /></div>
+          <div><h4>By severity</h4><Bars rows={a.bySeverity.map((r) => ({ key: r.key, label: words(r.key), n: r.n, color: SEV_COLOR(r.key) }))} onPick={(k) => pick({ kind: 'severity', value: k })} /></div>
+          <div><h4>Batches with most abnormal records</h4><Bars rows={a.byBatch.map((r) => ({ key: r.key, label: r.key, n: r.n, color: C.use, hint: 'click: show its records' }))} onPick={(k) => pick({ kind: 'batch', value: k })} /></div>
         </div>
       </section>
-      <section className="dash-panel" aria-label="Open exceptions">
-        <div className="panel-head"><h2>Open exceptions</h2><span className="pill bad">{open.length}</span></div>
-        {open.length === 0 ? <p className="all-good"><span aria-hidden="true">✓</span> No open exception.</p> : (
-          <table className="plain-table">
-            <thead><tr><th>Batch</th><th>Exception</th><th>Step</th><th>Severity</th><th>Status</th><th>Raised</th></tr></thead>
-            <tbody>{open.map((e) => (
-              <tr key={e.exceptionId}><td><strong>{e.batchNumber}</strong></td><td>{words(e.type)}<small className="cell-sub">{e.description ?? words(e.category)}</small></td>
-                <td>{e.stepTitle ?? e.step ?? '—'}</td><td><span className="sev" style={{ background: SEV_COLOR(e.severity) }}>{words(e.severity)}</span></td>
-                <td>{words(e.status)}{e.disposition ? ` · ${words(e.disposition)}` : ''}</td><td>{shortTime(e.raisedAt)}</td></tr>))}</tbody>
-          </table>
-        )}
-      </section>
-      <section className="dash-panel" aria-label="Abnormal readings">
-        <div className="panel-head"><h2>Abnormal readings</h2><span className="muted">in-process checks failed or on alert, process values out of limits · last {d.days} days</span></div>
-        {d.ipc!.length + d.process!.length === 0 ? <p className="all-good"><span aria-hidden="true">✓</span> None.</p> : (
-          <table className="plain-table">
-            <thead><tr><th>Batch</th><th>Check / value</th><th>Result</th><th>Limits</th><th>Recorded</th></tr></thead>
-            <tbody>
-              {d.ipc!.map((r, n) => <tr key={`i${n}`}><td><strong>{r.batchNumber}</strong></td><td>{r.item ?? words(r.checkKind)}<small className="cell-sub">{r.stepTitle}</small></td>
-                <td><span className="sev" style={{ background: r.result === 'FAIL' ? C.over : C.due }}>{r.result.toLowerCase()}</span> {r.value}{r.unit ? ` ${r.unit}` : ''}</td><td>{r.lower ?? '–'} to {r.upper ?? '–'}</td><td>{shortTime(r.recordedAt)}</td></tr>)}
-              {d.process!.map((r, n) => <tr key={`p${n}`}><td><strong>{r.batchNumber}</strong></td><td>{r.tag}<small className="cell-sub">{r.step}</small></td>
-                <td><span className="sev" style={{ background: C.over }}>out of limits</span> {r.value}{r.unit ? ` ${r.unit}` : ''}</td><td>{r.lower ?? '–'} to {r.upper ?? '–'}</td><td>{shortTime(r.recordedAt)}</td></tr>)}
-            </tbody>
-          </table>
-        )}
-      </section>
+      <div id="ex-lists" />
+      {f && (
+        <div className="filter-bar">Showing: <strong>{filterLabel(f)}</strong>
+          {f.kind === 'batch' && <button className="link" onClick={() => onBatch(f.value!)}>Open batch {f.value} →</button>}
+          <button className="link dark" onClick={() => setF(null)}>Clear ✕</button></div>
+      )}
+      {f?.kind === 'alarms' && (
+        <section className="dash-panel" aria-label="Alarms">
+          <div className="panel-head"><h2>GMP alarms not acknowledged</h2><span className="pill bad">{d.alarms!.length}</span></div>
+          {d.alarms!.length === 0 ? <p className="all-good"><span aria-hidden="true">✓</span> None.</p> : (
+            <table className="plain-table"><thead><tr><th>Alarm</th><th>Source</th><th>Subject</th><th>Raised</th></tr></thead>
+              <tbody>{d.alarms!.map((r, n) => <tr key={n}><td><strong>{r.code}</strong></td><td>{r.source}</td><td>{r.subject ?? '—'}</td><td>{shortTime(r.raisedAt)}</td></tr>)}</tbody></table>)}
+        </section>
+      )}
+      {showEx && (
+        <section className="dash-panel" aria-label="Open exceptions">
+          <div className="panel-head"><h2>{f && !['open', 'old'].includes(f.kind) ? 'Exceptions' : 'Open exceptions'}</h2><span className="pill bad">{exs.length}</span>
+            <span className="muted">click a row to see the batch</span></div>
+          {exs.length === 0 ? <p className="all-good"><span aria-hidden="true">✓</span> None.</p> : (
+            <table className="plain-table">
+              <thead><tr><th>Batch</th><th>Exception</th><th>Step</th><th>Severity</th><th>Status</th><th>Raised</th></tr></thead>
+              <tbody>{exs.map((e) => (
+                <tr key={e.exceptionId} className="clickable" onClick={() => onBatch(e.batchNumber)}>
+                  <td><BatchLink n={e.batchNumber} onBatch={onBatch} /></td><td>{words(e.type)}<small className="cell-sub">{e.description ?? words(e.category)}</small></td>
+                  <td>{e.stepTitle ?? e.step ?? '—'}</td>
+                  <td><button className="sev sev-btn" style={{ background: SEV_COLOR(e.severity) }} onClick={(ev) => { ev.stopPropagation(); pick({ kind: 'severity', value: e.severity }); }}>{words(e.severity)}</button></td>
+                  <td>{words(e.status)}{e.disposition ? ` · ${words(e.disposition)}` : ''}</td><td>{shortTime(e.raisedAt)}</td></tr>))}</tbody>
+            </table>
+          )}
+        </section>
+      )}
+      {showReadings && (
+        <section className="dash-panel" aria-label="Abnormal readings">
+          <div className="panel-head"><h2>Abnormal readings</h2><span className="muted">in-process checks failed or on alert, process values out of limits · last {d.days} days</span></div>
+          {ipc.length + proc.length === 0 ? <p className="all-good"><span aria-hidden="true">✓</span> None.</p> : (
+            <table className="plain-table">
+              <thead><tr><th>Batch</th><th>Check / value</th><th>Result</th><th>Limits</th><th>Recorded</th></tr></thead>
+              <tbody>
+                {ipc.map((r, n) => <tr key={`i${n}`} className="clickable" onClick={() => onBatch(r.batchNumber)}><td><BatchLink n={r.batchNumber} onBatch={onBatch} /></td><td>{r.item ?? words(r.checkKind)}<small className="cell-sub">{r.stepTitle}</small></td>
+                  <td><span className="sev" style={{ background: r.result === 'FAIL' ? C.over : C.due }}>{r.result.toLowerCase()}</span> {r.value}{r.unit ? ` ${r.unit}` : ''}</td><td>{r.lower ?? '–'} to {r.upper ?? '–'}</td><td>{shortTime(r.recordedAt)}</td></tr>)}
+                {proc.map((r, n) => <tr key={`p${n}`} className="clickable" onClick={() => onBatch(r.batchNumber)}><td><BatchLink n={r.batchNumber} onBatch={onBatch} /></td><td>{r.tag}<small className="cell-sub">{r.step}</small></td>
+                  <td><span className="sev" style={{ background: C.over }}>out of limits</span> {r.value}{r.unit ? ` ${r.unit}` : ''}</td><td>{r.lower ?? '–'} to {r.upper ?? '–'}</td><td>{shortTime(r.recordedAt)}</td></tr>)}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
     </>
+  );
+}
+
+// ---- one batch: what happened (Batchwright record, deviations, Logbook entries) ----
+interface BatchDetailData {
+  batch: { batchNumber: string; productCode: string; strength: string | null; status: string; issuedAt: string | null; completedAt: string | null; released: boolean };
+  equipment: { step: string | null; equipmentCode: string | null; equipmentType: string | null; roomCode: string | null; startedAt: string | null; endedAt: string | null }[];
+  exceptions: Exc[];
+  ipc: { stepTitle: string | null; checkKind: string; item: string | null; value: string | null; unit: string | null; lower: string | null; upper: string | null; aggregate: string | null; result: string; recordedAt: string }[];
+  process: { step: string | null; tag: string; value: string | null; unit: string | null; lower: string | null; upper: string | null; withinLimits: boolean | null; recordedAt: string }[];
+  deviations: { number: string; status: string; title: string | null; openedAt: string | null; closedAt: string | null }[] | null;
+  logbook: { id: number; equipmentId: number; code: string; name: string; what: string; start: string; end: string | null; by: string }[];
+}
+const stepName = (s: string | null) => (s ?? '').replace(/^p-/, '').replace(/@$/, '').replaceAll('-', ' ');
+function BatchDrawer({ number, onClose, onOpen }: { number: string; onClose: () => void; onOpen: (id: number) => void }) {
+  const [d, setD] = useState<BatchDetailData | null>(null);
+  const [err, setErr] = useState('');
+  const [tab, setTab] = useState<'abnormal' | 'checks' | 'equipment' | 'logbook'>('abnormal');
+  useEffect(() => { setD(null); setErr(''); api<BatchDetailData>('GET', `/api/dashboard/batches/${encodeURIComponent(number)}`).then(setD).catch((e) => setErr(e instanceof Error ? e.message : String(e))); }, [number]);
+  useEffect(() => { const k = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, [onClose]);
+  const open = d ? d.exceptions.filter(isOpen) : [];
+  const failed = d ? d.ipc.filter((r) => r.result === 'FAIL' || r.result === 'ALERT') : [];
+  const outOfLimits = d ? d.process.filter((p) => p.withinLimits === false) : [];
+  return (
+    <div className="drawer-wrap" role="dialog" aria-modal="true" aria-label={`Batch ${number}`} onClick={onClose}>
+      <aside className="drawer" onClick={(e) => e.stopPropagation()}>
+        <header className="drawer-head">
+          <div><span className="pt-title">Batch</span><h2>{number}</h2>
+            {d && <p className="muted">{d.batch.productCode}{d.batch.strength ? ` ${d.batch.strength}` : ''} · {words(d.batch.status)}{d.batch.released ? ' · released' : ''} · issued {d.batch.issuedAt ? shortTime(d.batch.issuedAt) : '—'}{d.batch.completedAt ? ` · completed ${shortTime(d.batch.completedAt)}` : ''}</p>}</div>
+          <button className="link dark" onClick={onClose} aria-label="Close">✕</button>
+        </header>
+        {err && <p className="error">{err}</p>}
+        {!d && !err && <p className="muted">Loading the batch record…</p>}
+        {d && (
+          <>
+            <div className="drawer-kpis">
+              <div className={open.length ? 'mk bad' : 'mk ok'}><b>{open.length}</b><span>open exceptions</span></div>
+              <div className="mk"><b>{d.exceptions.length}</b><span>exceptions in all</span></div>
+              <div className={failed.length ? 'mk warn' : 'mk ok'}><b>{failed.length}</b><span>checks failed / alert</span></div>
+              <div className={outOfLimits.length ? 'mk warn' : 'mk ok'}><b>{outOfLimits.length}</b><span>values out of limits</span></div>
+              <div className={d.deviations?.length ? 'mk warn' : 'mk ok'}><b>{d.deviations?.length ?? '—'}</b><span>deviations</span></div>
+            </div>
+            {d.deviations && d.deviations.length > 0 && (
+              <div className="drawer-devs">{d.deviations.map((x) => <span key={x.number} className="dev-chip"><strong>{x.number}</strong> · {words(x.status)}{x.title ? ` · ${x.title}` : ''}</span>)}</div>
+            )}
+            <div className="chips drawer-tabs" role="tablist">
+              {([['abnormal', 'What went wrong'], ['checks', `Checks and values (${d.ipc.length + d.process.length})`], ['equipment', `Equipment and rooms (${d.equipment.length})`], ['logbook', `Logbook entries (${d.logbook.length})`]] as const).map(([k, l]) => (
+                <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? 'scope-chip on' : 'scope-chip'} onClick={() => setTab(k)}>{l}</button>))}
+            </div>
+            {tab === 'abnormal' && (
+              <div className="timeline">
+                {[...d.exceptions.map((e) => ({ at: e.raisedAt, kind: 'ex' as const, e })), ...failed.map((r) => ({ at: r.recordedAt, kind: 'ipc' as const, r })), ...outOfLimits.map((p) => ({ at: p.recordedAt, kind: 'pv' as const, p }))]
+                  .sort((x, y) => x.at.localeCompare(y.at)).map((x, n) => (
+                    <div key={n} className={`tl-item ${x.kind === 'ex' ? (isOpen(x.e) ? 'open' : 'closed') : 'reading'}`}>
+                      <span className="tl-time">{shortTime(x.at)}</span>
+                      {x.kind === 'ex' && <div><strong>{words(x.e.type)}</strong> <span className="sev" style={{ background: SEV_COLOR(x.e.severity) }}>{words(x.e.severity)}</span> <span className="muted">· {words(x.e.status)}{x.e.disposition ? ` · ${words(x.e.disposition)}` : ''}</span>
+                        <small className="cell-sub">{x.e.stepTitle ?? stepName(x.e.step)}{x.e.description ? ` — ${x.e.description}` : ''}</small></div>}
+                      {x.kind === 'ipc' && <div><strong>{x.r.item ?? words(x.r.checkKind)}</strong> <span className="sev" style={{ background: x.r.result === 'FAIL' ? C.over : C.due }}>{x.r.result.toLowerCase()}</span> {x.r.value}{x.r.unit ? ` ${x.r.unit}` : ''} <span className="muted">(limits {x.r.lower ?? '–'} to {x.r.upper ?? '–'})</span><small className="cell-sub">{x.r.stepTitle}</small></div>}
+                      {x.kind === 'pv' && <div><strong>{x.p.tag}</strong> <span className="sev" style={{ background: C.over }}>out of limits</span> {x.p.value}{x.p.unit ? ` ${x.p.unit}` : ''} <span className="muted">(limits {x.p.lower ?? '–'} to {x.p.upper ?? '–'})</span><small className="cell-sub">{stepName(x.p.step)}</small></div>}
+                    </div>))}
+                {d.exceptions.length + failed.length + outOfLimits.length === 0 && <p className="all-good"><span aria-hidden="true">✓</span> Nothing abnormal recorded for this batch.</p>}
+              </div>
+            )}
+            {tab === 'checks' && (
+              <table className="plain-table"><thead><tr><th>Check / value</th><th>Result</th><th>Limits</th><th>Recorded</th></tr></thead>
+                <tbody>
+                  {d.ipc.map((r, n) => <tr key={`i${n}`}><td>{r.item ?? words(r.checkKind)}{r.aggregate ? ` (${r.aggregate})` : ''}<small className="cell-sub">{r.stepTitle}</small></td>
+                    <td><span className="sev" style={{ background: r.result === 'PASS' ? C.ready : r.result === 'FAIL' ? C.over : C.due }}>{r.result.toLowerCase()}</span> {r.value}{r.unit ? ` ${r.unit}` : ''}</td><td>{r.lower ?? '–'} to {r.upper ?? '–'}</td><td>{shortTime(r.recordedAt)}</td></tr>)}
+                  {d.process.map((p, n) => <tr key={`p${n}`}><td>{p.tag}<small className="cell-sub">{stepName(p.step)}</small></td>
+                    <td><span className="sev" style={{ background: p.withinLimits === false ? C.over : C.ready }}>{p.withinLimits === false ? 'out of limits' : 'in limits'}</span> {p.value}{p.unit ? ` ${p.unit}` : ''}</td><td>{p.lower ?? '–'} to {p.upper ?? '–'}</td><td>{shortTime(p.recordedAt)}</td></tr>)}
+                </tbody></table>
+            )}
+            {tab === 'equipment' && (
+              <table className="plain-table"><thead><tr><th>Step</th><th>Equipment / room</th><th>From</th><th>To</th></tr></thead>
+                <tbody>{d.equipment.map((x, n) => <tr key={n}><td>{stepName(x.step)}</td><td><strong>{x.equipmentCode ?? '—'}</strong> {x.equipmentType ? <span className="muted">{x.equipmentType}</span> : null}{x.roomCode ? <small className="cell-sub">room {x.roomCode}</small> : null}</td>
+                  <td>{x.startedAt ? shortTime(x.startedAt) : '—'}</td><td>{x.endedAt ? shortTime(x.endedAt) : <span className="muted">open</span>}</td></tr>)}</tbody></table>
+            )}
+            {tab === 'logbook' && (d.logbook.length === 0 ? <p className="muted">No Logbook entry names this batch.</p> : (
+              <table className="plain-table"><thead><tr><th>Item</th><th>Activity</th><th>From</th><th>To</th><th>By</th></tr></thead>
+                <tbody>{d.logbook.map((x) => <tr key={x.id} className="clickable" onClick={() => onOpen(x.equipmentId)}><td><strong>{x.code}</strong> {x.name}</td><td>{x.what}</td><td>{shortTime(x.start)}</td><td>{x.end ? shortTime(x.end) : <span className="muted">in progress</span>}</td><td>{x.by}</td></tr>)}</tbody></table>
+            ))}
+          </>
+        )}
+      </aside>
+    </div>
   );
 }
 
@@ -390,6 +548,7 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
   const [exc, setExc] = useState<ExcData | null>(null);
   const [raised, setRaised] = useState<Overdue | null>(null);
   const [updated, setUpdated] = useState<string | null>(null);
+  const [batch, setBatch] = useState<string | null>(null);
 
   const load = async (background = false) => {
     const get = <T,>(u: string) => api<T>('GET', u, undefined, background);
@@ -470,7 +629,8 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
         </>
       )}
       {tab === 'review' && <Review d={pending} onOpen={onOpen} />}
-      {tab === 'exceptions' && <Exceptions d={exc} />}
+      {tab === 'exceptions' && <Exceptions d={exc} onBatch={setBatch} />}
+      {batch && <BatchDrawer number={batch} onClose={() => setBatch(null)} onOpen={(id) => { setBatch(null); onOpen(id); }} />}
     </>
   );
 }

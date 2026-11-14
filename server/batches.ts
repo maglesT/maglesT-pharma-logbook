@@ -24,6 +24,15 @@ export interface Batches {
   usedOn(codes: string[]): Promise<Set<string>>;
   /** Owner 2026-11-13: only the abnormal records of the batch records, of the last `days` days (and every open one). */
   abnormal(days: number): Promise<Abnormal>;
+  /** Owner 2026-11-14: what happened to one batch (equipment and rooms used, every exception, check and process value). */
+  detail(batchNumber: string): Promise<BatchDetail | null>;
+}
+export interface BatchDetail {
+  batch: Batch;
+  equipment: { step: string | null; equipmentCode: string | null; equipmentType: string | null; roomCode: string | null; startedAt: string | null; endedAt: string | null }[];
+  exceptions: BatchException[];
+  ipc: (IpcAbnormal & { aggregate: string | null })[];
+  process: (ProcessAbnormal & { withinLimits: boolean | null })[];
 }
 export interface BatchException {
   batchNumber: string; exceptionId: string; type: string; category: string; severity: string; step: string | null; stepTitle: string | null;
@@ -94,6 +103,31 @@ export function sqlBatches(q: Sql, schema = 'report'): Batches {
         where gmp_critical and acked_at is null order by raised_at desc limit 200`).map((r) => ({
         code: r.alarm_code, source: r.source, subject: r.subject_code, batchNumbers: r.batch_numbers ?? [], raisedAt: r.raised_at }));
       return { exceptions, ipc, process, alarms } as Abnormal;
+    })),
+    detail: (batchNumber) => read(() => q.begin('read only', async (tx) => {
+      await tx`set local statement_timeout = '15s'`;
+      const [b] = await tx<Row[]>`select ${tx.unsafe(COLS)} from ${v('batch_fact_v1')} where batch_number = ${batchNumber} limit 1`;
+      if (!b) return null;
+      const equipment = (await tx<Record<string, string | null>[]>`
+        select step, nullif(equipment_code, '') as equipment_code, nullif(equipment_type, '') as equipment_type, nullif(room_code, '') as room_code,
+          started_at::text, ended_at::text from ${v('equipment_use_v1')} where batch_number = ${batchNumber} order by started_at nulls last limit 300`)
+        .map((r) => ({ step: r.step, equipmentCode: r.equipment_code, equipmentType: r.equipment_type, roomCode: r.room_code, startedAt: r.started_at, endedAt: r.ended_at }));
+      const exceptions = (await tx<Record<string, string | null>[]>`
+        select batch_number, exception_id::text, exception_type, category, severity, step, step_title, description, status, disposition,
+          disposed_at::text, raised_at::text from ${v('exception_detail_v1')} where batch_number = ${batchNumber} order by raised_at limit 1000`).map((r) => ({
+        batchNumber: r.batch_number!, exceptionId: r.exception_id!, type: r.exception_type!, category: r.category ?? '', severity: r.severity ?? '',
+        step: r.step, stepTitle: r.step_title, description: r.description, status: r.status ?? '', disposition: r.disposition, disposedAt: r.disposed_at, raisedAt: r.raised_at! }));
+      const ipc = (await tx<Record<string, string | null>[]>`
+        select batch_number, step, step_title, check_kind, item, instrument_code, value_text, unit, lower_text, upper_text, aggregate, result, recorded_at::text
+        from ${v('ipc_result_v1')} where batch_number = ${batchNumber} order by recorded_at limit 1000`).map((r) => ({
+        batchNumber: r.batch_number!, step: r.step, stepTitle: r.step_title, checkKind: r.check_kind ?? '', item: r.item, instrumentCode: r.instrument_code,
+        value: r.value_text, unit: r.unit, lower: r.lower_text, upper: r.upper_text, aggregate: r.aggregate, result: r.result ?? '', recordedAt: r.recorded_at! }));
+      const process = (await tx<Record<string, string | boolean | null>[]>`
+        select batch_number, step, tag, value_text, unit, lower_text, upper_text, within_limits, recorded_at::text
+        from ${v('process_actual_v1')} where batch_number = ${batchNumber} order by recorded_at limit 1000`).map((r) => ({
+        batchNumber: r.batch_number as string, step: r.step as string | null, tag: (r.tag as string) ?? '', value: r.value_text as string | null, unit: r.unit as string | null,
+        lower: r.lower_text as string | null, upper: r.upper_text as string | null, withinLimits: r.within_limits as boolean | null, recordedAt: r.recorded_at as string }));
+      return { batch: toBatch(b), equipment, exceptions, ipc, process } as BatchDetail;
     })),
   };
 }
