@@ -62,6 +62,10 @@ export function EquipmentPage({ me, openId }: { me: Me; openId?: number }) {
   }, [selected]);
   useEffect(() => setSelected(openId), [openId]);
 
+  // Owner 2026-11-14 (speed): statuses by id, and the cards drawn 60 at a time.
+  const [limit, setLimit] = useState(60);
+  useEffect(() => setLimit(60), [selection, filter]);
+  const byId = useMemo(() => new Map((statuses ?? []).map((x) => [x.equipmentId, x])), [statuses]);
   const eq = items.find((i) => i.id === selected);
   if (eq) return <Logbook me={me} equipment={eq} onBack={() => setSelected(undefined)} />;
 
@@ -76,14 +80,15 @@ export function EquipmentPage({ me, openId }: { me: Me; openId?: number }) {
       <p className="muted">{shown.length} of {active.length} logbooks{chosen.length !== active.length ? ` (${chosen.length} in the selection)` : ''}</p>
       {statuses === null && <p className="muted">Loading status…</p>}
       <div className="tiles">
-        {shown.map((i) => (
-          <button key={i.id} className={`tile state-${statuses?.find((x) => x.equipmentId === i.id)?.state ?? 'loading'}`} onClick={() => setSelected(i.id)}>
-            <strong>{i.code} <StatusChip status={statuses?.find((x) => x.equipmentId === i.id)} /></strong>
+        {shown.slice(0, limit).map((i) => (
+          <button key={i.id} className={`tile state-${byId.get(i.id)?.state ?? 'loading'}`} onClick={() => setSelected(i.id)}>
+            <strong>{i.code} <StatusChip status={byId.get(i.id)} /></strong>
             <span>{i.name}</span>
             <span className="muted">{i.location}{i.type ? `${i.location ? ' · ' : ''}${i.type}` : ''}</span>
           </button>
         ))}
       </div>
+      {shown.length > limit && <p className="show-more"><button onClick={() => setLimit(limit + 120)}>Show more ({shown.length - limit} more)</button></p>}
     </>
   );
 }

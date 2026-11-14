@@ -593,3 +593,10 @@ td .batch-link { font-size: .95rem; }
 .routes label.route { display: grid; grid-template-columns: 20px 1fr; align-items: start; margin-right: 0; }
 .routes .route span small { display: block; color: var(--muted); font-weight: 400; margin-top: 2px; }
 .pill.warn { background: var(--warn-soft); color: var(--warn); }
+/* owner 2026-11-14: nothing spills out of a dues card; long lists fold */
+.due-cols > .due-col { min-width: 0; }
+.due-row { width: 100%; min-width: 0; overflow: hidden; box-sizing: border-box; }
+.due-row .due-name, .due-row .due-code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.due-row .due-when { white-space: normal; }
+.due-more { justify-self: start; font-size: .84rem; min-height: 0; padding: 2px 4px; }
+.show-more { text-align: center; margin: 16px 0; }

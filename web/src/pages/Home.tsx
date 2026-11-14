@@ -210,6 +210,7 @@ const KINDS: { key: 'equipment' | 'instrument' | 'area'; label: string }[] = [
   { key: 'equipment', label: 'Equipment' }, { key: 'instrument', label: 'Instruments' }, { key: 'area', label: 'Areas' }];
 function DueColumns({ items, onOpen }: { items: Item[]; onOpen: (id: number) => void }) {
   const [kind, setKind] = useState<'all' | 'equipment' | 'instrument' | 'area'>('all');
+  const [open, setOpen] = useState<Record<string, boolean>>({});
   const cleaning = items.filter((i) => i.st.deadline && (i.st.deadline.overdue || i.st.deadline.soon))
     .map((i) => ({ i, over: i.st.deadline!.overdue, when: i.st.deadline!.at, text: `${DEADLINE_LABEL[i.st.deadline!.kind]} · ${i.st.deadline!.overdue ? `overdue by ${timeLeft(i.st.deadline!.at)}` : `ends in ${timeLeft(i.st.deadline!.at)}`}` }));
   const col = (k: Due['kind']) => items.flatMap((i) => i.st.dues.filter((d) => d.kind === k && (d.overdue || d.soon))
@@ -245,7 +246,9 @@ function DueColumns({ items, onOpen }: { items: Item[]; onOpen: (id: number) => 
               {rows.length === 0 ? <p className="all-good small"><span aria-hidden="true">✓</span> Nothing due</p> : groups.map((g) => (
                 <div key={g.key} className="due-group">
                   <h4>{g.label} <span>{g.rows.length}</span></h4>
-                  {g.rows.map((r, i) => row(r, `${g.key}-${i}`))}
+                  {(open[`${c.key}-${g.key}`] ? g.rows : g.rows.slice(0, 6)).map((r, i) => row(r, `${g.key}-${i}`))}
+                  {g.rows.length > 6 && <button className="link due-more" onClick={() => setOpen({ ...open, [`${c.key}-${g.key}`]: !open[`${c.key}-${g.key}`] })}>
+                    {open[`${c.key}-${g.key}`] ? 'Show fewer' : `Show all ${g.rows.length}`}</button>}
                 </div>
               ))}
             </div>
