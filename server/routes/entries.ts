@@ -11,6 +11,7 @@ import { SignError, authenticateSigner, contentHash, proofOnly, sign, signBody }
 import { settingsInForce } from './settings.js';
 import { allStatuses, statusOf } from '../status.js';
 import { VoiceError, confirmVoiceNotes, unsignedDrafts, voiceNotesFor, type VoiceUse } from '../voice.js';
+import { ATTACHMENT_TYPES, attachmentsFor } from '../attachments.js';
 
 // Product default (LB-04): an activity time older than this makes the entry a late entry.
 export const LATE_MINUTES = 30;
@@ -646,6 +647,8 @@ export async function present(sql: Sql, rows: EntryRow[], needsVerification?: (r
     select object_id::int, printed_name, meaning, signed_at, content_hash from signatures
     where object_type = 'entry' and object_id = any(${ids}::bigint[]) order by signed_at`;
   const voices = await voiceNotesFor(sql, rows);
+  // D-44: the documents of the entry, shared by all its versions.
+  const attachments = await attachmentsFor(sql, rows.filter((r) => ATTACHMENT_TYPES.has(r.logbook_type)).map((r) => r.entry_id));
   const names = new Map(
     (await sql<{ id: number; full_name: string }[]>`
       select id::int, full_name from users where id = any(${[...new Set(rows.map((r) => r.entered_by))]}::bigint[])`).map((u) => [u.id, u.full_name]),
@@ -674,6 +677,7 @@ export async function present(sql: Sql, rows: EntryRow[], needsVerification?: (r
       signatures: mine.map((g) => ({ printedName: g.printed_name, meaning: g.meaning, signedAt: g.signed_at, valid: g.content_hash === hash })),
       // D-26: voice notes whose signed English text is in this version.
       voiceNotes: voices.get(r.id) ?? [],
+      attachments: attachments.get(r.entry_id) ?? [],
       ...(needsVerification
         ? {
             awaitingVerification: needsVerification(r) && !mine.some((g) => g.meaning === 'verified'),

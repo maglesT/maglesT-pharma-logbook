@@ -144,6 +144,7 @@ export const MEANING_LABEL: Record<string, string> = {
   approved: 'Approved',
   corrected: 'Corrected',
   voice_confirmed: 'Voice note confirmed',
+  decided: 'Route decided',
 };
 
 // Value for a datetime-local input, in the browser's local time.
@@ -184,7 +185,50 @@ export interface Entry {
   mayCorrect?: boolean;
   // D-26: voice notes whose signed English text is in this version.
   voiceNotes?: { id: number; field: string; language: string | null; edited: boolean; carried: boolean }[];
+  // D-44: documents attached to the entry (shared by all its versions).
+  attachments?: Attachment[];
 }
+
+// D-44: a document on a calibration, requalification or maintenance entry.
+export interface Attachment { id: number; entryId: number; fileName: string; mediaType: string; size: number; sha256: string; reason: string | null; uploadedBy: string; uploadedAt: string }
+export const ATTACHMENT_TYPES = new Set(['calibration', 'requalification', 'maintenance']);
+export const ATTACHMENT_ACCEPT = 'application/pdf,image/png,image/jpeg,.pdf,.png,.jpg,.jpeg';
+export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+export const fileSize = (n: number) => (n < 1024 * 1024 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`);
+// The declared type from the name when the browser gives none; the server checks the real type from the bytes.
+export function attachmentType(file: File): string | null {
+  const t = file.type || (/\.pdf$/i.test(file.name) ? 'application/pdf' : /\.png$/i.test(file.name) ? 'image/png' : /\.jpe?g$/i.test(file.name) ? 'image/jpeg' : '');
+  return t === 'image/jpg' ? 'image/jpeg' : ['application/pdf', 'image/png', 'image/jpeg'].includes(t) ? t : null;
+}
+export const readBase64 = (file: File) => new Promise<string>((resolve, reject) => {
+  const r = new FileReader();
+  r.onerror = () => reject(new Error(`Could not read ${file.name}.`));
+  r.onload = () => resolve(String(r.result).split(',')[1] ?? '');
+  r.readAsDataURL(file);
+});
+// Uploads one document to an entry version; the reason is needed for a document added later (D-44).
+export async function uploadAttachment(versionId: number, file: File, reason?: string) {
+  const mediaType = attachmentType(file);
+  if (!mediaType) throw new Error(`${file.name}: only PDF, PNG and JPEG documents can be attached.`);
+  if (file.size > MAX_ATTACHMENT_BYTES) throw new Error(`${file.name}: a document may be at most 10 MB.`);
+  return api<Attachment>('POST', `/api/entries/${versionId}/attachments`, { fileName: file.name, mediaType, dataBase64: await readBase64(file), reason: reason || undefined });
+}
+
+// D-43: a problem on an item (a missed limit or a reported problem) and QA's route decision.
+export interface Problem {
+  id: number; equipmentId: number; code: string; name: string; location: string; source: 'overdue' | 'reported';
+  dueKind: 'dirty_hold' | 'clean_hold' | 'frequency' | 'pm' | 'calibration' | 'requalification' | null;
+  label: string; title: string; whatHappened: string | null; impact: string | null; severity: 'minor' | 'major' | 'critical' | null; severityLabel: string | null;
+  reportedBy: string | null; createdAt: string; mayAllowUse: boolean; contentHash: string;
+  decision: {
+    route: 'deviation' | 'exception'; exceptionNumber: string | null; justification: string | null; impactAssessment: string | null; action: string | null;
+    useAllowedUntil: string | null; decidedBy: string | null; decidedAt: string; active: boolean; deviation: { number: string; status: string } | null;
+  } | null;
+}
+export const SEVERITY_LABEL: Record<string, string> = { minor: 'Minor', major: 'Major', critical: 'Critical' };
+export const plantDay = (iso: string) => new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+// "Use allowed until" is the end of a plant day: shown as that day.
+export const untilDay = (iso: string) => new Date(new Date(iso).getTime() - 1).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium' });
 
 export const TYPE_LABEL: Record<string, string> = {
   equipment_use: 'Equipment use',
@@ -219,7 +263,7 @@ export interface EquipmentStatus {
   qualification: string | null;
 }
 export interface CleaningDeadline { kind: 'dirty_hold' | 'clean_hold' | 'frequency'; at: string; hours: number; soon: boolean; overdue: boolean }
-export interface Due { kind: 'pm' | 'calibration' | 'requalification'; due: string; frequency: string; soon: boolean; overdue: boolean; dueFrom?: string }
+export interface Due { kind: 'pm' | 'calibration' | 'requalification'; due: string; frequency: string; soon: boolean; overdue: boolean; dueFrom?: string; waived?: { number: string; until: string } }
 export const DEADLINE_LABEL: Record<CleaningDeadline['kind'], string> = { dirty_hold: 'Dirty hold', clean_hold: 'Clean hold', frequency: 'Scheduled cleaning' };
 export const DUE_LABEL: Record<Due['kind'], string> = { pm: 'Preventive maintenance', calibration: 'Calibration', requalification: 'Requalification' };
 // Time left until (or past) a moment, in words: "2 h 15 min", "3 days 4 h".

@@ -210,6 +210,7 @@ history card needs any Logbook permission (sign-on itself needs one).
 | `logbook.entry.correct_others` | Correct entries made by others (D-17) | mayCorrect: supervisor |
 | `logbook.entry.verify` | Verify entries (second person) | VERIFIERS |
 | `logbook.breakdown.release` | Release equipment after a breakdown | /release: qa |
+| `logbook.exception.decide` | Decide the route of a problem (Deviations or a Logbook exception) and approve Logbook exceptions (D-43) | /problems/:id/decide: qa |
 | `logbook.review.read` | See period reviews, the batch view and exports | review/exports: qa, supervisor |
 | `logbook.review.sign` | Sign period reviews | /reviews: qa |
 | `logbook.audit.read` | Read the audit trail and run the integrity check | /audit, /integrity: qa, admin |
@@ -226,7 +227,7 @@ Old role → permissions (for the B1-5 data move; each moved user gets exactly t
 | operator | record_use, record_cleaning, record_general, record_maintenance, record_sterile, record_steriliser_test, voice_note.record, advice.ask |
 | supervisor | the operator's, plus correct_others, verify, review.read |
 | engineering | record_general, record_maintenance, record_calibration, record_steriliser_test, voice_note.record, advice.ask |
-| qa | verify, breakdown.release, review.read, review.sign, audit.read, settings.approve, advice.ask |
+| qa | verify, breakdown.release, exception.decide, review.read, review.sign, audit.read, settings.approve, advice.ask |
 | admin | audit.read, settings.draft, site.manage |
 
 Admins (D-30, option a): today the Admin role can never sign. With ticked permissions a person could hold `site.manage`

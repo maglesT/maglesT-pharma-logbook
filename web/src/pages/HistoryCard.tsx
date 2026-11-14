@@ -6,6 +6,7 @@ import {
 import { StatusChip } from '../components/StatusChip.js';
 import { Summary, VoiceLinks } from './EquipmentPage.js';
 import { VoiceNoteDialog } from '../components/VoiceNote.js';
+import { AttachmentLinks } from '../components/Attachments.js';
 
 const day = (offset: number) => {
   const d = new Date();
@@ -133,7 +134,7 @@ function EventRow({ ev, onVoice }: { ev: HistoryEvent; onVoice: (id: number) => 
         </td>
         <td>
           {ev.breakdown && <div><strong>Downtime {ev.breakdown.downtime}</strong> · parts: {ev.breakdown.parts || '—'} · {ev.breakdown.status}</div>}
-          {e.batch && <div>Batch {e.batch}</div>}<Summary e={e} /> <VoiceLinks e={e} onOpen={onVoice} />
+          {e.batch && <div>Batch {e.batch}</div>}<Summary e={e} /> <VoiceLinks e={e} onOpen={onVoice} /><AttachmentLinks e={e} full />
         </td>
         <td>{e.enteredBy}<br /><span className="muted">{plantTime(e.enteredAt)}</span></td>
         <td>{e.signatures.map((s) => <div key={s.meaning}>{MEANING_LABEL[s.meaning]}: {s.printedName}, {plantTime(s.signedAt)}{!s.valid && ' (INVALID)'}</div>)}</td>

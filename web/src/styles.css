@@ -526,3 +526,19 @@ td .batch-link { font-size: .95rem; }
 .tl-item.open::before { background: var(--bad); } .tl-item.reading::before { background: #e0a800; } .tl-item.closed::before { background: var(--ok); }
 .tl-time { font-size: .82rem; color: var(--muted); }
 @media (max-width: 700px) { .drawer-kpis { grid-template-columns: repeat(2, 1fr); } .tl-item { grid-template-columns: 1fr; } }
+
+/* D-44: documents on an entry */
+.attachments { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 2px; font-size: 0.9rem; }
+.attachments a { color: var(--brand); text-decoration: none; } .attachments a:hover { text-decoration: underline; }
+/* D-43: problems and exceptions on an item */
+.problems { gap: 10px; } .problems .panel-head { margin-bottom: 0; } .problems .report-problem { margin-left: auto; }
+.problems h3 { margin: 6px 0 4px; font-size: 0.95rem; color: var(--muted); }
+.problem-group { display: grid; gap: 6px; }
+.problem-row { display: flex; gap: 12px; justify-content: space-between; align-items: flex-start; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: #fff; font-size: 0.92rem; }
+.problem-row.waiting { background: #fffbea; border-color: #f1dfa6; }
+.problem-row.exception.active { background: var(--ok-soft); border-color: #bfe5cc; }
+.problem-row .muted { font-size: 0.86rem; }
+.problem-row button { white-space: nowrap; }
+.routes label.route { display: grid; grid-template-columns: 20px 1fr; align-items: start; margin-right: 0; }
+.routes .route span small { display: block; color: var(--muted); font-weight: 400; margin-top: 2px; }
+.pill.warn { background: var(--warn-soft); color: var(--warn); }

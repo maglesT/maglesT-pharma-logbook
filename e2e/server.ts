@@ -6,6 +6,7 @@ import { buildApp } from '../server/app.js';
 import globalSetup from '../test/global-setup.js';
 import { TEST_DATABASE_URL, TEST_PROOF_KEY, fakeSignOn, login, proofFor, seedUser, call } from '../test/helpers.js';
 import { NO_CARE, type Care, type Master } from '../server/master.js';
+import { scheduleOverdue } from '../server/overdue.js';
 import { E2E_PORT, E2E_SCHEMA, USERS } from './config.js';
 import type { SpeechProvider } from '../server/voice.js';
 
@@ -27,6 +28,8 @@ await owner.end();
 const schemaOwner = connect(TEST_DATABASE_URL, { searchPath: E2E_SCHEMA });
 await migrate(schemaOwner);
 for (const [username, roles] of Object.entries(USERS)) await seedUser(schemaOwner, username, [...roles]);
+// As on an installation with history (D-37): limits that ran out in the last 30 days count.
+await schemaOwner`update overdue_since set since = now() - interval '30 days'`;
 await schemaOwner.end();
 
 const sql = connect(TEST_DATABASE_URL, { role: 'logbook_app', searchPath: E2E_SCHEMA });
@@ -60,3 +63,5 @@ await call(app, admin, 'POST', '/api/logout');
 await call(app, qa, 'POST', '/api/logout');
 
 await app.listen({ port: E2E_PORT, host: '127.0.0.1' });
+// D-37/D-43: the minute check for missed limits, every 2 s here so a browser test can wait for it.
+scheduleOverdue(sql, master, null, () => {}, 2_000);

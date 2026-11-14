@@ -2,6 +2,7 @@ import type { Sql } from './db.js';
 import { audit } from './audit.js';
 import { contentHash } from './signatures.js';
 import { ENTRY_COLS, entryContent, type EntryRow } from './routes/entries.js';
+import { DECISION_COLS, decisionContent, type DecisionRow } from './problems.js';
 import { signedContent, type SettingsRow } from './routes/settings.js';
 import { VOICE_COLS, voiceContent, type ConfirmationRow, type VoiceNoteRow } from './voice.js';
 
@@ -92,6 +93,8 @@ export async function check(sql: Sql): Promise<IntegrityResult> {
     (await sql<SettingsRow[]>`select id::int, logbook_type, version, settings, effective_from, created_by::int, created_at from logbook_settings`).map((s) => [s.id, s]),
   );
   const reviews = new Map((await sql<{ id: number; content: unknown }[]>`select id::int, content from reviews`).map((r) => [r.id, r.content]));
+  // D-43: QA's route decisions, signed.
+  const decisions = new Map((await sql.unsafe<DecisionRow[]>(`select ${DECISION_COLS} from problem_decisions d`)).map((d) => [d.id, d]));
   const sigs = await sql<{ id: number; object_type: string; object_id: number; meaning: string; content_hash: string }[]>`
     select id::int, object_type, object_id::int, meaning, content_hash from signatures order by id`;
   for (const g of sigs) {
@@ -99,6 +102,7 @@ export async function check(sql: Sql): Promise<IntegrityResult> {
       g.object_type === 'entry' ? (byId.has(g.object_id) ? entryContent(byId.get(g.object_id)!) : undefined)
       : g.object_type === 'settings' ? (settings.has(g.object_id) ? signedContent(settings.get(g.object_id)!) : undefined)
       : g.object_type === 'voice_note' ? (voiceById.has(g.object_id) && confirmations.has(g.object_id) ? voiceContent(voiceById.get(g.object_id)!, confirmations.get(g.object_id)!) : undefined)
+      : g.object_type === 'problem_decision' ? (decisions.has(g.object_id) ? decisionContent(decisions.get(g.object_id)!) : undefined)
       : reviews.get(g.object_id);
     if (content === undefined) problems.push(`Signature ${g.id} (${g.meaning}): the signed ${g.object_type} ${g.object_id} is missing.`);
     else if (contentHash(g.object_type, g.object_id, content) !== g.content_hash) {

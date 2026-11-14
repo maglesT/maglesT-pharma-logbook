@@ -49,7 +49,11 @@ export interface Due {
   soon: boolean;
   overdue: boolean;
   dueFrom: string;                  // plant date from which it counts as due (85 % of the allowed time, D-41)
+  // D-43: an approved Logbook exception allows use although the due is overdue, until this moment.
+  waived?: { number: string; until: Date };
 }
+// D-43: an approved exception that allows continued use of the item for one overdue lifecycle due.
+export interface ActiveException { kind: Due['kind']; number: string; until: Date }
 // Owner (point 8): pending activities show from 15 days before they are due (where no start is known; D-41: 85 %).
 export const DUES_WARN_DAYS = 15;
 // D-41: a cleaning is due once 85 % of its hold or interval has passed.
@@ -134,6 +138,8 @@ interface Facts {
   pressure_out_of_limit: string[] | null;
   today: string;
   now: Date;
+  // D-43: approved exceptions allowing use now, merged in after the query.
+  exceptions: ActiveException[];
 }
 
 const DUE_SOON_DAYS = 7;
@@ -239,13 +245,36 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
     where ${ids === null ? q`true` : q`q.id = any(${ids}::bigint[])`}`;
   const none = { cleanHoldHours: null, dirtyHoldHours: null, cleaningBasis: null, cleaningFrequencyHours: null, pmFrequencyDays: null,
     calibrationFrequencyDays: null, requalificationFrequencyMonths: null, needsCalibration: false, addedAt: new Date(0) };
-  return rows.map((r) => ({ ...r, care: ctx.care.get(r.id) ?? none, qual: ctx.qual?.get(r.id) ?? null, hasQual: ctx.qual !== null }));
+  const exceptions = await activeExceptions(q, ids);
+  return rows.map((r) => ({ ...r, care: ctx.care.get(r.id) ?? none, qual: ctx.qual?.get(r.id) ?? null, hasQual: ctx.qual !== null, exceptions: exceptions.get(r.id) ?? [] }));
+}
+
+// D-43: the approved Logbook exceptions that allow use of an item now (use_allowed_until not passed), by local id. Only a
+// missed PM, calibration or requalification can be waived (the database refuses anything else).
+export async function activeExceptions(q: Sql | Tx, ids: number[] | null): Promise<Map<number, ActiveException[]>> {
+  const rows = await q<{ equipment_id: number; kind: Due['kind']; number: string; until: Date }[]>`
+    select p.equipment_id::int, p.due_kind as kind, d.exception_number as number, d.use_allowed_until as until
+    from problem_decisions d join problems p on p.id = d.problem_id
+    where d.route = 'exception' and d.use_allowed_until > now() and ${ids === null ? q`true` : q`p.equipment_id = any(${ids}::bigint[])`}
+    order by d.use_allowed_until desc`;
+  const out = new Map<number, ActiveException[]>();
+  for (const r of rows) out.set(r.equipment_id, [...(out.get(r.equipment_id) ?? []), { kind: r.kind, number: r.number, until: r.until }]);
+  return out;
 }
 
 export function deriveStatus(f: Facts): EquipmentStatus {
   const blockers: string[] = [];
   const warnings: string[] = [];
   const now = f.now.getTime();
+  // D-43: an approved exception allows use for a while although a PM, calibration or requalification is overdue.
+  const waived = (kind: Due['kind']) => f.exceptions.find((x) => x.kind === kind && x.until.getTime() > now) ?? null;
+  const untilText = (until: Date) => `until ${plantDate(new Date(until.getTime() - 1))} (end of day)`;
+  const dueOverdue = (d: Due, text: string, state: StatusCode) => {
+    const x = waived(d.kind);
+    if (x) { d.waived = { number: x.number, until: x.until }; warnings.push(`Use allowed under exception ${x.number}, ${untilText(x.until)}: ${text}`); }
+    else { blockers.push(text); duesState ??= state; }
+  };
+  let duesState: StatusCode | null = null;
 
   // LB-06 / SchM 18.4.3: defective equipment is withdrawn until released.
   if (f.open_breakdowns > 0) blockers.push('Out of service: a breakdown has not been released by QA.');
@@ -278,8 +307,9 @@ export function deriveStatus(f: Facts): EquipmentStatus {
           if (!calibrationDue || byFrequency < calibrationDue) calibrationDue = byFrequency;
         }
         if (calibrationDue && calibrationDue < f.today) {
-          blockers.push(`Calibration overdue since ${calibrationDue}.`);
-          calState = 'calibration_overdue';
+          const x = waived('calibration');
+          if (x) warnings.push(`Use allowed under exception ${x.number}, ${untilText(x.until)}: calibration overdue since ${calibrationDue}.`);
+          else { blockers.push(`Calibration overdue since ${calibrationDue}.`); calState = 'calibration_overdue'; }
         } else if (calibrationDue && Date.parse(calibrationDue) - Date.parse(f.today) < DUE_SOON_DAYS * 86_400_000) {
           warnings.push(`Calibration due on ${calibrationDue}.`);
         }
@@ -353,16 +383,18 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   // Owner 2026-11-12 (slide 4, point 8): preventive maintenance, calibration and requalification dues, from master data's
   // frequencies and the Qualification product. Overdue blocks use.
   const dues: Due[] = [];
-  let duesState: StatusCode | null = null;
   if (c.pmFrequencyDays) {
     const from = f.last_pm_end ?? c.addedAt;
     const d = dueOf('pm', addDays(plantDate(from), c.pmFrequencyDays), f.today, `every ${c.pmFrequencyDays} days`, plantDate(from));
     dues.push(d);
-    if (d.overdue) { blockers.push(`Preventive maintenance overdue since ${d.due}: do the PM before use.`); duesState ??= 'pm_overdue'; }
+    if (d.overdue) dueOverdue(d, `Preventive maintenance overdue since ${d.due}: do the PM before use.`, 'pm_overdue');
   }
   if (calibrationDue && (c.calibrationFrequencyDays || f.care.needsCalibration)) {
-    dues.push(dueOf('calibration', calibrationDue, f.today, c.calibrationFrequencyDays ? `every ${c.calibrationFrequencyDays} days` : 'per certificate',
-      f.last_cal_pass_at ? plantDate(f.last_cal_pass_at) : null));
+    const d = dueOf('calibration', calibrationDue, f.today, c.calibrationFrequencyDays ? `every ${c.calibrationFrequencyDays} days` : 'per certificate',
+      f.last_cal_pass_at ? plantDate(f.last_cal_pass_at) : null);
+    const x = d.overdue ? waived('calibration') : null;
+    if (x) d.waived = { number: x.number, until: x.until };
+    dues.push(d);
   }
   // A requalification written in the Logbook gives the due date where the Qualification product has none.
   const requalDue = f.qual?.nextReviewDue ?? f.last_requal_due
@@ -371,7 +403,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     const d = dueOf('requalification', requalDue, f.today, c.requalificationFrequencyMonths ? `every ${c.requalificationFrequencyMonths} months` : 'per requalification report',
       f.last_requal_at ? plantDate(f.last_requal_at) : null);
     dues.push(d);
-    if (d.overdue) { blockers.push(`Requalification overdue since ${d.due}: requalify before use.`); duesState ??= 'requalification_overdue'; }
+    if (d.overdue) dueOverdue(d, `Requalification overdue since ${d.due}: requalify before use.`, 'requalification_overdue');
   }
   if (f.qual) {
     if (f.qual.nextReviewDue) {
@@ -379,7 +411,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
         c.requalificationFrequencyMonths ? `every ${c.requalificationFrequencyMonths} months` : 'per qualification report',
         c.requalificationFrequencyMonths ? addMonths(f.qual.nextReviewDue, -c.requalificationFrequencyMonths) : (f.last_requal_at ? plantDate(f.last_requal_at) : null));
       dues.push(d);
-      if (d.overdue) { blockers.push(`Requalification overdue since ${d.due}: requalify before use.`); duesState ??= 'requalification_overdue'; }
+      if (d.overdue) dueOverdue(d, `Requalification overdue since ${d.due}: requalify before use.`, 'requalification_overdue');
     }
     if (f.qual.status === 'not_qualified' || f.qual.status === 'requalification_needed') {
       blockers.push(f.qual.status === 'not_qualified' ? 'Not qualified: see the Qualification system.' : 'Requalification needed: see the Qualification system.');

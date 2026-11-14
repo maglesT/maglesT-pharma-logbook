@@ -27,6 +27,8 @@ import type { Batches } from './batches.js';
 import { batchRoutes } from './routes/batches.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { overdueRoutes } from './routes/overdue.js';
+import { problemRoutes } from './routes/problems.js';
+import { attachmentRoutes } from './routes/attachments.js';
 import { statusContext, type StatusContext } from './status.js';
 
 export const VERSION = '0.5.0';
@@ -103,6 +105,8 @@ export async function buildApp({ sql, signOn, master, qualification = null, devi
   voiceRoutes(app, sql, speech);
   adviceRoutes(app, sql, advisor);
   overdueRoutes(app, sql);
+  problemRoutes(app, sql);
+  attachmentRoutes(app, sql);
   batchRoutes(app, sql);
   dashboardRoutes(app, sql);
 

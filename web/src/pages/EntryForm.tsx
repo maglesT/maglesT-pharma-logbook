@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { api, ApiError, getSignProof, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type BatchChoice, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
+import { api, ApiError, ATTACHMENT_TYPES, getSignProof, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type BatchChoice, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
 import { VoiceButton } from '../components/VoiceNote.js';
+import { FilePicker, uploadAll } from '../components/Attachments.js';
 
 type Data = Record<string, unknown>;
 
@@ -127,6 +128,10 @@ export function EntryForm({
   // Voice-note drafts per field, with the text the field had before; signed on save (D-26).
   const [drafts, setDrafts] = useState<Record<string, VoiceDraft & { previous: string }>>({});
   const [needLateReason, setNeedLateReason] = useState(false);
+  // D-44: documents chosen for a calibration, requalification or maintenance entry; uploaded right after the save.
+  const [files, setFiles] = useState<File[]>([]);
+  const [saved, setSaved] = useState(false);
+  const takesDocuments = ATTACHMENT_TYPES.has(type);
 
   const signs = Boolean(correcting) || PERFORMER_SIGNS.has(type);
   const voiceDrafts = Object.entries(drafts);
@@ -192,13 +197,22 @@ export function EntryForm({
         body.voiceNotes = voiceDrafts.map(([field, d]) => ({ id: d.id, field, finalText: String(data[field] ?? ''), shownHash: d.shownHash }));
         body.voiceSignature = { proof };
       }
+      let savedId: number;
       if (completing) {
-        await api('POST', `/api/entries/${completing.id}/complete`, { activityEnd: body.activityEnd, data: body.data, signature: body.signature,
-          voiceNotes: body.voiceNotes, voiceSignature: body.voiceSignature, lateReason: lateReason || undefined });
+        savedId = (await api<{ id: number }>('POST', `/api/entries/${completing.id}/complete`, { activityEnd: body.activityEnd, data: body.data, signature: body.signature,
+          voiceNotes: body.voiceNotes, voiceSignature: body.voiceSignature, lateReason: lateReason || undefined })).id;
       } else if (correcting) {
-        await api('POST', `/api/entries/${correcting.id}/correct`, { ...body, reason });
+        savedId = (await api<{ id: number }>('POST', `/api/entries/${correcting.id}/correct`, { ...body, reason })).id;
       } else {
-        await api('POST', `/api/equipment/${equipment.id}/entries`, { ...body, logbookType: type, lateReason: lateReason || undefined });
+        savedId = (await api<{ id: number }>('POST', `/api/equipment/${equipment.id}/entries`, { ...body, logbookType: type, lateReason: lateReason || undefined })).id;
+      }
+      // The entry is saved; its documents follow. A document that fails leaves the entry as it is (attach it later).
+      if (files.length) {
+        const failed = await uploadAll(savedId, files);
+        if (failed.length) {
+          setSaved(true);
+          return setProblems(['The entry was saved, but a document could not be attached. Use "Attach document" on the entry to add it later.', ...failed]);
+        }
       }
       onDone();
     } catch (err) {
@@ -319,6 +333,7 @@ export function EntryForm({
           <label>Reason for late entry<input value={lateReason} onChange={(e) => setLateReason(e.target.value)} placeholder="e.g. transcribed from paper form no. …" /></label>
         )}
         {correcting && <label>Reason for correction (required)<input value={reason} onChange={(e) => setReason(e.target.value)} required /></label>}
+        {takesDocuments && !saved && <FilePicker files={files} onChange={setFiles} />}
 
         {signs && (
           <div className="signbox">
@@ -338,8 +353,10 @@ export function EntryForm({
 
         {problems.length > 0 && <ul className="error">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
         <div className="actions">
-          <button type="button" onClick={onCancel}>Cancel</button>
-          <button className="primary" type="submit" disabled={Boolean(correcting) && !reason.trim()}>{signs || voiceDrafts.length ? 'Sign and save' : 'Save'}</button>
+          {saved ? <button type="button" className="primary" onClick={onDone}>Close</button> : <>
+            <button type="button" onClick={onCancel}>Cancel</button>
+            <button className="primary" type="submit" disabled={Boolean(correcting) && !reason.trim()}>{signs || voiceDrafts.length ? 'Sign and save' : 'Save'}</button>
+          </>}
         </div>
       </form>
     </div>
