@@ -337,6 +337,7 @@ table.register { font-size: 0.86rem; }
 .use-check li span:last-child { font-size: 0.84rem; color: var(--muted); }
 .use-check li.warn { background: #fffbea; } .use-check li.warn > span:first-child { color: var(--warn); }
 .use-check li.bad { background: var(--bad-soft); } .use-check li.bad > span:first-child { color: var(--bad); }
+.use-check li.none { background: var(--card); } .use-check li.none > span:first-child { color: var(--muted); }
 .pending-banner { background: #fff5f4; border-bottom: 1px solid #f5c6c1; padding: 10px 20px; display: grid; gap: 6px; }
 .pending-banner.soon { background: #fffbea; border-color: #f1dfa6; }
 .pending-banner .pb-head { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
