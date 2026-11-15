@@ -51,8 +51,9 @@ export interface AppOptions {
   // Owner 2026-11-12: Batchwright's batch records (batch_fact_v1, equipment_use_v1), and TrueBatch's (D-45), merged;
   // null without either link (batch typed).
   batches?: Batches | null;
-  // D-46: TrueBatch's machine and room uses (equipment_use_v1), counted in the status; null without the TrueBatch link.
-  trueBatchUses?: TrueBatchUses | null;
+  // D-46: TrueBatch's machine and room uses (equipment_use_v1), counted in the status, and TrueBatch Packing's (D-47);
+  // empty without either link.
+  trueBatchUses?: TrueBatchUses[];
   logger?: boolean;
   webRoot?: string;
   // Secure flag on the session cookie; off only for plain-HTTP development.
@@ -63,7 +64,7 @@ export interface AppOptions {
   advisor?: AdviceProvider | null;
 }
 
-export async function buildApp({ sql, signOn, master, qualification = null, deviations = null, batches = null, trueBatchUses = null, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ sql, signOn, master, qualification = null, deviations = null, batches = null, trueBatchUses = [], proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger, trustProxy: true });
   app.decorate('cookieSecure', cookieSecure);
   app.decorate('proofKey', proofKey);
@@ -142,7 +143,7 @@ declare module 'fastify' {
     qualification: Qualification | null;
     deviations: Deviations | null;
     batches: Batches | null;
-    trueBatchUses: TrueBatchUses | null;
+    trueBatchUses: TrueBatchUses[];
     // What every status needs from master data and the Qualification product (platform D-24).
     statusContext: (q?: Sql | Tx) => Promise<StatusContext>;
   }
