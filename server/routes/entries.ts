@@ -350,7 +350,13 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (b.logbookType === 'steriliser_cycle' && b.data.cycleType === 'steam' && !status.hasPassedSterilizerTest) {
           throw new EntryError(409, 'not_fit_for_use', ['No verified passed steriliser test on record: test the steriliser first.']);
         }
-        if (b.logbookType === 'equipment_cleaning' || b.logbookType === 'area_cleaning') cleaningFits(status, b.activityStart);
+        if (b.logbookType === 'equipment_cleaning' || b.logbookType === 'area_cleaning') {
+          cleaningFits(status, b.activityStart);
+          // D-46: a cleaning that ends after the dirty hold ran out is late: it says why ("clean, verify and record why").
+          if (status.dirtyUntil && (b.activityEnd ?? b.activityStart) > status.dirtyUntil && !String(b.data.delayReason ?? '').trim()) {
+            throw new EntryError(400, 'check_failed', [`The dirty hold ran out at ${plantTime(status.dirtyUntil)}: give the reason the cleaning is late.`]);
+          }
+        }
         // Owner 2026-11-12: with Batchwright (or TrueBatch, D-45) linked, the batch is one of its batch records and the product is the batch's.
         if (app.batches && isUse) {
           if (!b.batch) throw new EntryError(400, 'check_failed', ['Choose the batch from the batch records.']);

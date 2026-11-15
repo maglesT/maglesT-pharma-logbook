@@ -241,6 +241,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
           correcting={form.correcting}
           completing={form.completing}
           preset={form.preset}
+          dirtyUntil={status?.dirtyUntil ?? null}
           voice={voice}
           onCancel={() => setForm(null)}
           onDone={async () => {

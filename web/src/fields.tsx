@@ -10,6 +10,8 @@ export const LABELS: Record<string, string> = {
   cycleType: 'Cycle', cycleId: 'Cycle no.', programme: 'Programme', load: 'Load', controllerRecordRef: 'Controller record', indicators: 'Indicators',
   test: 'Test', port: 'Port', method: 'Method', point: 'Point', value: 'Reading', outOfLimit: 'OUT OF LIMITS',
   result: 'Result', certificateRef: 'Certificate', nextDue: 'Next due', notes: 'Notes', remarks: 'Remarks', comment: 'Comment', deviationRef: 'Deviation',
+  // D-46: why a cleaning ended after its dirty hold ran out.
+  delayReason: 'Why late',
 };
 // Master data, users and settings, as named in the audit trail.
 Object.assign(LABELS, {

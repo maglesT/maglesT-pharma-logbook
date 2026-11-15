@@ -113,7 +113,7 @@ describe('uses recorded in TrueBatch count in the status (D-46)', () => {
     expect(await status(a.id)).toMatchObject({ state: 'clean', blockers: [], lastTrueBatchUse: { batch: 'TB260001' } });
   });
 
-  it('LB-07: the dirty hold runs from the end of the TrueBatch use; the miss is recorded for Deviations', async () => {
+  it('LB-07: the dirty hold runs from the end of the TrueBatch use; once it ran out the cleaning says why, and the miss is recorded for Deviations', async () => {
     const a = await item({ dirtyHoldHours: 1 });
     await t.owner`update overdue_since set since = now() - interval '1 day'`;
     await tbUse('TB260002', a.code, { startedMinutesAgo: 200, endedMinutesAgo: 120 });
@@ -123,6 +123,13 @@ describe('uses recorded in TrueBatch count in the status (D-46)', () => {
     await tick();
     const [ev] = await t.owner<{ description: string }[]>`select description from overdue_events where equipment_id = ${a.id} and kind = 'dirty_hold'`;
     expect(ev!.description).toContain('batch TB260002 in TrueBatch (granulation/charge-api)');
+    const noReason = await cleaning(a.id);
+    expect(noReason.statusCode).toBe(400);
+    expect(noReason.json().problems[0]).toMatch(/^The dirty hold ran out at \d{4}-\d\d-\d\d \d\d:\d\d IST: give the reason the cleaning is late\.$/);
+    const ok = await cleaning(a.id, { delayReason: 'Cleaning crew on the line clearance of RM-104' });
+    expect(ok.statusCode).toBe(201);
+    const [row] = await t.owner<{ data: Record<string, unknown> }[]>`select data from entries where id = ${ok.json().id}`;
+    expect(row!.data.delayReason).toBe('Cleaning crew on the line clearance of RM-104');
   });
 
   it('LB-08: a room is in use by its own TrueBatch row (the room as equipment_code); a machine used in the room does not occupy the room', async () => {

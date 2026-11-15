@@ -82,6 +82,7 @@ export function EntryForm({
   correcting,
   completing,
   preset,
+  dirtyUntil = null,
   voice,
   onDone,
   onCancel,
@@ -94,6 +95,8 @@ export function EntryForm({
   products: Product[];
   correcting?: Entry;
   completing?: Entry;
+  // D-46: when the item's dirty hold runs out; a cleaning ending later says why it is late.
+  dirtyUntil?: string | null;
   // D-26: voice notes, when the site has them switched on.
   voice?: VoiceConfig;
   onDone: () => void;
@@ -161,6 +164,9 @@ export function EntryForm({
   const showEnd = completing ? true : correcting ? Boolean(correcting.activityEnd) : HAS_END.has(type) && !openBreakdown;
   const set = (k: string, v: unknown) => setData({ ...data, [k]: v });
   const checklist = (data.checklist ?? {}) as Record<string, boolean>;
+  // D-46: "clean, verify and record why": a cleaning that ends after the dirty hold ran out gives the reason.
+  const isCleaning = type === 'equipment_cleaning' || type === 'area_cleaning';
+  const cleaningLate = isCleaning && !correcting && dirtyUntil !== null && new Date(showEnd ? end : start).getTime() > new Date(dirtyUntil).getTime();
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -315,6 +321,11 @@ export function EntryForm({
           ),
         )}
 
+        {(cleaningLate || (isCleaning && Boolean(data.delayReason))) && (
+          <label>Why the cleaning is late (the dirty hold ran out){cleaningLate && ' (required)'}
+            <textarea value={String(data.delayReason ?? '')} onChange={(e) => set('delayReason', e.target.value)} required={cleaningLate} />
+          </label>
+        )}
         {needLateReason && !correcting && (
           <label>Reason for late entry<input value={lateReason} onChange={(e) => setLateReason(e.target.value)} placeholder="e.g. transcribed from paper form no. …" /></label>
         )}

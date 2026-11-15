@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { cleanVerified, logIn, logOut, newEquipment, openLogbook, owner, sign, statusBar, newEntry } from './helpers.js';
+import { apiAs, cleanVerified, logIn, logOut, newEquipment, openLogbook, owner, post, sign, statusBar, newEntry } from './helpers.js';
 
 test('LB-07: after use the equipment is dirty and blocked until a cleaning verified by a second person', async ({ page }) => {
   const { id, code } = await newEquipment({ cleanHoldHours: 24 });
@@ -78,4 +78,34 @@ test('LB-07: past its clean-hold time the equipment shows Clean expired and use 
   await form.getByLabel('Batch number').fill('B-E2E-3');
   await form.getByRole('button', { name: 'Save' }).click();
   await expect(form.locator('.error')).toContainText('Clean-hold time expired');
+});
+
+test('LB-07: once the dirty hold ran out, the cleaning form asks why the cleaning is late and the logbook shows it; the time carries IST', async ({ page }) => {
+  const { id, code } = await newEquipment({ dirtyHoldHours: 1 });
+  await cleanVerified(id);
+  const op = await apiAs('op1');
+  const p1 = (await (await op.get('/api/products')).json()).find((p: { code: string }) => p.code === 'P1');
+  const use = await post(op, `/api/equipment/${id}/entries`, { logbookType: 'equipment_use', activityStart: new Date().toISOString(), productId: p1.id, batch: 'B-E2E-LATE', data: {} });
+  await post(op, `/api/entries/${use.id}/complete`, { activityEnd: new Date().toISOString() });
+  await op.dispose();
+  // As if the cleaning and the use had been three hours ago: the dirty hold of 1 h ran out two hours ago.
+  const sql = owner();
+  try {
+    await sql`update entries set activity_start = activity_start - interval '3 hours', activity_end = activity_end - interval '3 hours' where equipment_id = ${id}`;
+  } finally {
+    await sql.end();
+  }
+
+  await logIn(page, 'op1');
+  await openLogbook(page, code);
+  await expect(statusBar(page)).toContainText(/Dirty-hold time expired at \d{4}-\d\d-\d\d \d\d:\d\d IST: the cleaning is late; clean, verify and record why\./);
+  await newEntry(page, 'Cleaning');
+  const form = page.getByRole('dialog');
+  const why = form.getByLabel(/Why the cleaning is late/);
+  await expect(why).toBeVisible();
+  await why.fill('Cleaning crew held on the line clearance of RM-104');
+  await sign(form, 'op1', 'Sign and save');
+  await expect(form).toHaveCount(0);
+  await expect(page.getByRole('row').filter({ hasText: 'Equipment cleaning' }).first()).toContainText('Why late');
+  await expect(page.getByRole('row').filter({ hasText: 'Equipment cleaning' }).first()).toContainText('Cleaning crew held on the line clearance of RM-104');
 });
