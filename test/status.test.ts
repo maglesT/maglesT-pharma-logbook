@@ -85,6 +85,17 @@ describe('cleaning status (LB-07)', () => {
     expect((await startUse(id)).json().problems[0]).toMatch(/Clean-hold time expired/);
   });
 
+  it('LB-07: times in status messages carry the plant time zone (the published clean_until is UTC)', async () => {
+    const id = await newItem({ cleanHoldHours: 1 });
+    await cleanAndVerify(id);
+    await t.owner`alter table entries disable trigger entries_version_chain`;
+    await t.owner`update entries set activity_start = activity_start - interval '2 hours', activity_end = activity_end - interval '2 hours' where equipment_id = ${id}`;
+    await t.owner`alter table entries enable trigger entries_version_chain`;
+    const s = await status(id);
+    const at = new Date(s.cleanUntil).toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' }).slice(0, 16);
+    expect(s.blockers).toEqual([`Clean-hold time expired at ${at} IST: clean again before use.`]);
+  });
+
   it('LB-10: cleaning cannot be recorded while the equipment is in use', async () => {
     const id = await newItem();
     await cleanAndVerify(id);

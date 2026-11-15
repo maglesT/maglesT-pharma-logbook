@@ -64,7 +64,10 @@ export function deadline(kind: CleaningDeadline['kind'], from: Date, hours: numb
   const window = Math.max(WARN_MIN_HOURS, hours * WARN_FRACTION) * 3_600_000;
   return { kind, at, hours, overdue: left < 0, soon: left >= 0 && left <= window };
 }
-const plantTime = (d: Date) => d.toLocaleString('sv-SE', { timeZone: PLANT_TZ }).slice(0, 16);
+// Times in messages carry the plant time zone (e.g. "2026-11-11 11:51 IST"): the published status also has UTC times.
+const ZONE = new Intl.DateTimeFormat('en-IN', { timeZone: PLANT_TZ, timeZoneName: 'short' }).formatToParts(new Date())
+  .find((p) => p.type === 'timeZoneName')?.value ?? PLANT_TZ;
+export const plantTime = (d: Date) => `${d.toLocaleString('sv-SE', { timeZone: PLANT_TZ }).slice(0, 16)} ${ZONE}`;
 const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 const plantDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: PLANT_TZ });
 const addMonths = (date: string, months: number) => {
