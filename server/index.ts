@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { sqlMaster } from './master.js';
 import { sqlQualification } from './qualification.js';
 import { scheduleOverdue, sqlDeviations } from './overdue.js';
-import { mergeBatches, sqlBatches } from './batches.js';
+import { mergeBatches, sqlBatches, sqlTrueBatchUses } from './batches.js';
 
 const config = loadConfig();
 const sql = connect(config.DATABASE_URL, { role: config.DB_APP_ROLE });
@@ -35,14 +35,16 @@ const ebmr = config.EBMR_DATABASE_URL ? connect(config.EBMR_DATABASE_URL) : null
 const tb = config.TRUEBATCH_DATABASE_URL ? connect(config.TRUEBATCH_DATABASE_URL) : null;
 // D-45: batches from Batchwright, TrueBatch or both.
 const batches = mergeBatches([ebmr ? sqlBatches(ebmr) : null, tb ? sqlBatches(tb, 'report', 'TrueBatch') : null]);
+// D-46: TrueBatch's machine and room uses count in the status as Logbook uses do.
+const trueBatchUses = tb ? sqlTrueBatchUses(tb) : null;
 const master = sqlMaster(md);
 const qualification = qual ? sqlQualification(qual) : null;
-const app = await buildApp({ sql, signOn, proofKey, master, qualification, deviations: dv ? sqlDeviations(dv) : null, batches, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
+const app = await buildApp({ sql, signOn, proofKey, master, qualification, deviations: dv ? sqlDeviations(dv) : null, batches, trueBatchUses, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
 
 await app.listen({ port: config.PORT, host: config.HOST });
 const stopIntegrity = scheduleIntegrityCheck(sql, (msg) => app.log.info(msg));
 // D-37: missed limits are recorded for Deviations every minute.
-const stopOverdue = scheduleOverdue(sql, master, qualification, (msg) => app.log.info(msg));
+const stopOverdue = scheduleOverdue(sql, master, qualification, (msg) => app.log.info(msg), 60_000, trueBatchUses);
 
 for (const signal of ['SIGINT', 'SIGTERM'] as const) {
   process.on(signal, async () => {

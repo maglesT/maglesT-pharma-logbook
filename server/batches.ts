@@ -120,6 +120,35 @@ export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'Bat
 }
 
 /**
+ * D-46 (owner 15 Nov 2026): a machine or room use recorded in TrueBatch (equipment_use_v1), read live for the status as if
+ * the use had been entered in the Logbook. The item is TrueBatch's equipment_code (a room's row names the room there).
+ * Open while its step is not signed done (ended_at null); an open use counts only while its batch is in production, so a
+ * step left open in a finished or cancelled batch never holds an item.
+ */
+export interface TrueBatchUse { code: string; batchNumber: string; step: string; startedAt: Date; endedAt: Date | null }
+export interface TrueBatchUses {
+  /** Per item code (upper case): the newest open use and the newest ended use, at most one of each. */
+  latest(codes: string[]): Promise<TrueBatchUse[]>;
+}
+export function sqlTrueBatchUses(q: Sql, schema = 'report'): TrueBatchUses {
+  const v = (name: string) => q(`${schema}.${name}`);
+  return {
+    latest: async (codes) => {
+      try {
+        return (await q<{ code: string; batch_number: string; step: string; started_at: Date; ended_at: Date | null }[]>`
+          select distinct on (upper(u.equipment_code), u.ended_at is null) upper(u.equipment_code) as code, u.batch_number, u.step,
+            coalesce(u.started_at, u.data_as_of) as started_at, u.ended_at
+          from ${v('equipment_use_v1')} u
+          where upper(u.equipment_code) = any(${codes.map((c) => c.toUpperCase())})
+            and (u.ended_at is not null or exists (select 1 from ${v('batch_fact_v1')} b where b.batch_number = u.batch_number and ${q.unsafe(IN_PRODUCTION)}))
+          order by upper(u.equipment_code), u.ended_at is null, coalesce(u.ended_at, u.started_at) desc nulls last`)
+          .map((r) => ({ code: r.code, batchNumber: r.batch_number, step: r.step ?? '', startedAt: r.started_at, endedAt: r.ended_at }));
+      } catch (e) { if (isCut(e)) throw new TrueBatchOff(); throw e; }
+    },
+  };
+}
+
+/**
  * D-45: the batch records of every linked product as one (null when none is linked). A batch number is looked up in
  * each; the first product (in the order given) that has it wins. The list and "used on" need every linked product to
  * answer: one that does not stops them with its own "connection off" (PL-08), as a single link does. A batch found in

@@ -151,7 +151,8 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
       {status && (
         <div className={`statusbar ${status.blockers.length ? 'blocked' : 'fit'}`}>
           <StatusChip status={status} />
-          {status.inUse && <span>Batch {status.inUse.batch} {status.inUse.stage && `· ${status.inUse.stage}`} since {plantTime(status.inUse.since)}</span>}
+          {status.inUse && <span>Batch {status.inUse.batch} {status.inUse.stage && `· ${status.inUse.stage}`}{status.inUse.source === 'TrueBatch' && ' · in TrueBatch'} since {plantTime(status.inUse.since)}</span>}
+          {!status.inUse && status.lastTrueBatchUse && <span>Last used by batch {status.lastTrueBatchUse.batch} in TrueBatch{status.lastTrueBatchUse.step && ` (${status.lastTrueBatchUse.step})`}, ended {plantTime(status.lastTrueBatchUse.endedAt)}</span>}
           {status.cleanUntil && !status.blockers.length && <span>Clean until {plantTime(status.cleanUntil)}</span>}
           {status.calibrationDue && <span>Calibration due {status.calibrationDue.slice(0, 10)}</span>}
           {[...status.blockers, ...status.warnings].map((b) => <span key={b} className="reason">{b}</span>)}
