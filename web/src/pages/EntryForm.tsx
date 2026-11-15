@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { api, ApiError, getSignProof, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type BatchChoice, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
 import { VoiceButton } from '../components/VoiceNote.js';
+import { OUTCOME_LABEL, STAGE_LABEL } from '../fields.js';
 
 type Data = Record<string, unknown>;
 
@@ -470,8 +471,6 @@ function MaintenanceFields({
 // Owner 2026-11-12: a requalification is pulled from the item's approved protocol in the Qualification system (stage,
 // result and next due date filled in, read only), or written by hand, e.g. done by a vendor outside it.
 interface QualProtocol { number: string; stage: string; step: string; reportOutcome: string | null; nextReviewDueDecided: string | null; reportApprovedAt: string | null }
-const STAGE_LABEL: Record<string, string> = { iq: 'IQ', oq: 'OQ', pq: 'PQ', iq_oq: 'IQ/OQ', dq: 'DQ', urs: 'URS', periodic_review: 'Periodic review', csv: 'CSV' };
-const OUTCOME_LABEL: Record<string, string> = { pass: 'Pass', pass_conditions: 'Pass with conditions', fail: 'Fail' };
 function RequalificationFields({ data, setData, equipment }: { data: Data; setData: (d: Data) => void; equipment: Equipment }) {
   const [list, setList] = useState<{ linked: boolean; protocols: QualProtocol[] } | null>(null);
   useEffect(() => {

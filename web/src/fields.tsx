@@ -6,7 +6,7 @@ export const LABELS: Record<string, string> = {
   impactAssessment: 'Impact assessment', rootCause: 'Root cause', workDone: 'Work done', parts: 'Parts used', partsNone: 'Parts used',
   toolsUsed: 'Tools / consumables', doneBy: 'Done by', vendorName: 'Vendor', serviceReportRef: 'Service report', workOrderRef: 'Work order',
   postRepairChecks: 'Post-repair checks', recalibrationNeeded: 'Re-calibration needed',
-  stage: 'Stage', cleaningType: 'Cleaning', agent: 'Agent', sporicidal: 'Sporicidal', disinfectantLot: 'Disinfectant lot',
+  source: 'Recorded from', protocolNumber: 'Protocol', stage: 'Stage', outcome: 'Result', reportRef: 'Report', cleaningType: 'Cleaning', agent: 'Agent', sporicidal: 'Sporicidal', disinfectantLot: 'Disinfectant lot',
   cycleType: 'Cycle', cycleId: 'Cycle no.', programme: 'Programme', load: 'Load', controllerRecordRef: 'Controller record', indicators: 'Indicators',
   test: 'Test', port: 'Port', method: 'Method', point: 'Point', value: 'Reading', outOfLimit: 'OUT OF LIMITS',
   result: 'Result', certificateRef: 'Certificate', nextDue: 'Next due', notes: 'Notes', remarks: 'Remarks', comment: 'Comment', deviationRef: 'Deviation',
@@ -28,6 +28,10 @@ Object.assign(LABELS, {
   from: 'From', to: 'To', modelVersion: 'Model',
 });
 const ORDER = Object.keys(LABELS);
+// Requalification values in words (the Qualification product's stage keys and report outcomes).
+export const STAGE_LABEL: Record<string, string> = { iq: 'IQ', oq: 'OQ', pq: 'PQ', iq_oq: 'IQ/OQ', dq: 'DQ', urs: 'URS', periodic_review: 'Periodic review', csv: 'CSV' };
+export const OUTCOME_LABEL: Record<string, string> = { pass: 'Pass', pass_conditions: 'Pass with conditions', fail: 'Fail' };
+const SOURCE_LABEL: Record<string, string> = { protocol: 'Qualification protocol', manual: 'Written by hand' };
 const rank = (k: string) => (ORDER.includes(k) ? ORDER.indexOf(k) : ORDER.length);
 
 export const partsLine = (parts: Part[]) => parts.map((p) => `${p.quantity} × ${p.name}${p.partNumber ? ` (P/N ${p.partNumber})` : ''}${p.lotSerial ? `, lot/SN ${p.lotSerial}` : ''}`).join('; ');
@@ -49,6 +53,9 @@ export const fieldValue = (k: string, v: unknown): string =>
   : k === 'parts' ? partsLine(v as Part[])
   : k === 'partsNone' ? 'none'
   : k === 'doneBy' ? (v === 'vendor' ? 'external vendor' : 'in-house')
+  : k === 'stage' && typeof v === 'string' && STAGE_LABEL[v] ? STAGE_LABEL[v]
+  : k === 'outcome' && typeof v === 'string' ? OUTCOME_LABEL[v] ?? text(v)
+  : k === 'source' && typeof v === 'string' ? SOURCE_LABEL[v] ?? text(v)
   : text(v);
 
 
