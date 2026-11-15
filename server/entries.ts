@@ -64,7 +64,8 @@ export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
     ...outOfLimit,
   }),
   area_cleaning: z.object({
-    cleaningType: z.enum(['daily', 'weekly', 'product_change', 'other']),
+    // D-48: a room used by a batch is cleaned batch to batch (same product) or at a product changeover, as a machine is.
+    cleaningType: z.enum(['daily', 'weekly', 'batch_to_batch', 'product_change', 'other']),
     agent: z.string().trim().max(120).default(''),
     sporicidal: z.boolean().default(false),
     disinfectantLot: z.string().trim().max(60).default(''),
