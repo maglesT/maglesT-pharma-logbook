@@ -124,7 +124,7 @@ export async function addToLogbook(sql: Sql | Tx, m: MasterItem, settings: { ste
 
 /** The parameters the status needs, by local id (platform D-24). */
 export const needsCalibrationOf = (i: MasterItem) => i.kind !== 'area' && (i.needsCalibration || i.care.calibrationFrequencyDays !== null);
-export async function careByLocalId(sql: Sql | Tx, master: Master): Promise<Map<number, Care & { needsCalibration: boolean; addedAt: Date }>> {
+export async function careByLocalId(sql: Sql | Tx, master: Master): Promise<Map<number, Care & { needsCalibration: boolean; addedAt: Date; active: boolean }>> {
   const items = await logbookItems(sql, master);
   // Calibrated when master data says so: marked "needs calibration", or with a calibration frequency. The Logbook's own
   // column only follows master data, for its published equipment_v1 (read by Deviations, D-28); it is never the source.
@@ -133,7 +133,7 @@ export async function careByLocalId(sql: Sql | Tx, master: Master): Promise<Map<
     await sql`update equipment e set needs_calibration = f.nc
       from jsonb_to_recordset(${sql.json(flags as never)}) as f(id bigint, nc boolean) where e.id = f.id and e.needs_calibration <> f.nc`;
   }
-  return new Map(items.map((i) => [i.id, { ...i.care, addedAt: i.addedAt, needsCalibration: needsCalibrationOf(i) }]));
+  return new Map(items.map((i) => [i.id, { ...i.care, addedAt: i.addedAt, needsCalibration: needsCalibrationOf(i), active: i.active }]));
 }
 
 /** One item by local id, read live; undefined if unknown. */

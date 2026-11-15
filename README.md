@@ -49,6 +49,9 @@ or, on a single box, let the owner login switch to it with `DB_APP_ROLE=logbook_
 **Report views on the Medhanta platform (D-29).** Names and locations are master data now; `report.equipment_v1` keeps
 showing the name and location each item had when it was moved or first seen by the Logbook. Read current names from
 master_data's own views.
+`report.equipment_status_v1` (D-45) publishes each item's status as the Logbook works it out (for TrueBatch Tablets), refreshed
+every minute and after each entry; `checked_at` says when. Batches come from Batchwright (`EBMR_DATABASE_URL`), TrueBatch
+(`TRUEBATCH_DATABASE_URL`) or both, through their platform links.
 
 **Read-only role for the Deviations system (D-28).** Migration 0013 creates the role `logbook_report` without a login. (On the Medhanta platform, D-29, it is not created: other products read the views through platform links.)
 It can read the four views in the schema `report` (`equipment_v1`, `entry_v1`, `calibration_v1`, `logbook_sop_v1`) and

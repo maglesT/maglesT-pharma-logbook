@@ -3,6 +3,7 @@ import { audit } from './audit.js';
 import { logbookItems, type LogbookItem, type Master } from './master.js';
 import { QualificationOff, type Qualification } from './qualification.js';
 import { allStatuses, PLANT_TZ, statusContext, type EquipmentStatus } from './status.js';
+import { saveStatuses } from './item-status.js';
 
 // Owner 2026-11-12 (D-37): a missed limit raises a deviation on its own. The Logbook records each overdue cleaning
 // (dirty hold, clean hold, scheduled cleaning), preventive maintenance, calibration and requalification once, with the
@@ -91,7 +92,7 @@ async function report(sql: Sql, kind: OverdueKind, i: LogbookItem, s: EquipmentS
   }
 }
 
-/** Records every limit now overdue that is not on record yet. Returns the number of new records. */
+/** Records every limit now overdue that is not on record yet, and publishes the statuses (D-45). Returns the number of new records. */
 export async function recordOverdue(sql: Sql, master: Master, qualification: Qualification | null): Promise<number> {
   // Without the Qualification product the requalification due date is not known for sure: no requalification records.
   let ctx;
@@ -105,6 +106,9 @@ export async function recordOverdue(sql: Sql, master: Master, qualification: Qua
   }
   const items = new Map((await logbookItems(sql, master)).filter((i) => i.active).map((i) => [i.id, i]));
   const statuses = await allStatuses(sql, ctx);
+  // D-45: the same check publishes each item's status (report.equipment_status_v1). Not while Qualification is linked
+  // but not answering: without it the status would miss the qualification checks, so the published rows grow old.
+  if (qualKnown || !qualification) await saveStatuses(sql, statuses, ctx);
   // Only limits that ran out after the feature was installed (migration 0019).
   const since = (await sql<{ since: Date }[]>`select since from overdue_since`)[0]?.since ?? new Date();
   let added = 0;

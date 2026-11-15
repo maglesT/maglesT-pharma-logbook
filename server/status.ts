@@ -32,6 +32,9 @@ export interface EquipmentStatus {
   // Dates due in days (PM, calibration, requalification): soon within DUES_WARN_DAYS, overdue once passed.
   dues: Due[];
   qualification: QualStatus['status'] | null;
+  // D-45: the end of the verified cleaning in force (after the last use), and when this status was worked out.
+  lastCleanEnd: Date | null;
+  checkedAt: Date;
 }
 
 // The next time by which the item must be cleaned. soon: in the last quarter of the hold or frequency (at least 1 hour).
@@ -83,7 +86,7 @@ function dueOf(kind: Due['kind'], due: string, today: string, frequency: string,
 
 /** What the status needs from master data and the Qualification product, by local item id (platform D-24). */
 export interface StatusContext {
-  care: Map<number, Care & { needsCalibration: boolean; addedAt: Date }>;
+  care: Map<number, Care & { needsCalibration: boolean; addedAt: Date; active: boolean }>;
   qual: Map<number, QualStatus> | null;           // null: no Qualification link
 }
 export async function statusContext(sql: Sql | Tx, master: Master, qualification: Qualification | null): Promise<StatusContext> {
@@ -137,6 +140,8 @@ interface Facts {
 }
 
 const DUE_SOON_DAYS = 7;
+/** The blocker of a use in progress (D-45: the published status leaves it out; in_use_batch says it). */
+export const IN_USE = 'In use: end the current use first.';
 
 // One query for any number of items: the facts status is derived from. The entry scan is limited
 // to the requested items (review S4-4).
@@ -390,7 +395,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   // Owner 2026-11-12: one activity at a time; a change over in progress occupies the item like a use.
   if (f.open_change_over_since) blockers.push(`Change over in progress since ${plantTime(f.open_change_over_since)}: end it first.`);
   // LB-08: the item in use shows what is in it.
-  if (f.open_use_id) blockers.push('In use: end the current use first.');
+  if (f.open_use_id) blockers.push(IN_USE);
   // Cycles are stopped by everything except the cleaning status (review S6-1: including use).
   const cycleBlockers = blockers.filter((b) => !/^(Dirty|Clean-hold|Cleaning overdue)/.test(b));
 
@@ -419,6 +424,8 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     deadline: due,
     dues,
     qualification: f.qual?.status ?? null,
+    lastCleanEnd: f.last_clean_end,
+    checkedAt: f.now,
   };
 }
 

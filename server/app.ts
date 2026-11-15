@@ -28,6 +28,10 @@ import { batchRoutes } from './routes/batches.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { overdueRoutes } from './routes/overdue.js';
 import { statusContext, type StatusContext } from './status.js';
+import { refreshStatus } from './item-status.js';
+
+// D-45: a write that can change an item's status (a new entry, completing, correcting, verifying or releasing one).
+const STATUS_WRITE = /^\/api\/(?:equipment\/(\d+)\/entries|entries\/(\d+)\/(?:complete|correct|verify|release))(?:\?|$)/;
 
 export const VERSION = '0.5.0';
 
@@ -44,7 +48,8 @@ export interface AppOptions {
   qualification?: Qualification | null;
   // D-37: the Deviations product's deviation_v1 (numbers of the deviations raised for missed limits); null without the link.
   deviations?: Deviations | null;
-  // Owner 2026-11-12: Batchwright's batch records (batch_fact_v1, equipment_use_v1); null without the link (batch typed).
+  // Owner 2026-11-12: Batchwright's batch records (batch_fact_v1, equipment_use_v1), and TrueBatch's (D-45), merged;
+  // null without either link (batch typed).
   batches?: Batches | null;
   logger?: boolean;
   webRoot?: string;
@@ -71,6 +76,14 @@ export async function buildApp({ sql, signOn, master, qualification = null, devi
     return reply.send(err);
   });
   await app.register(fastifyCookie);
+  // D-45: the published status (report.equipment_status_v1) follows each written entry at once; the minute check
+  // (recordOverdue) covers everything else, such as time running out or a changed setting.
+  app.addHook('onResponse', async (req, reply) => {
+    const m = req.method === 'POST' && reply.statusCode < 300 ? STATUS_WRITE.exec(req.url) : null;
+    if (!m) return;
+    await refreshStatus(sql, () => statusContext(sql, master, qualification), m[1] ? { equipmentId: Number(m[1]) } : { entryId: Number(m[2]) })
+      .catch((e: Error) => req.log.warn(`status not published: ${e.message}`));
+  });
 
   app.addHook('onRequest', async (req, reply) => {
     if (!req.url.startsWith('/api/')) return;

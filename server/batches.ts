@@ -5,6 +5,9 @@ import { ConnectionOff } from './master.js';
 // Batchwright's report views through the platform link (report.batch_fact_v1: batches with product and status;
 // report.equipment_use_v1: which equipment a batch uses), live, with its own login. Nothing is copied or written.
 // Without the link (no Batchwright on the site) the batch is typed as before.
+// D-45 (owner 15 Nov 2026): TrueBatch Tablets publishes views of the same names and columns (batch_fact_v1,
+// equipment_use_v1), read the same way through its own link (TRUEBATCH_DATABASE_URL). Either or both may be linked; the
+// batch lists are merged. The abnormal records (Home, D-41) are Batchwright's only.
 
 export interface Batch {
   batchNumber: string;
@@ -15,15 +18,20 @@ export interface Batch {
   completedAt: string | null;
   released: boolean;
   inProduction: boolean;
+  /** The product that keeps the batch record (Batchwright or TrueBatch). */
+  source: BatchSource;
 }
+export type BatchSource = 'Batchwright' | 'TrueBatch';
 export interface Batches {
+  /** The linked batch-record products, in words (for messages). */
+  source: string;
   /** Batches in production, and those finished in the last `recentDays` days (for "from batch" of a change over). */
   list(recentDays: number): Promise<Batch[]>;
   get(batchNumber: string): Promise<Batch | null>;
-  /** Batch numbers Batchwright records as using one of these equipment or room codes. */
+  /** Batch numbers the batch records show as using one of these equipment or room codes. */
   usedOn(codes: string[]): Promise<Set<string>>;
   /** Owner 2026-11-13: only the abnormal records of the batch records, of the last `days` days (and every open one). */
-  abnormal(days: number): Promise<Abnormal>;
+  abnormal?(days: number): Promise<Abnormal>;
 }
 export interface BatchException {
   batchNumber: string; exceptionId: string; type: string; category: string; severity: string; step: string | null; stepTitle: string | null;
@@ -39,6 +47,10 @@ export const BATCHWRIGHT_OFF = 'Connection to Batchwright (batch records) is off
 export class BatchwrightOff extends ConnectionOff {
   constructor() { super(); this.message = BATCHWRIGHT_OFF; }
 }
+export const TRUEBATCH_OFF = 'Connection to TrueBatch (batch records) is off. Ask your administrator.';
+export class TrueBatchOff extends ConnectionOff {
+  constructor() { super(); this.message = TRUEBATCH_OFF; }
+}
 const isCut = (e: unknown) => {
   const code = (e as { code?: string }).code ?? '';
   return ['42501', '42P01', '28000', '57P01', 'ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'CONNECT_TIMEOUT', 'CONNECTION_CLOSED',
@@ -51,25 +63,34 @@ const IN_PRODUCTION = `(completed_at is null and not coalesce(released, false)
 const COLS = `batch_number, product_code, strength, status, issued_at::text, completed_at::text, coalesce(released, false) as released,
   ${IN_PRODUCTION} as in_production`;
 type Row = { batch_number: string; product_code: string; strength: string | null; status: string; issued_at: string | null; completed_at: string | null; released: boolean; in_production: boolean };
-const toBatch = (r: Row): Batch => ({ batchNumber: r.batch_number, productCode: r.product_code, strength: r.strength, status: r.status,
-  issuedAt: r.issued_at, completedAt: r.completed_at, released: r.released, inProduction: r.in_production });
+const toBatch = (source: BatchSource) => (r: Row): Batch => ({ batchNumber: r.batch_number, productCode: r.product_code, strength: r.strength,
+  status: r.status, issuedAt: r.issued_at, completedAt: r.completed_at, released: r.released, inProduction: r.in_production, source });
 
-export function sqlBatches(q: Sql, schema = 'report'): Batches {
-  const read = async <T>(f: () => Promise<T>) => { try { return await f(); } catch (e) { if (isCut(e)) throw new BatchwrightOff(); throw e; } };
+/** Batchwright's batch records (with its abnormal records), or TrueBatch's (`source` 'TrueBatch': the same two views). */
+export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'Batchwright'): Batches {
+  const read = async <T>(f: () => Promise<T>) => {
+    try { return await f(); } catch (e) { if (isCut(e)) throw source === 'TrueBatch' ? new TrueBatchOff() : new BatchwrightOff(); throw e; }
+  };
   const v = (name: string) => q(`${schema}.${name}`);
-  return {
+  const batch = toBatch(source);
+  const common: Batches = {
+    source,
     list: (recentDays) => read(async () => (await q<Row[]>`
       select ${q.unsafe(COLS)} from ${v('batch_fact_v1')}
       where ${q.unsafe(IN_PRODUCTION)} or completed_at > now() - make_interval(days => ${recentDays})
-      order by issued_at desc nulls last, batch_number limit 500`).map(toBatch)),
+      order by issued_at desc nulls last, batch_number limit 500`).map(batch)),
     get: (batchNumber) => read(async () => {
       const [r] = await q<Row[]>`select ${q.unsafe(COLS)} from ${v('batch_fact_v1')} where batch_number = ${batchNumber} limit 1`;
-      return r ? toBatch(r) : null;
+      return r ? batch(r) : null;
     }),
     usedOn: (codes) => read(async () => new Set((await q<{ batch_number: string }[]>`
       select distinct batch_number from ${v('equipment_use_v1')}
       where upper(equipment_code) = any(${codes.map((c) => c.toUpperCase())}) or upper(room_code) = any(${codes.map((c) => c.toUpperCase())})`)
       .map((r) => r.batch_number))),
+  };
+  if (source === 'TrueBatch') return common;
+  return {
+    ...common,
     abnormal: (days) => read(() => q.begin('read only', async (tx) => {
       await tx`set local statement_timeout = '15s'`;
       const since = tx`now() - make_interval(days => ${days})`;
@@ -95,5 +116,35 @@ export function sqlBatches(q: Sql, schema = 'report'): Batches {
         code: r.alarm_code, source: r.source, subject: r.subject_code, batchNumbers: r.batch_numbers ?? [], raisedAt: r.raised_at }));
       return { exceptions, ipc, process, alarms } as Abnormal;
     })),
+  };
+}
+
+/**
+ * D-45: the batch records of every linked product as one (null when none is linked). A batch number is looked up in
+ * each; the first product (in the order given) that has it wins. The list and "used on" need every linked product to
+ * answer: one that does not stops them with its own "connection off" (PL-08), as a single link does. A batch found in
+ * one product is used even while another does not answer; a batch found in none while one does not answer is that
+ * product's "connection off", never "unknown".
+ */
+export function mergeBatches(sources: (Batches | null)[]): Batches | null {
+  const all = sources.filter((s): s is Batches => s !== null);
+  if (all.length <= 1) return all[0] ?? null;
+  const abnormal = all.find((s) => s.abnormal)?.abnormal;
+  return {
+    source: all.map((s) => s.source).join(', '),
+    list: async (recentDays) => {
+      const seen = new Set<string>();
+      return (await Promise.all(all.map((s) => s.list(recentDays)))).flat()
+        .filter((b) => !seen.has(b.batchNumber) && seen.add(b.batchNumber));
+    },
+    get: async (batchNumber) => {
+      const got = await Promise.allSettled(all.map((s) => s.get(batchNumber)));
+      for (const g of got) if (g.status === 'fulfilled' && g.value) return g.value;
+      const off = got.find((g) => g.status === 'rejected');
+      if (off) throw (off as PromiseRejectedResult).reason;
+      return null;
+    },
+    usedOn: async (codes) => new Set((await Promise.all(all.map((s) => s.usedOn(codes)))).flatMap((u) => [...u])),
+    ...(abnormal ? { abnormal } : {}),
   };
 }
