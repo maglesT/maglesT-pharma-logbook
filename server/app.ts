@@ -23,7 +23,7 @@ import type { SignOn } from './signon.js';
 import { ConnectionOff, type Master } from './master.js';
 import type { Qualification } from './qualification.js';
 import type { Deviations } from './overdue.js';
-import type { Batches } from './batches.js';
+import type { Batches, TrueBatchUses } from './batches.js';
 import { batchRoutes } from './routes/batches.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { overdueRoutes } from './routes/overdue.js';
@@ -51,6 +51,8 @@ export interface AppOptions {
   // Owner 2026-11-12: Batchwright's batch records (batch_fact_v1, equipment_use_v1), and TrueBatch's (D-45), merged;
   // null without either link (batch typed).
   batches?: Batches | null;
+  // D-46: TrueBatch's machine and room uses (equipment_use_v1), counted in the status; null without the TrueBatch link.
+  trueBatchUses?: TrueBatchUses | null;
   logger?: boolean;
   webRoot?: string;
   // Secure flag on the session cookie; off only for plain-HTTP development.
@@ -61,7 +63,7 @@ export interface AppOptions {
   advisor?: AdviceProvider | null;
 }
 
-export async function buildApp({ sql, signOn, master, qualification = null, deviations = null, batches = null, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ sql, signOn, master, qualification = null, deviations = null, batches = null, trueBatchUses = null, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger, trustProxy: true });
   app.decorate('cookieSecure', cookieSecure);
   app.decorate('proofKey', proofKey);
@@ -69,7 +71,8 @@ export async function buildApp({ sql, signOn, master, qualification = null, devi
   app.decorate('qualification', qualification);
   app.decorate('deviations', deviations);
   app.decorate('batches', batches);
-  app.decorate('statusContext', (q: Sql | Tx = sql) => statusContext(q, master, qualification));
+  app.decorate('trueBatchUses', trueBatchUses);
+  app.decorate('statusContext', (q: Sql | Tx = sql) => statusContext(q, master, qualification, trueBatchUses));
   // A cut master-data link stops the feature with one message (platform D-02, PL-08).
   app.setErrorHandler((err, _req, reply) => {
     if (err instanceof ConnectionOff) return reply.code(503).send({ error: 'connection_off', message: err.message });
@@ -81,7 +84,7 @@ export async function buildApp({ sql, signOn, master, qualification = null, devi
   app.addHook('onResponse', async (req, reply) => {
     const m = req.method === 'POST' && reply.statusCode < 300 ? STATUS_WRITE.exec(req.url) : null;
     if (!m) return;
-    await refreshStatus(sql, () => statusContext(sql, master, qualification), m[1] ? { equipmentId: Number(m[1]) } : { entryId: Number(m[2]) })
+    await refreshStatus(sql, () => statusContext(sql, master, qualification, trueBatchUses), m[1] ? { equipmentId: Number(m[1]) } : { entryId: Number(m[2]) })
       .catch((e: Error) => req.log.warn(`status not published: ${e.message}`));
   });
 
@@ -139,6 +142,7 @@ declare module 'fastify' {
     qualification: Qualification | null;
     deviations: Deviations | null;
     batches: Batches | null;
+    trueBatchUses: TrueBatchUses | null;
     // What every status needs from master data and the Qualification product (platform D-24).
     statusContext: (q?: Sql | Tx) => Promise<StatusContext>;
   }

@@ -151,7 +151,8 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
       {status && (
         <div className={`statusbar ${status.blockers.length ? 'blocked' : 'fit'}`}>
           <StatusChip status={status} />
-          {status.inUse && <span>Batch {status.inUse.batch} {status.inUse.stage && `· ${status.inUse.stage}`} since {plantTime(status.inUse.since)}</span>}
+          {status.inUse && <span>Batch {status.inUse.batch} {status.inUse.stage && `· ${status.inUse.stage}`}{status.inUse.source === 'TrueBatch' && ' · in TrueBatch'} since {plantTime(status.inUse.since)}</span>}
+          {!status.inUse && status.lastTrueBatchUse && <span>Last used by batch {status.lastTrueBatchUse.batch} in TrueBatch{status.lastTrueBatchUse.step && ` (${status.lastTrueBatchUse.step})`}, ended {plantTime(status.lastTrueBatchUse.endedAt)}</span>}
           {status.cleanUntil && !status.blockers.length && <span>Clean until {plantTime(status.cleanUntil)}</span>}
           {status.calibrationDue && <span>Calibration due {status.calibrationDue.slice(0, 10)}</span>}
           {[...status.blockers, ...status.warnings].map((b) => <span key={b} className="reason">{b}</span>)}
@@ -240,6 +241,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
           correcting={form.correcting}
           completing={form.completing}
           preset={form.preset}
+          dirtyUntil={status?.dirtyUntil ?? null}
           voice={voice}
           onCancel={() => setForm(null)}
           onDone={async () => {
@@ -318,25 +320,29 @@ export function Summary({ e, full = false }: { e: Entry; full?: boolean }) {
 }
 
 // Owner 2026-11-12 (slide 4): what is checked before use, when the item is scanned or opened.
-function UseCheck({ status: s }: { status: EquipmentStatus }) {
+export function UseCheck({ status: s }: { status: EquipmentStatus }) {
   const due = (k: Due['kind']) => s.dues.find((d) => d.kind === k);
   const has = (re: RegExp) => s.blockers.some((b) => re.test(b));
-  const line = (label: string, bad: boolean, warn: boolean, text: string) => (
-    <li className={bad ? 'bad' : warn ? 'warn' : 'ok'}><span aria-hidden="true">{bad ? '✕' : warn ? '!' : '✓'}</span><b>{label}</b><span>{text}</span></li>
-  );
+  // Nothing to check (no schedule, not calibrated in the Logbook): a dash, never a green tick.
+  const line = (label: string, bad: boolean, warn: boolean, text: string, none = false) => {
+    const k = bad ? 'bad' : warn ? 'warn' : none ? 'none' : 'ok';
+    return <li className={k}><span aria-hidden="true">{{ bad: '✕', warn: '!', none: '–', ok: '✓' }[k]}</span><b>{label}</b><span>{text}</span></li>;
+  };
   const dueText = (d: Due | undefined, none: string) => (d ? `${d.overdue ? 'Overdue since' : 'Due'} ${d.due} (${daysLeft(d.due)})` : none);
   const pm = due('pm');
   const cal = due('calibration');
   const rq = due('requalification');
   const cleaningBad = has(/^(Dirty|Clean-hold|Cleaning overdue)/);
+  const calBad = has(/^(Calibration|Not calibrated|Re-calibration)/);
   return (
     <ul className="use-check" aria-label="Before use">
       {line('Cleaning status', cleaningBad, Boolean(s.deadline?.soon), cleaningBad ? s.blockers.find((b) => /^(Dirty|Clean-hold|Cleaning overdue)/.test(b))!
         : s.deadline ? `${s.deadline.kind === 'dirty_hold' ? 'Dirty hold ends' : s.schedule === 'frequency' ? 'Next cleaning due' : 'Clean until'} ${plantTime(s.deadline.at)}` : 'Clean')}
-      {line('Preventive maintenance', Boolean(pm?.overdue), Boolean(pm?.soon), dueText(pm, 'No PM schedule in master data'))}
-      {line('Calibration', has(/^(Calibration|Not calibrated|Re-calibration)/), Boolean(cal?.soon), has(/^(Calibration|Not calibrated|Re-calibration)/) ? s.blockers.find((b) => /^(Calibration|Not calibrated|Re-calibration)/.test(b))! : dueText(cal, 'Not calibrated in the Logbook'))}
+      {line('Preventive maintenance', Boolean(pm?.overdue), Boolean(pm?.soon), dueText(pm, 'No PM schedule in master data'), !pm)}
+      {line('Calibration', calBad, Boolean(cal?.soon), calBad ? s.blockers.find((b) => /^(Calibration|Not calibrated|Re-calibration)/.test(b))! : dueText(cal, 'Not calibrated in the Logbook'), !calBad && !cal)}
       {line('Requalification', Boolean(rq?.overdue) || has(/^(Not qualified|Requalification needed)/), Boolean(rq?.soon),
-        has(/^(Not qualified|Requalification needed)/) ? s.blockers.find((b) => /^(Not qualified|Requalification needed)/.test(b))! : dueText(rq, 'No requalification date'))}
+        has(/^(Not qualified|Requalification needed)/) ? s.blockers.find((b) => /^(Not qualified|Requalification needed)/.test(b))! : dueText(rq, 'No requalification date'),
+        !rq && !has(/^(Not qualified|Requalification needed)/))}
       {line('Breakdown (QA released)', has(/^Out of service/), false, has(/^Out of service/) ? 'A breakdown is not released by QA' : 'No open breakdown')}
     </ul>
   );

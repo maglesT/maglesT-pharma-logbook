@@ -4,6 +4,7 @@ import { logbookItems, type LogbookItem, type Master } from './master.js';
 import { QualificationOff, type Qualification } from './qualification.js';
 import { allStatuses, PLANT_TZ, statusContext, type EquipmentStatus } from './status.js';
 import { saveStatuses } from './item-status.js';
+import type { TrueBatchUses } from './batches.js';
 
 // Owner 2026-11-12 (D-37): a missed limit raises a deviation on its own. The Logbook records each overdue cleaning
 // (dirty hold, clean hold, scheduled cleaning), preventive maintenance, calibration and requalification once, with the
@@ -42,7 +43,9 @@ async function report(sql: Sql, kind: OverdueKind, i: LogbookItem, s: EquipmentS
   const c = i.care;
   switch (kind) {
     case 'dirty_hold': {
-      const u = await lastUse(sql, i.id);
+      // D-46: the last use may be TrueBatch's.
+      const tb = s.lastTrueBatchUse;
+      const u = tb ? { ended: tb.endedAt, batch: `${tb.batch} in TrueBatch${tb.step ? ` (${tb.step})` : ''}`, product: null } : await lastUse(sql, i.id);
       return {
         title: `Dirty hold expired: ${i.code} not cleaned within ${c.dirtyHoldHours ?? '?'} h of use`,
         description: `${named(i)} was not cleaned within its dirty hold of ${c.dirtyHoldHours ?? '?'} hours after use. `
@@ -93,22 +96,23 @@ async function report(sql: Sql, kind: OverdueKind, i: LogbookItem, s: EquipmentS
 }
 
 /** Records every limit now overdue that is not on record yet, and publishes the statuses (D-45). Returns the number of new records. */
-export async function recordOverdue(sql: Sql, master: Master, qualification: Qualification | null): Promise<number> {
+export async function recordOverdue(sql: Sql, master: Master, qualification: Qualification | null, trueBatch: TrueBatchUses | null = null): Promise<number> {
   // Without the Qualification product the requalification due date is not known for sure: no requalification records.
   let ctx;
   let qualKnown = qualification !== null;
   try {
-    ctx = await statusContext(sql, master, qualification);
+    ctx = await statusContext(sql, master, qualification, trueBatch);
   } catch (e) {
     if (!(e instanceof QualificationOff)) throw e;
-    ctx = await statusContext(sql, master, null);
+    ctx = await statusContext(sql, master, null, trueBatch);
     qualKnown = false;
   }
   const items = new Map((await logbookItems(sql, master)).filter((i) => i.active).map((i) => [i.id, i]));
   const statuses = await allStatuses(sql, ctx);
   // D-45: the same check publishes each item's status (report.equipment_status_v1). Not while Qualification is linked
   // but not answering: without it the status would miss the qualification checks, so the published rows grow old.
-  if (qualKnown || !qualification) await saveStatuses(sql, statuses, ctx);
+  // D-46: nor while TrueBatch is linked but not answering (its uses would be missing).
+  if ((qualKnown || !qualification) && !ctx.trueBatchOff) await saveStatuses(sql, statuses, ctx);
   // Only limits that ran out after the feature was installed (migration 0019).
   const since = (await sql<{ since: Date }[]>`select since from overdue_since`)[0]?.since ?? new Date();
   let added = 0;
@@ -142,13 +146,14 @@ export async function recordOverdue(sql: Sql, master: Master, qualification: Qua
 }
 
 /** Checks every minute inside the server process (as the daily integrity check does). */
-export function scheduleOverdue(sql: Sql, master: Master, qualification: Qualification | null, log: (msg: string) => void, everyMs = 60_000): () => void {
+export function scheduleOverdue(sql: Sql, master: Master, qualification: Qualification | null, log: (msg: string) => void, everyMs = 60_000,
+  trueBatch: TrueBatchUses | null = null): () => void {
   let running = false;
   const tick = async () => {
     if (running) return;
     running = true;
     try {
-      const n = await recordOverdue(sql, master, qualification);
+      const n = await recordOverdue(sql, master, qualification, trueBatch);
       if (n) log(`overdue: ${n} new missed limit(s) recorded for Deviations`);
     } catch (e) {
       log(`overdue check could not run: ${(e as Error).message}`);

@@ -209,7 +209,9 @@ export interface EquipmentStatus {
   state: string;
   blockers: string[];
   warnings: string[];
-  inUse: { entryId: number; productId: number | null; batch: string | null; stage: string; since: string } | null;
+  // D-46: a use open in TrueBatch has no Logbook entry (entryId null).
+  inUse: { entryId: number | null; productId: number | null; batch: string | null; stage: string; since: string; source: 'Logbook' | 'TrueBatch' } | null;
+  lastTrueBatchUse: { batch: string; step: string; endedAt: string } | null;
   cleanUntil: string | null;
   calibrationDue: string | null;
   schedule: 'hold' | 'frequency' | null;

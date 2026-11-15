@@ -1,13 +1,15 @@
 import type { Sql, Tx } from './db.js';
 import { ConnectionOff } from './master.js';
-import { IN_USE, statusOf, type EquipmentStatus, type StatusContext } from './status.js';
+import { isInUse, statusOf, type EquipmentStatus, type StatusContext } from './status.js';
 
 // D-45 (owner 15 Nov 2026): the status the Logbook works out is published for TrueBatch Tablets
 // (report.equipment_status_v1, migration 0023). TrueBatch reads it by master id before a machine or room is used in a
 // batch step. fit_for_use leaves out a use in progress: TrueBatch checks in_use_batch itself (its own batch may be the
 // one using the item). Written in the minute check (recordOverdue) and right after an entry is written. When the
 // status cannot be worked out (master data or Qualification not answering) nothing is written: the row grows old and
-// the reader treats the link as off (never stale data, platform D-02).
+// the reader treats the link as off (never stale data, platform D-02). D-46: the same while TrueBatch is linked but not
+// answering (its uses would be missing); a use open in TrueBatch is published like a Logbook use (in_use_batch), and
+// after it ends the item is dirty (not fit) until a verified cleaning, as after a Logbook use.
 
 export const RETIRED = 'Not active in master data: not for use.';
 
@@ -26,7 +28,7 @@ export async function saveStatuses(q: Sql | Tx, statuses: EquipmentStatus[], ctx
       and exists (select 1 from signatures v where v.object_type = 'entry' and v.object_id = e.id and v.meaning = 'verified')
     order by e.equipment_id, e.activity_end desc nulls last`).map((r) => [r.id, r]));
   const rows = statuses.map((s) => {
-    const blockers = s.blockers.filter((b) => b !== IN_USE);
+    const blockers = s.blockers.filter((b) => !isInUse(b));
     if (!ctx.care.get(s.equipmentId)?.active) blockers.unshift(RETIRED);
     const c = cleaned.get(s.equipmentId);
     return {
@@ -57,6 +59,7 @@ export async function refreshStatus(sql: Sql, context: () => Promise<StatusConte
   if (!id) return;
   let ctx: StatusContext;
   try { ctx = await context(); } catch (e) { if (e instanceof ConnectionOff) return; throw e; }
+  if (ctx.trueBatchOff) return;
   const s = await statusOf(sql, id, ctx);
   if (s) await saveStatuses(sql, [s], ctx);
 }

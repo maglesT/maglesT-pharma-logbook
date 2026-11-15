@@ -26,6 +26,8 @@ export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
     cleaningType: z.enum(['batch_to_batch', 'product_change', 'major']),
     checklist: checklistAnswers,
     remarks: z.string().trim().max(1000).default(''),
+    // D-46: why the cleaning is late, when it ends after the dirty hold ran out (the status asks to record why).
+    delayReason: z.string().trim().max(1000).optional(),
   }),
   maintenance: z.object({
     kind: z.enum(['preventive', 'breakdown', 'repair']),
@@ -68,6 +70,7 @@ export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
     disinfectantLot: z.string().trim().max(60).default(''),
     checklist: checklistAnswers,
     remarks: z.string().trim().max(1000).default(''),
+    delayReason: z.string().trim().max(1000).optional(),
   }),
   general_log: z.object({ checklist: checklistAnswers, notes: z.string().trim().max(2000).default('') }),
   // Owner 2026-11-12: change over between products or batches; open until it is ended, like a use.

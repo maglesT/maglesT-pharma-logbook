@@ -9,7 +9,7 @@ import { DATA_SCHEMAS, REPORTED_FIELDS, checkData, correctCodes, mayCorrect, may
 import { logbookItem, logbookProducts, type Master } from '../master.js';
 import { SignError, authenticateSigner, contentHash, proofOnly, sign, signBody } from '../signatures.js';
 import { settingsInForce } from './settings.js';
-import { allStatuses, statusOf } from '../status.js';
+import { allStatuses, plantTime, statusOf, type EquipmentStatus } from '../status.js';
 import { VoiceError, confirmVoiceNotes, unsignedDrafts, voiceNotesFor, type VoiceUse } from '../voice.js';
 
 // Product default (LB-04): an activity time older than this makes the entry a late entry.
@@ -157,8 +157,11 @@ function timing(now: Date, times: (Date | null | undefined)[], lateReason: strin
 }
 
 // A cleaning is recorded only when the item is not in use, and starts after the last use ended
-// (review S4-3/7).
-function cleaningFits(status: { inUse: unknown; lastUseEnd: Date | null }, start: Date) {
+// (review S4-3/7). D-46: a use open in TrueBatch ends there, when its step is signed done.
+function cleaningFits(status: Pick<EquipmentStatus, 'inUse' | 'lastUseEnd'>, start: Date) {
+  if (status.inUse?.source === 'TrueBatch') {
+    throw new EntryError(409, 'in_use', [`In use by batch ${status.inUse.batch} in TrueBatch: record the cleaning once the step is signed done in TrueBatch.`]);
+  }
   if (status.inUse) throw new EntryError(409, 'in_use', ['End the current use before recording a cleaning.']);
   // Forms enter times to the minute, so compare at minute precision.
   const useEndMinute = status.lastUseEnd ? Math.floor(status.lastUseEnd.getTime() / 60_000) * 60_000 : null;
@@ -347,7 +350,13 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (b.logbookType === 'steriliser_cycle' && b.data.cycleType === 'steam' && !status.hasPassedSterilizerTest) {
           throw new EntryError(409, 'not_fit_for_use', ['No verified passed steriliser test on record: test the steriliser first.']);
         }
-        if (b.logbookType === 'equipment_cleaning' || b.logbookType === 'area_cleaning') cleaningFits(status, b.activityStart);
+        if (b.logbookType === 'equipment_cleaning' || b.logbookType === 'area_cleaning') {
+          cleaningFits(status, b.activityStart);
+          // D-46: a cleaning that ends after the dirty hold ran out is late: it says why ("clean, verify and record why").
+          if (status.dirtyUntil && (b.activityEnd ?? b.activityStart) > status.dirtyUntil && !String(b.data.delayReason ?? '').trim()) {
+            throw new EntryError(400, 'check_failed', [`The dirty hold ran out at ${plantTime(status.dirtyUntil)}: give the reason the cleaning is late.`]);
+          }
+        }
         // Owner 2026-11-12: with Batchwright (or TrueBatch, D-45) linked, the batch is one of its batch records and the product is the batch's.
         if (app.batches && isUse) {
           if (!b.batch) throw new EntryError(400, 'check_failed', ['Choose the batch from the batch records.']);

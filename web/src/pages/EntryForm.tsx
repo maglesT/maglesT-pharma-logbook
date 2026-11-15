@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { api, ApiError, getSignProof, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type BatchChoice, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
 import { VoiceButton } from '../components/VoiceNote.js';
+import { OUTCOME_LABEL, STAGE_LABEL } from '../fields.js';
 
 type Data = Record<string, unknown>;
 
@@ -82,6 +83,7 @@ export function EntryForm({
   correcting,
   completing,
   preset,
+  dirtyUntil = null,
   voice,
   onDone,
   onCancel,
@@ -94,6 +96,8 @@ export function EntryForm({
   products: Product[];
   correcting?: Entry;
   completing?: Entry;
+  // D-46: when the item's dirty hold runs out; a cleaning ending later says why it is late.
+  dirtyUntil?: string | null;
   // D-26: voice notes, when the site has them switched on.
   voice?: VoiceConfig;
   onDone: () => void;
@@ -161,6 +165,9 @@ export function EntryForm({
   const showEnd = completing ? true : correcting ? Boolean(correcting.activityEnd) : HAS_END.has(type) && !openBreakdown;
   const set = (k: string, v: unknown) => setData({ ...data, [k]: v });
   const checklist = (data.checklist ?? {}) as Record<string, boolean>;
+  // D-46: "clean, verify and record why": a cleaning that ends after the dirty hold ran out gives the reason.
+  const isCleaning = type === 'equipment_cleaning' || type === 'area_cleaning';
+  const cleaningLate = isCleaning && !correcting && dirtyUntil !== null && new Date(showEnd ? end : start).getTime() > new Date(dirtyUntil).getTime();
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -315,6 +322,11 @@ export function EntryForm({
           ),
         )}
 
+        {(cleaningLate || (isCleaning && Boolean(data.delayReason))) && (
+          <label>Why the cleaning is late (the dirty hold ran out){cleaningLate && ' (required)'}
+            <textarea value={String(data.delayReason ?? '')} onChange={(e) => set('delayReason', e.target.value)} required={cleaningLate} />
+          </label>
+        )}
         {needLateReason && !correcting && (
           <label>Reason for late entry<input value={lateReason} onChange={(e) => setLateReason(e.target.value)} placeholder="e.g. transcribed from paper form no. …" /></label>
         )}
@@ -459,8 +471,6 @@ function MaintenanceFields({
 // Owner 2026-11-12: a requalification is pulled from the item's approved protocol in the Qualification system (stage,
 // result and next due date filled in, read only), or written by hand, e.g. done by a vendor outside it.
 interface QualProtocol { number: string; stage: string; step: string; reportOutcome: string | null; nextReviewDueDecided: string | null; reportApprovedAt: string | null }
-const STAGE_LABEL: Record<string, string> = { iq: 'IQ', oq: 'OQ', pq: 'PQ', iq_oq: 'IQ/OQ', dq: 'DQ', urs: 'URS', periodic_review: 'Periodic review', csv: 'CSV' };
-const OUTCOME_LABEL: Record<string, string> = { pass: 'Pass', pass_conditions: 'Pass with conditions', fail: 'Fail' };
 function RequalificationFields({ data, setData, equipment }: { data: Data; setData: (d: Data) => void; equipment: Equipment }) {
   const [list, setList] = useState<{ linked: boolean; protocols: QualProtocol[] } | null>(null);
   useEffect(() => {
