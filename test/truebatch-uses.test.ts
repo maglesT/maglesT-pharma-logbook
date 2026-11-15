@@ -61,13 +61,15 @@ beforeAll(async () => {
   await t.owner.unsafe(`create table ${TB}.batch_fact_v1 (batch_id uuid, batch_number text, product_code text, strength text, status text, issued_at timestamptz,
       completed_at timestamptz, released boolean, read_at timestamptz default now(), data_as_of timestamptz);
     create table ${TB}.equipment_use_v1 (batch_number text, equipment_code text, equipment_type text, room_code text, step text, started_at timestamptz,
-      ended_at timestamptz, read_at timestamptz default now(), data_as_of timestamptz);
+      ended_at timestamptz, read_at timestamptz default now(), data_as_of timestamptz, step_name text);
     insert into ${TB}.batch_fact_v1 (batch_number, product_code, status, issued_at, completed_at, released) values
       ('TB260001', 'FG-TB', 'IN_PRODUCTION', now() - interval '1 day', null, false),
       ('TB260002', 'FG-TB', 'IN_PRODUCTION', now() - interval '1 day', null, false),
       ('TB250099', 'FG-TB', 'REJECTED', now() - interval '9 days', now() - interval '8 days', false);
     grant usage on schema ${TB} to logbook_app; grant select on all tables in schema ${TB} to logbook_app;
-    create table ${TBP}.equipment_use_v1 (like ${TB}.equipment_use_v1 including defaults);
+    -- Packing's view as before D-48: no step_name column.
+    create table ${TBP}.equipment_use_v1 (batch_number text, equipment_code text, equipment_type text, room_code text, step text, started_at timestamptz,
+      ended_at timestamptz, read_at timestamptz default now(), data_as_of timestamptz);
     grant usage on schema ${TBP} to logbook_app; grant select on all tables in schema ${TBP} to logbook_app;`);
   for (const [u, roles] of [['admin', ['admin']], ['qa1', ['qa']], ['op1', ['operator']], ['sup1', ['supervisor']]] as const) await seedUser(t.owner, u, [...roles]);
   for (const [k, u] of [['admin', 'admin'], ['qa', 'qa1'], ['op1', 'op1'], ['sup1', 'sup1']] as const) c[k] = (await login(t.app, u)).cookie;
@@ -175,6 +177,38 @@ describe('uses recorded in TrueBatch count in the status (D-46)', () => {
     await tick();
     expect(((await published(a.code))!.checked_at as Date).getTime()).toBeGreaterThan(before.getTime());
     expect((await status(a.id)).warnings).not.toContain(TRUEBATCH_USES_OFF);
+  });
+});
+
+describe('the step is shown by its readable name (D-48)', () => {
+  it('LB-08: TrueBatch\'s step_name ("Stage › Step") is shown in the status, the item page and the dirty-hold record; the key when it has none', async () => {
+    const a = await item({ dirtyHoldHours: 1 });
+    await t.owner`update overdue_since set since = now() - interval '1 day'`;
+    await t.owner.unsafe(`insert into ${TB}.equipment_use_v1 (batch_number, equipment_code, equipment_type, room_code, step, step_name, started_at, ended_at, data_as_of)
+      values ('TB260001', '${a.code}', 'machine', 'GRAN-TB', 'granulation/granulate', 'Granulation › Granulate to an end point', now() - interval '3 hours', now() - interval '2 hours', now())`);
+    const s = await status(a.id);
+    expect(s).toMatchObject({ state: 'dirty_expired', lastTrueBatchUse: { batch: 'TB260001', step: 'Granulation › Granulate to an end point' } });
+    await tick();
+    const [ev] = await t.owner<{ description: string }[]>`select description from overdue_events where equipment_id = ${a.id} and kind = 'dirty_hold'`;
+    expect(ev!.description).toContain('batch TB260001 in TrueBatch (Granulation › Granulate to an end point)');
+    // Open: the blocker names the step the same way.
+    const b = await item();
+    await t.owner.unsafe(`insert into ${TB}.equipment_use_v1 (batch_number, equipment_code, equipment_type, room_code, step, step_name, started_at, data_as_of)
+      values ('TB260001', '${b.code}', 'machine', 'GRAN-TB', 'granulation/granulate', 'Granulation › Granulate to an end point', now(), now())`);
+    expect((await status(b.id)).blockers).toEqual(['In use by batch TB260001 in TrueBatch (Granulation › Granulate to an end point): it ends when the step is signed done in TrueBatch.']);
+    // An empty step_name falls back to the key.
+    const c2 = await item();
+    await t.owner.unsafe(`insert into ${TB}.equipment_use_v1 (batch_number, equipment_code, equipment_type, room_code, step, step_name, started_at, data_as_of)
+      values ('TB260001', '${c2.code}', 'machine', 'GRAN-TB', 'granulation/granulate', '', now(), now())`);
+    expect((await status(c2.id)).inUse).toMatchObject({ batch: 'TB260001', stage: 'granulation/granulate' });
+  });
+
+  it('PL-08: a view without the step_name column (a product not yet updated) still answers, with the key', async () => {
+    const a = await item();
+    await tbUse('PK260009', a.code, { schema: TBP });
+    const s = await status(a.id);
+    expect(s).toMatchObject({ state: 'in_use', inUse: { batch: 'PK260009', stage: 'granulation/charge-api', source: 'TrueBatch Packing' } });
+    expect(s.warnings).not.toContain(PACKING_OFF);
   });
 });
 

@@ -204,6 +204,15 @@ describe('signatures and verification (LB-03, LB-11)', () => {
     expect(ok.statusCode).toBe(201);
   });
 
+  it('LB-02: a room is cleaned batch to batch or at a product changeover, as a machine is (D-48); a machine-only type is refused', async () => {
+    const r = (await addItem(t, { code: 'GR-B2B', name: 'Granulation room 2', kind: 'area' })) as number;
+    const major = await create('op1', r, { logbookType: 'area_cleaning', activityStart: now(), activityEnd: now(), data: { cleaningType: 'major' }, signature: sig('op1') });
+    expect(major.statusCode).toBe(400);
+    const ok = await create('op1', r, { logbookType: 'area_cleaning', activityStart: now(), activityEnd: now(), data: { cleaningType: 'batch_to_batch' }, signature: sig('op1') });
+    expect(ok.statusCode).toBe(201);
+    expect((await latest(r))[0].data.cleaningType).toBe('batch_to_batch');
+  });
+
   it('LB-11: a breakdown of sterile equipment needs an impact assessment (Annex 1 5.7)', async () => {
     const steriliser = (await addItem(t, { code: 'AC-01', name: 'Autoclave', kind: 'equipment', sterile: true }));
     const res = await create('eng1', steriliser, { logbookType: 'maintenance', activityStart: now(), data: { kind: 'breakdown', description: 'Door seal leak', occurredAt: minutesAgo(5), failureCategory: 'mechanical', partsNone: true, doneBy: 'in_house' }, signature: sig('eng1') });

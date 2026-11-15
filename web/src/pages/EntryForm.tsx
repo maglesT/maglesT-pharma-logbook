@@ -29,7 +29,7 @@ const OPTIONS: Record<string, Record<string, [string, string][]>> = {
   equipment_cleaning: { cleaningType: [['batch_to_batch', 'Batch to batch'], ['product_change', 'Product changeover'], ['major', 'Major']] },
   maintenance: { kind: [['preventive', 'Preventive'], ['breakdown', 'Breakdown'], ['repair', 'Repair']] },
   calibration: { result: [['pass', 'Pass'], ['fail', 'Fail']] },
-  area_cleaning: { cleaningType: [['daily', 'Daily'], ['weekly', 'Weekly'], ['product_change', 'Product changeover'], ['other', 'Other']] },
+  area_cleaning: { cleaningType: [['daily', 'Daily'], ['weekly', 'Weekly'], ['batch_to_batch', 'Batch to batch'], ['product_change', 'Product changeover'], ['other', 'Other']] },
   steriliser_cycle: { cycleType: [['steam', 'Steam (autoclave)'], ['dry_heat', 'Dry heat / depyrogenation'], ['sip', 'Steam in place'], ['vhp', 'VHP bio-decontamination']], result: [['pass', 'Pass'], ['fail', 'Fail']] },
   steriliser_test: { test: [['air_removal', 'Air removal (Bowie-Dick)'], ['leak', 'Leak (vacuum) test']], result: [['pass', 'Pass'], ['fail', 'Fail']] },
   glove_integrity: { result: [['pass', 'Pass'], ['fail', 'Fail']] },

@@ -54,7 +54,8 @@ every minute and after each entry; `checked_at` says when. Batches come from Bat
 (`TRUEBATCH_DATABASE_URL`) or both, through their platform links. With TrueBatch linked, its machine and room uses
 (`equipment_use_v1`, read live) count in the status as Logbook uses do (D-46): in use while the step is open, dirty after.
 TrueBatch Tablets Packing's uses (its `equipment_use_v1`, `TRUEBATCH_PACKING_DATABASE_URL`) count the same way, merged with
-TrueBatch's (D-47); each link off is named in its own warning.
+TrueBatch's (D-47); each link off is named in its own warning. Steps are named by the view's `step_name` ("Stage › Step")
+when it has one, else by the step key (D-48).
 
 **Read-only role for the Deviations system (D-28).** Migration 0013 creates the role `logbook_report` without a login. (On the Medhanta platform, D-29, it is not created: other products read the views through platform links.)
 It can read the four views in the schema `report` (`equipment_v1`, `entry_v1`, `calibration_v1`, `logbook_sop_v1`) and
