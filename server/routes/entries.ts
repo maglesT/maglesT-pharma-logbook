@@ -157,10 +157,11 @@ function timing(now: Date, times: (Date | null | undefined)[], lateReason: strin
 }
 
 // A cleaning is recorded only when the item is not in use, and starts after the last use ended
-// (review S4-3/7). D-46: a use open in TrueBatch ends there, when its step is signed done.
+// (review S4-3/7). D-46: a use open in TrueBatch (D-47: or TrueBatch Packing) ends there, when its step is signed done.
 function cleaningFits(status: Pick<EquipmentStatus, 'inUse' | 'lastUseEnd'>, start: Date) {
-  if (status.inUse?.source === 'TrueBatch') {
-    throw new EntryError(409, 'in_use', [`In use by batch ${status.inUse.batch} in TrueBatch: record the cleaning once the step is signed done in TrueBatch.`]);
+  if (status.inUse && status.inUse.source !== 'Logbook') {
+    const { batch, source } = status.inUse;
+    throw new EntryError(409, 'in_use', [`In use by batch ${batch} in ${source}: record the cleaning once the step is signed done in ${source}.`]);
   }
   if (status.inUse) throw new EntryError(409, 'in_use', ['End the current use before recording a cleaning.']);
   // Forms enter times to the minute, so compare at minute precision.

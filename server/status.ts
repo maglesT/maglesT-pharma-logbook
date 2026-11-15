@@ -1,7 +1,7 @@
 import type { Sql, Tx } from './db.js';
 import { careByLocalId, type Care, type Master } from './master.js';
 import type { Qualification, QualStatus } from './qualification.js';
-import { TrueBatchOff, type TrueBatchUse, type TrueBatchUses } from './batches.js';
+import { UsesOff, type TrueBatchUse, type TrueBatchUses, type UseSource } from './batches.js';
 
 // Plant time zone: calibration due dates are plant-local dates (D-19).
 export const PLANT_TZ = process.env.DISPLAY_TZ ?? 'Asia/Kolkata';
@@ -20,11 +20,12 @@ export interface EquipmentStatus {
   // Blockers other than cleaning: these also stop a sterilisation cycle (S6).
   cycleBlockers: string[];
   warnings: string[];
-  // D-46: a use open in TrueBatch occupies the item as a Logbook use does (no entry: entryId and productId null).
-  inUse: { entryId: number | null; productId: number | null; batch: string | null; stage: string; since: Date; source: 'Logbook' | 'TrueBatch' } | null;
+  // D-46: a use open in TrueBatch (D-47: or TrueBatch Packing) occupies the item as a Logbook use does (no entry:
+  // entryId and productId null).
+  inUse: { entryId: number | null; productId: number | null; batch: string | null; stage: string; since: Date; source: 'Logbook' | UseSource } | null;
   lastUseEnd: Date | null;
-  // D-46: the last use, when it was recorded in TrueBatch (it ended after the Logbook's last use).
-  lastTrueBatchUse: { batch: string; step: string; endedAt: Date } | null;
+  // D-46: the last use, when it was recorded in TrueBatch or TrueBatch Packing (it ended after the Logbook's last use).
+  lastTrueBatchUse: { batch: string; step: string; endedAt: Date; source: UseSource } | null;
   hasPassedSterilizerTest: boolean;
   cleanUntil: Date | null;
   // Plant-local date (YYYY-MM-DD).
@@ -95,37 +96,42 @@ function dueOf(kind: Due['kind'], due: string, today: string, frequency: string,
 export interface StatusContext {
   care: Map<number, Care & { needsCalibration: boolean; addedAt: Date; active: boolean }>;
   qual: Map<number, QualStatus> | null;           // null: no Qualification link
-  // D-46: TrueBatch's uses by local item id (the newest open and the newest ended); null: no TrueBatch link.
+  // D-46: the uses recorded in TrueBatch and TrueBatch Packing (D-47) by local item id (the newest open and the newest
+  // ended, of both); null: neither is linked.
   trueBatch?: Map<number, { open: TrueBatchUse | null; last: TrueBatchUse | null }> | null;
-  // D-46: TrueBatch is linked but does not answer: the status says so, and is not published.
-  trueBatchOff?: boolean;
+  // D-46: the linked products that do not answer: the status says so for each, and is not published.
+  usesOff?: UseSource[];
 }
-/** D-46: the TrueBatch uses of every item, read live; a cut link leaves them out and says so. */
-async function trueBatchUses(sql: Sql | Tx, trueBatch: TrueBatchUses): Promise<Pick<StatusContext, 'trueBatch' | 'trueBatchOff'>> {
+/** D-46, D-47: the uses of every item recorded in each linked product, read live; a cut link leaves its uses out and says so. */
+async function trueBatchUses(sql: Sql | Tx, sources: TrueBatchUses[]): Promise<Pick<StatusContext, 'trueBatch' | 'usesOff'>> {
   const items = await sql<{ id: number; code: string }[]>`select id::int, upper(code) as code from equipment`;
-  let uses: TrueBatchUse[];
-  try { uses = await trueBatch.latest(items.map((i) => i.code)); } catch (e) {
-    if (e instanceof TrueBatchOff) return { trueBatch: new Map(), trueBatchOff: true };
+  const codes = items.map((i) => i.code);
+  const read = await Promise.all(sources.map((s) => s.latest(codes).catch((e) => {
+    if (e instanceof UsesOff) return null;
     throw e;
-  }
+  })));
+  const usesOff = sources.filter((_, i) => read[i] === null).map((s) => s.source);
   const byCode = new Map<string, { open: TrueBatchUse | null; last: TrueBatchUse | null }>();
-  for (const u of uses) {
+  for (const u of read.flatMap((r) => r ?? [])) {
     const s = byCode.get(u.code) ?? { open: null, last: null };
-    if (u.endedAt) s.last = u; else s.open = u;
+    if (u.endedAt) { if (!s.last || u.endedAt > s.last.endedAt!) s.last = u; }
+    else if (!s.open || u.startedAt > s.open.startedAt) s.open = u;
     byCode.set(u.code, s);
   }
-  return { trueBatch: new Map(items.flatMap((i) => (byCode.has(i.code) ? [[i.id, byCode.get(i.code)!] as const] : []))), trueBatchOff: false };
+  return { trueBatch: new Map(items.flatMap((i) => (byCode.has(i.code) ? [[i.id, byCode.get(i.code)!] as const] : []))), usesOff };
 }
-export async function statusContext(sql: Sql | Tx, master: Master, qualification: Qualification | null, trueBatch: TrueBatchUses | null = null): Promise<StatusContext> {
+export async function statusContext(sql: Sql | Tx, master: Master, qualification: Qualification | null, uses: TrueBatchUses[] = []): Promise<StatusContext> {
   const care = await careByLocalId(sql, master);
-  const tb = trueBatch ? await trueBatchUses(sql, trueBatch) : { trueBatch: null };
+  const tb = uses.length ? await trueBatchUses(sql, uses) : { trueBatch: null };
   if (!qualification) return { care, qual: null, ...tb };
   const byMaster = await qualification.statuses();
   const ids = await sql<{ id: number; item_id: string }[]>`select id::int, item_id::text from equipment where item_id is not null`;
   return { care, qual: new Map(ids.flatMap((r) => (byMaster.has(r.item_id) ? [[r.id, byMaster.get(r.item_id)!] as const] : []))), ...tb };
 }
-/** D-46: what a cut TrueBatch link leaves out of the status. */
-export const TRUEBATCH_USES_OFF = 'Connection to TrueBatch is off: machine and room uses recorded in TrueBatch (in use, dirty after use) are not shown. Ask your administrator.';
+/** D-46, D-47: what a cut link to TrueBatch or TrueBatch Packing leaves out of the status. */
+export const usesOffWarning = (source: UseSource) =>
+  `Connection to ${source} is off: machine and room uses recorded in ${source} (in use, dirty after use) are not shown. Ask your administrator.`;
+export const TRUEBATCH_USES_OFF = usesOffWarning('TrueBatch');
 
 interface Facts {
   id: number;
@@ -135,7 +141,7 @@ interface Facts {
   qual: QualStatus | null;
   hasQual: boolean;
   tb: { open: TrueBatchUse | null; last: TrueBatchUse | null } | null;
-  tbOff: boolean;
+  usesOff: UseSource[];
   last_pm_end: Date | null;
   last_cal_pass_at: Date | null;
   open_change_over_since: Date | null;
@@ -174,18 +180,18 @@ interface Facts {
 const DUE_SOON_DAYS = 7;
 /** The blocker of a use in progress (D-45: the published status leaves it out; in_use_batch says it). */
 export const IN_USE = 'In use: end the current use first.';
-/** D-46: the blocker of a use open in TrueBatch; it ends when the step is signed done there. */
-export const inTrueBatch = (batch: string, step: string) =>
-  `In use by batch ${batch} in TrueBatch${step ? ` (${step})` : ''}: it ends when the step is signed done in TrueBatch.`;
+/** D-46: the blocker of a use open in TrueBatch (D-47: or TrueBatch Packing); it ends when the step is signed done there. */
+export const inTrueBatch = (batch: string, step: string, source: UseSource = 'TrueBatch') =>
+  `In use by batch ${batch} in ${source}${step ? ` (${step})` : ''}: it ends when the step is signed done in ${source}.`;
 export const isInUse = (blocker: string) => blocker === IN_USE || blocker.startsWith('In use by batch ');
 
 // One query for any number of items: the facts status is derived from. The entry scan is limited
 // to the requested items (review S4-4).
 async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Promise<Facts[]> {
   const scope = ids === null ? q`true` : q`e.equipment_id = any(${ids}::bigint[])`;
-  // D-46: the end of the last TrueBatch use counts as a use end (a cleaning must follow it).
+  // D-46: the end of the last TrueBatch (or TrueBatch Packing) use counts as a use end (a cleaning must follow it).
   const tbEnds = [...(ctx.trueBatch ?? [])].filter(([id, u]) => u.last?.endedAt && (ids === null || ids.includes(id)));
-  const rows = await q<Omit<Facts, 'care' | 'qual' | 'hasQual' | 'tb' | 'tbOff'>[]>`
+  const rows = await q<Omit<Facts, 'care' | 'qual' | 'hasQual' | 'tb' | 'usesOff'>[]>`
     with latest as (
       select e.*,
         exists (select 1 from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'verified') as verified
@@ -290,22 +296,22 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
   const none = { cleanHoldHours: null, dirtyHoldHours: null, cleaningBasis: null, cleaningFrequencyHours: null, pmFrequencyDays: null,
     calibrationFrequencyDays: null, requalificationFrequencyMonths: null, needsCalibration: false, addedAt: new Date(0) };
   return rows.map((r) => ({ ...r, care: ctx.care.get(r.id) ?? none, qual: ctx.qual?.get(r.id) ?? null, hasQual: ctx.qual !== null,
-    tb: ctx.trueBatch?.get(r.id) ?? null, tbOff: ctx.trueBatchOff ?? false }));
+    tb: ctx.trueBatch?.get(r.id) ?? null, usesOff: ctx.usesOff ?? [] }));
 }
 
 export function deriveStatus(f: Facts): EquipmentStatus {
   const blockers: string[] = [];
   const warnings: string[] = [];
   const now = f.now.getTime();
-  // LB-08 / D-46: the use in progress, written in the Logbook or open in TrueBatch (the Logbook's first).
+  // LB-08 / D-46: the use in progress, written in the Logbook or open in TrueBatch or TrueBatch Packing (the Logbook's first).
   const tbOpen = f.tb?.open ?? null;
   const inUse: EquipmentStatus['inUse'] = f.open_use_id
     ? { entryId: f.open_use_id, productId: f.open_use_product, batch: f.open_use_batch, stage: f.open_use_stage ?? '', since: f.open_use_since!, source: 'Logbook' }
-    : tbOpen ? { entryId: null, productId: null, batch: tbOpen.batchNumber, stage: tbOpen.step, since: tbOpen.startedAt, source: 'TrueBatch' } : null;
+    : tbOpen ? { entryId: null, productId: null, batch: tbOpen.batchNumber, stage: tbOpen.step, since: tbOpen.startedAt, source: tbOpen.source } : null;
   const tbLast = f.tb?.last;
   const lastTrueBatchUse = tbLast?.endedAt && f.last_use_end && tbLast.endedAt.getTime() === f.last_use_end.getTime()
-    ? { batch: tbLast.batchNumber, step: tbLast.step, endedAt: tbLast.endedAt } : null;
-  if (f.tbOff) warnings.push(TRUEBATCH_USES_OFF);
+    ? { batch: tbLast.batchNumber, step: tbLast.step, endedAt: tbLast.endedAt, source: tbLast.source } : null;
+  for (const source of f.usesOff) warnings.push(usesOffWarning(source));
 
   // LB-06 / SchM 18.4.3: defective equipment is withdrawn until released.
   if (f.open_breakdowns > 0) blockers.push('Out of service: a breakdown has not been released by QA.');
@@ -450,7 +456,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   // Owner 2026-11-12: one activity at a time; a change over in progress occupies the item like a use.
   if (f.open_change_over_since) blockers.push(`Change over in progress since ${plantTime(f.open_change_over_since)}: end it first.`);
   // LB-08: the item in use shows what is in it.
-  if (inUse) blockers.push(inUse.source === 'TrueBatch' ? inTrueBatch(inUse.batch!, inUse.stage) : IN_USE);
+  if (inUse) blockers.push(inUse.source === 'Logbook' ? IN_USE : inTrueBatch(inUse.batch!, inUse.stage, inUse.source));
   // Cycles are stopped by everything except the cleaning status (review S6-1: including use).
   const cycleBlockers = blockers.filter((b) => !/^(Dirty|Clean-hold|Cleaning overdue)/.test(b));
 

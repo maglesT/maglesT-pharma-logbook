@@ -43,9 +43,9 @@ async function report(sql: Sql, kind: OverdueKind, i: LogbookItem, s: EquipmentS
   const c = i.care;
   switch (kind) {
     case 'dirty_hold': {
-      // D-46: the last use may be TrueBatch's.
+      // D-46: the last use may be TrueBatch's (D-47: or TrueBatch Packing's).
       const tb = s.lastTrueBatchUse;
-      const u = tb ? { ended: tb.endedAt, batch: `${tb.batch} in TrueBatch${tb.step ? ` (${tb.step})` : ''}`, product: null } : await lastUse(sql, i.id);
+      const u = tb ? { ended: tb.endedAt, batch: `${tb.batch} in ${tb.source}${tb.step ? ` (${tb.step})` : ''}`, product: null } : await lastUse(sql, i.id);
       return {
         title: `Dirty hold expired: ${i.code} not cleaned within ${c.dirtyHoldHours ?? '?'} h of use`,
         description: `${named(i)} was not cleaned within its dirty hold of ${c.dirtyHoldHours ?? '?'} hours after use. `
@@ -96,7 +96,7 @@ async function report(sql: Sql, kind: OverdueKind, i: LogbookItem, s: EquipmentS
 }
 
 /** Records every limit now overdue that is not on record yet, and publishes the statuses (D-45). Returns the number of new records. */
-export async function recordOverdue(sql: Sql, master: Master, qualification: Qualification | null, trueBatch: TrueBatchUses | null = null): Promise<number> {
+export async function recordOverdue(sql: Sql, master: Master, qualification: Qualification | null, trueBatch: TrueBatchUses[] = []): Promise<number> {
   // Without the Qualification product the requalification due date is not known for sure: no requalification records.
   let ctx;
   let qualKnown = qualification !== null;
@@ -111,8 +111,8 @@ export async function recordOverdue(sql: Sql, master: Master, qualification: Qua
   const statuses = await allStatuses(sql, ctx);
   // D-45: the same check publishes each item's status (report.equipment_status_v1). Not while Qualification is linked
   // but not answering: without it the status would miss the qualification checks, so the published rows grow old.
-  // D-46: nor while TrueBatch is linked but not answering (its uses would be missing).
-  if ((qualKnown || !qualification) && !ctx.trueBatchOff) await saveStatuses(sql, statuses, ctx);
+  // D-46: nor while TrueBatch (D-47: or TrueBatch Packing) is linked but not answering (its uses would be missing).
+  if ((qualKnown || !qualification) && !ctx.usesOff?.length) await saveStatuses(sql, statuses, ctx);
   // Only limits that ran out after the feature was installed (migration 0019).
   const since = (await sql<{ since: Date }[]>`select since from overdue_since`)[0]?.since ?? new Date();
   let added = 0;
@@ -147,7 +147,7 @@ export async function recordOverdue(sql: Sql, master: Master, qualification: Qua
 
 /** Checks every minute inside the server process (as the daily integrity check does). */
 export function scheduleOverdue(sql: Sql, master: Master, qualification: Qualification | null, log: (msg: string) => void, everyMs = 60_000,
-  trueBatch: TrueBatchUses | null = null): () => void {
+  trueBatch: TrueBatchUses[] = []): () => void {
   let running = false;
   const tick = async () => {
     if (running) return;

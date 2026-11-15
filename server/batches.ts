@@ -124,26 +124,38 @@ export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'Bat
  * the use had been entered in the Logbook. The item is TrueBatch's equipment_code (a room's row names the room there).
  * Open while its step is not signed done (ended_at null); an open use counts only while its batch is in production, so a
  * step left open in a finished or cancelled batch never holds an item.
+ * D-47: TrueBatch Tablets Packing publishes the same view, read the same way through its own link; its batches are not
+ * read (`batchView` null), so an open packing step holds the item until it is signed done there.
  */
-export interface TrueBatchUse { code: string; batchNumber: string; step: string; startedAt: Date; endedAt: Date | null }
+export type UseSource = 'TrueBatch' | 'TrueBatch Packing';
+export interface TrueBatchUse { code: string; batchNumber: string; step: string; startedAt: Date; endedAt: Date | null; source: UseSource }
 export interface TrueBatchUses {
+  /** The product that records the uses (for messages). */
+  source: UseSource;
   /** Per item code (upper case): the newest open use and the newest ended use, at most one of each. */
   latest(codes: string[]): Promise<TrueBatchUse[]>;
 }
-export function sqlTrueBatchUses(q: Sql, schema = 'report'): TrueBatchUses {
+/** The uses of one product could not be read: its link is off. */
+export class UsesOff extends ConnectionOff {
+  constructor(readonly source: UseSource) { super(); this.message = `Connection to ${source} (machine and room uses) is off. Ask your administrator.`; }
+}
+export function sqlTrueBatchUses(q: Sql, schema = 'report', source: UseSource = 'TrueBatch', batchView: string | null = 'batch_fact_v1'): TrueBatchUses {
   const v = (name: string) => q(`${schema}.${name}`);
   return {
+    source,
     latest: async (codes) => {
+      const inProduction = batchView
+        ? q`exists (select 1 from ${v(batchView)} b where b.batch_number = u.batch_number and ${q.unsafe(IN_PRODUCTION)})` : q`true`;
       try {
         return (await q<{ code: string; batch_number: string; step: string; started_at: Date; ended_at: Date | null }[]>`
           select distinct on (upper(u.equipment_code), u.ended_at is null) upper(u.equipment_code) as code, u.batch_number, u.step,
             coalesce(u.started_at, u.data_as_of) as started_at, u.ended_at
           from ${v('equipment_use_v1')} u
           where upper(u.equipment_code) = any(${codes.map((c) => c.toUpperCase())})
-            and (u.ended_at is not null or exists (select 1 from ${v('batch_fact_v1')} b where b.batch_number = u.batch_number and ${q.unsafe(IN_PRODUCTION)}))
+            and (u.ended_at is not null or ${inProduction})
           order by upper(u.equipment_code), u.ended_at is null, coalesce(u.ended_at, u.started_at) desc nulls last`)
-          .map((r) => ({ code: r.code, batchNumber: r.batch_number, step: r.step ?? '', startedAt: r.started_at, endedAt: r.ended_at }));
-      } catch (e) { if (isCut(e)) throw new TrueBatchOff(); throw e; }
+          .map((r) => ({ code: r.code, batchNumber: r.batch_number, step: r.step ?? '', startedAt: r.started_at, endedAt: r.ended_at, source }));
+      } catch (e) { if (isCut(e)) throw new UsesOff(source); throw e; }
     },
   };
 }
