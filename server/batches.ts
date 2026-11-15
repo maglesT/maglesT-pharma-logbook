@@ -126,6 +126,9 @@ export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'Bat
  * step left open in a finished or cancelled batch never holds an item.
  * D-47: TrueBatch Tablets Packing publishes the same view, read the same way through its own link; its batches are not
  * read (`batchView` null), so an open packing step holds the item until it is signed done there.
+ * D-48: the step is shown by its readable name (`step_name`, "Stage › Step", a column both products append to the view)
+ * when there is one, else by its key (`step`, "stage/step"). Read through the row as JSON, so a view without the column
+ * (a product not yet updated) still answers.
  */
 export type UseSource = 'TrueBatch' | 'TrueBatch Packing';
 export interface TrueBatchUse { code: string; batchNumber: string; step: string; startedAt: Date; endedAt: Date | null; source: UseSource }
@@ -148,7 +151,8 @@ export function sqlTrueBatchUses(q: Sql, schema = 'report', source: UseSource = 
         ? q`exists (select 1 from ${v(batchView)} b where b.batch_number = u.batch_number and ${q.unsafe(IN_PRODUCTION)})` : q`true`;
       try {
         return (await q<{ code: string; batch_number: string; step: string; started_at: Date; ended_at: Date | null }[]>`
-          select distinct on (upper(u.equipment_code), u.ended_at is null) upper(u.equipment_code) as code, u.batch_number, u.step,
+          select distinct on (upper(u.equipment_code), u.ended_at is null) upper(u.equipment_code) as code, u.batch_number,
+            coalesce(nullif(to_jsonb(u)->>'step_name', ''), u.step) as step,
             coalesce(u.started_at, u.data_as_of) as started_at, u.ended_at
           from ${v('equipment_use_v1')} u
           where upper(u.equipment_code) = any(${codes.map((c) => c.toUpperCase())})
