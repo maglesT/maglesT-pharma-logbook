@@ -22,7 +22,8 @@ const ADMIN_CORE = ['core.people.manage', 'core.masterdata.edit'];
 const CORE_LOGIN = /^[a-z][a-z0-9._-]{1,39}$/;
 const MASTER_CODE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,39}$/;
 // Not moved: the migration record (the platform keeps its own) and open sessions (everyone signs on again at core).
-const SKIP = new Set(['schema_migrations', 'sessions']);
+// item_status (D-45) is current state worked out again every minute: never moved.
+const SKIP = new Set(['schema_migrations', 'sessions', 'item_status']);
 const REASON = 'Moved from the standalone Pharma Logbook (B1-5)';
 // The id maps are filled by the move itself (a demo source holds stand-in ids there): not copied, not compared.
 const MAPPED: Record<string, string[]> = { users: ['employee_id'], equipment: ['item_id'], products: ['item_id'] };
