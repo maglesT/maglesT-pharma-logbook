@@ -348,12 +348,12 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           throw new EntryError(409, 'not_fit_for_use', ['No verified passed steriliser test on record: test the steriliser first.']);
         }
         if (b.logbookType === 'equipment_cleaning' || b.logbookType === 'area_cleaning') cleaningFits(status, b.activityStart);
-        // Owner 2026-11-12: with Batchwright linked, the batch is one of its batch records and the product is the batch's.
+        // Owner 2026-11-12: with Batchwright (or TrueBatch, D-45) linked, the batch is one of its batch records and the product is the batch's.
         if (app.batches && isUse) {
           if (!b.batch) throw new EntryError(400, 'check_failed', ['Choose the batch from the batch records.']);
           const found = await batchWithProduct(tx, app, b.batch);
-          if (!found) throw new EntryError(400, 'check_failed', [`Batch ${b.batch} is not in the batch records (Batchwright).`]);
-          if (!found.batch.inProduction) throw new EntryError(409, 'check_failed', [`Batch ${b.batch} is not in production in Batchwright (${found.batch.status}).`]);
+          if (!found) throw new EntryError(400, 'check_failed', [`Batch ${b.batch} is not in the batch records (${app.batches.source}).`]);
+          if (!found.batch.inProduction) throw new EntryError(409, 'check_failed', [`Batch ${b.batch} is not in production in ${found.batch.source} (${found.batch.status}).`]);
           if (!found.productId) throw new EntryError(409, 'check_failed', [`The product ${found.batch.productCode} of batch ${b.batch} is not in master data: ask your master data editor.`]);
           b.productId = found.productId;
         }
@@ -362,8 +362,8 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
             const n = String(b.data[k] ?? '').trim();
             if (!n) continue;
             const found = await batchWithProduct(tx, app, n);
-            if (!found) throw new EntryError(400, 'check_failed', [`Batch ${n} is not in the batch records (Batchwright).`]);
-            if (must && !found.batch.inProduction) throw new EntryError(409, 'check_failed', [`Batch ${n} is not in production in Batchwright (${found.batch.status}).`]);
+            if (!found) throw new EntryError(400, 'check_failed', [`Batch ${n} is not in the batch records (${app.batches.source}).`]);
+            if (must && !found.batch.inProduction) throw new EntryError(409, 'check_failed', [`Batch ${n} is not in production in ${found.batch.source} (${found.batch.status}).`]);
             b.data[product] = found.productLabel;
           }
         }
@@ -506,7 +506,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         }
         if (app.batches && prev.logbook_type === 'equipment_use' && b.batch && b.batch !== prev.batch) {
           const found = await batchWithProduct(tx, app, b.batch);
-          if (!found) throw new EntryError(400, 'check_failed', [`Batch ${b.batch} is not in the batch records (Batchwright).`]);
+          if (!found) throw new EntryError(400, 'check_failed', [`Batch ${b.batch} is not in the batch records (${app.batches.source}).`]);
           if (!found.productId) throw new EntryError(409, 'check_failed', [`The product ${found.batch.productCode} of batch ${b.batch} is not in master data: ask your master data editor.`]);
           b.productId = found.productId;
         }

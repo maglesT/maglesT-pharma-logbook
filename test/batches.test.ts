@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { sqlBatches } from '../server/batches.js';
+import { mergeBatches, sqlBatches } from '../server/batches.js';
 import { addItem, addProduct, call, freshApp, login, proofFor, seedUser, type TestApp } from './helpers.js';
 import { connect, type Sql } from '../server/db.js';
 import { TEST_DATABASE_URL } from './helpers.js';
@@ -10,6 +10,8 @@ let t: TestApp;
 let reader: Sql;
 const c: Record<string, string> = {};
 const S = `bw_${process.pid}`;
+// D-45: TrueBatch's views of the same names and columns (its own statuses: IN_PRODUCTION until production approval).
+const TB = `tb_${process.pid}`;
 const sig = (u: string) => ({ proof: proofFor(u) });
 const now = () => new Date().toISOString();
 let rmg: number;
@@ -29,6 +31,17 @@ beforeAll(async () => {
       ('OLD25001', 'FG-MET500', '500 mg', 'QA_REVIEWED', now() - interval '400 days', now() - interval '399 days', true);
     insert into ${S}.equipment_use_v1 values ('PCM26011', 'RMG-T1', 'GRAN-T'), ('MET26007', 'CMP-T9', 'COMP-T');
     grant usage on schema ${S} to logbook_app; grant select on all tables in schema ${S} to logbook_app;`);
+  await t.owner.unsafe(`create schema ${TB}`);
+  await t.owner.unsafe(`create table ${TB}.batch_fact_v1 (batch_id uuid, batch_number text, product_code text, strength text, status text, issued_at timestamptz,
+      completed_at timestamptz, released boolean, read_at timestamptz default now(), data_as_of timestamptz);
+    create table ${TB}.equipment_use_v1 (batch_number text, equipment_code text, equipment_type text, room_code text, step text, started_at timestamptz,
+      ended_at timestamptz, read_at timestamptz default now(), data_as_of timestamptz);
+    insert into ${TB}.batch_fact_v1 (batch_number, product_code, status, issued_at, completed_at, released) values
+      ('TBM26001', 'FG-MET500', 'IN_PRODUCTION', now() - interval '1 hour', null, false),
+      ('TBM26002', 'FG-MET500', 'PRODUCTION_APPROVED', now() - interval '4 days', now() - interval '1 day', false),
+      ('MET26007', 'FG-PCM500', 'IN_PRODUCTION', now() - interval '1 hour', null, false);
+    insert into ${TB}.equipment_use_v1 (batch_number, equipment_code, equipment_type, room_code, step) values ('TBM26001', 'CMP-TB1', 'machine', 'COMP-T', 'compression/press');
+    grant usage on schema ${TB} to logbook_app; grant select on all tables in schema ${TB} to logbook_app;`);
   reader = connect(TEST_DATABASE_URL, { role: 'logbook_app' });
   t.app.batches = sqlBatches(reader, S);
   for (const [u, roles] of [['admin', ['admin']], ['qa1', ['qa']], ['op1', ['operator']]] as const) await seedUser(t.owner, u, [...roles]);
@@ -46,6 +59,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await reader?.end();
   await t.owner.unsafe(`drop schema if exists ${S} cascade`);
+  await t.owner.unsafe(`drop schema if exists ${TB} cascade`);
   await t.close();
 });
 
@@ -93,6 +107,65 @@ describe('batches from the batch records (owner 2026-11-12)', () => {
       expect(r.json().message).toContain('Batchwright');
     } finally {
       await t.owner.unsafe(`grant select on all tables in schema ${S} to logbook_app`);
+    }
+  });
+});
+
+describe('batches from TrueBatch as well (D-45)', () => {
+  let bw: ReturnType<typeof sqlBatches>;
+  let press: number;
+  let blender: number;
+  beforeAll(async () => {
+    bw = t.app.batches!;
+    press = await addItem(t, { code: 'CMP-TB1', location: 'COMP-T' });
+    blender = await addItem(t, { code: 'BLD-TB2', location: 'COMP-T' });
+    t.app.batches = mergeBatches([bw, sqlBatches(reader, TB, 'TrueBatch')]);
+  });
+  afterAll(() => { t.app.batches = bw; });
+
+  it('LB-02: with both linked, the list has the batches of both, a TrueBatch batch using this item on top; a number in both is Batchwright\'s', async () => {
+    const r = (await call(t.app, c.op1!, 'GET', `/api/equipment/${press}/batches`)).json();
+    expect(r.linked).toBe(true);
+    expect(r.batches[0]).toMatchObject({ batchNumber: 'TBM26001', source: 'TrueBatch', onThisItem: true, inProduction: true, productName: 'Metformin tablets 500 mg' });
+    const numbers = r.batches.map((b: { batchNumber: string }) => b.batchNumber);
+    expect(numbers).toEqual(expect.arrayContaining(['TBM26001', 'TBM26002', 'PCM26011', 'MET26007']));
+    expect(numbers.filter((b: string) => b === 'MET26007')).toHaveLength(1);
+    expect(r.batches.find((b: { batchNumber: string }) => b.batchNumber === 'MET26007')).toMatchObject({ source: 'Batchwright', productCode: 'FG-MET500' });
+  });
+
+  it('LB-02: a use takes a TrueBatch batch and its product; a TrueBatch batch past production or a number in neither is refused', async () => {
+    expect((await use(blender, { batch: 'TBM26002' })).json().problems).toEqual(['Batch TBM26002 is not in production in TrueBatch (PRODUCTION_APPROVED).']);
+    expect((await use(blender, { batch: 'NONE-1' })).json().problems).toEqual(['Batch NONE-1 is not in the batch records (Batchwright, TrueBatch).']);
+    const ok = await use(press, { batch: 'TBM26001' });
+    expect(ok.statusCode).toBe(201);
+    const [row] = await t.owner<{ code: string; batch: string }[]>`select p.code, e.batch from entries e join products p on p.id = e.product_id where e.id = ${ok.json().id}`;
+    expect(row).toEqual({ code: 'FG-MET500', batch: 'TBM26001' });
+  });
+
+  it('LB-02: with TrueBatch alone, batches come from TrueBatch and the batch-record exceptions on Home are not linked', async () => {
+    t.app.batches = mergeBatches([null, sqlBatches(reader, TB, 'TrueBatch')]);
+    try {
+      const r = (await call(t.app, c.op1!, 'GET', `/api/equipment/${blender}/batches`)).json();
+      expect(r.batches.map((b: { batchNumber: string }) => b.batchNumber).sort()).toEqual(['MET26007', 'TBM26001', 'TBM26002']);
+      expect((await call(t.app, c.op1!, 'GET', '/api/dashboard/exceptions')).json()).toEqual({ linked: false });
+      expect((await use(blender, { batch: 'PCM26011' })).json().problems).toEqual(['Batch PCM26011 is not in the batch records (TrueBatch).']);
+    } finally {
+      t.app.batches = mergeBatches([bw, sqlBatches(reader, TB, 'TrueBatch')]);
+    }
+  });
+
+  it('PL-08: with the link to TrueBatch cut, the list stops with "connection off"; a Batchwright batch is still found, an unknown one is not refused as unknown', async () => {
+    await t.owner.unsafe(`revoke select on all tables in schema ${TB} from logbook_app`);
+    try {
+      const r = await call(t.app, c.op1!, 'GET', `/api/equipment/${blender}/batches`);
+      expect(r.statusCode).toBe(503);
+      expect(r.json().message).toBe('Connection to TrueBatch (batch records) is off. Ask your administrator.');
+      const unknown = await use(blender, { batch: 'NONE-2' });
+      expect(unknown.statusCode).toBe(503);
+      expect(unknown.json().message).toContain('TrueBatch');
+      expect((await use(blender, { batch: 'XYZ26001' })).json().problems[0]).toContain('The product FG-XYZ of batch XYZ26001 is not in master data');
+    } finally {
+      await t.owner.unsafe(`grant select on all tables in schema ${TB} to logbook_app`);
     }
   });
 });

@@ -110,7 +110,8 @@ export function dashboardRoutes(app: FastifyInstance, sql: Sql) {
   });
 
   app.get('/api/dashboard/exceptions', anyUser, async () => {
-    if (!app.batches) return { linked: false };
+    // D-45: abnormal records come from Batchwright only (TrueBatch publishes no such views).
+    if (!app.batches?.abnormal) return { linked: false };
     const a = await app.batches.abnormal(ABNORMAL_DAYS);
     return { linked: true, days: ABNORMAL_DAYS, ...a, analysis: analyse(a) };
   });
