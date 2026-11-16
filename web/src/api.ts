@@ -116,7 +116,6 @@ export interface Settings {
   limits: Record<string, { min?: number; max?: number; unit: string }>;
   pressurePoints: { name: string; critical: false; ccsRef: string; min: number; max: number; unit: string }[];
   voiceLanguages?: string[];
-  validDays?: number;
 }
 
 export interface SettingsVersion {

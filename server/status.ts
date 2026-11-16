@@ -3,7 +3,6 @@ import { careByLocalId, type Care, type Master } from './master.js';
 import type { Qualification, QualStatus } from './qualification.js';
 import { UsesOff, type TrueBatchUse, type TrueBatchUses, type UseSource } from './batches.js';
 import { dayText, timeText } from './dates.js';
-import { VALID_DAYS_DEFAULT } from './logbook-types.js';
 
 // Plant time zone: calibration due dates are plant-local dates (D-19).
 export const PLANT_TZ = process.env.DISPLAY_TZ ?? 'Asia/Kolkata';
@@ -182,13 +181,12 @@ interface Facts {
   has_passed_steriliser_test: boolean;
   failed_glove_ports: string[] | null;
   last_cycle_result: string | null;
-  // D-50: steriliser test, VHP decontamination and glove tests, with their validity in days (approved settings).
+  // D-50: steriliser test, VHP decontamination and glove tests (validity: D-51).
   has_steriliser_tests: boolean;
   last_steriliser_pass_at: Date | null;
   has_vhp_cycles: boolean;
   last_vhp_pass_at: Date | null;
   oldest_glove_test_at: Date | null;
-  valid_days: Record<string, number | null>;
   pressure_out_of_limit: string[] | null;
   today: string;
   now: Date;
@@ -217,8 +215,7 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
       where ${scope} and not exists (select 1 from entries x where x.supersedes = e.id)
     ),
     enabled as (
-      select distinct on (s.logbook_type) s.logbook_type, (s.settings->>'enabled')::boolean as on,
-        (s.settings->>'validDays')::int as valid_days
+      select distinct on (s.logbook_type) s.logbook_type, (s.settings->>'enabled')::boolean as on
       from logbook_settings s
       join signatures g on g.object_type = 'settings' and g.object_id = s.id and g.meaning = 'approved'
       where s.effective_from <= now()
@@ -281,7 +278,7 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
          order by l.data->>'port', l.activity_start desc) g where g.result = 'fail') as failed_glove_ports,
       (select l.data->>'result' from latest l where l.equipment_id = q.id and l.logbook_type = 'steriliser_cycle'
          order by l.activity_start desc limit 1) as last_cycle_result,
-      -- D-50: the sterile facts and their validity (settings validDays).
+      -- D-50: the sterile facts.
       exists (select 1 from latest l where l.equipment_id = q.id and l.logbook_type = 'steriliser_test') as has_steriliser_tests,
       (select max(coalesce(l.activity_end, l.activity_start)) from latest l where l.equipment_id = q.id and l.logbook_type = 'steriliser_test'
          and l.verified and l.data->>'result' = 'pass') as last_steriliser_pass_at,
@@ -292,8 +289,6 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
          select distinct on (l.data->>'port') coalesce(l.activity_end, l.activity_start) as at
          from latest l where l.equipment_id = q.id and l.logbook_type = 'glove_integrity'
          order by l.data->>'port', l.activity_start desc) g) as oldest_glove_test_at,
-      (select jsonb_object_agg(en.logbook_type, en.valid_days) from enabled en
-        where en.logbook_type in ('steriliser_test', 'steriliser_cycle', 'glove_integrity')) as valid_days,
       (select array_agg(p.point) from (
          select distinct on (l.data->>'point') l.data->>'point' as point, (l.data->>'outOfLimit')::boolean as oos
          from latest l where l.equipment_id = q.id and l.logbook_type = 'pressure_reading'
@@ -400,17 +395,19 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   for (const test of f.failed_steriliser_tests ?? []) blockers.push(`Steriliser ${TEST_LABEL[test] ?? test} failed or awaiting verification: a verified pass is needed before use.`);
   for (const port of f.failed_glove_ports ?? []) blockers.push(`Glove integrity failed on port ${port}: replace and pass before use.`);
   if (f.last_cycle_result === 'fail') warnings.push('The last sterilisation cycle failed: see its deviation.');
-  // D-50 (TrueBatch Injectables plan 3b): a steriliser is fit only with a verified passed test within its validity
-  // (default: today); an isolator or RABS only with a verified passed decontamination (VHP) and every glove port tested
-  // within theirs. Each applies to an item that keeps that record. Valid through the last plant day.
-  const sterile: [string, Date | null, string, string][] = [];
-  if (f.has_steriliser_tests) sterile.push(['steriliser_test', f.last_steriliser_pass_at, 'Steriliser test', 'pass a leak or air-removal test']);
-  if (f.has_vhp_cycles) sterile.push(['steriliser_cycle', f.last_vhp_pass_at, 'Decontamination (VHP)', 'decontaminate']);
-  if (f.oldest_glove_test_at) sterile.push(['glove_integrity', f.oldest_glove_test_at, 'Glove test', 'test every glove port']);
+  // D-50 (TrueBatch Injectables plan 3b): a steriliser is fit only with a verified passed test today (fixed: tested every
+  // day it is used); an isolator or RABS only with a verified passed decontamination (VHP) and every glove port tested
+  // within the days its qualification set in master data (D-51, platform D-38: decontaminationValidDays,
+  // gloveTestEveryDays; not set: not fit, never a default). Each applies to an item that keeps that record. Valid
+  // through the last plant day.
+  const sterile: [number | null | undefined, Date | null, string, string, string][] = [];
+  if (f.has_steriliser_tests) sterile.push([1, f.last_steriliser_pass_at, 'Steriliser test', 'pass a leak or air-removal test', '']);
+  if (f.has_vhp_cycles) sterile.push([f.care.decontaminationValidDays, f.last_vhp_pass_at, 'Decontamination (VHP)', 'decontaminate', 'Decontamination valid for (days)']);
+  if (f.oldest_glove_test_at) sterile.push([f.care.gloveTestEveryDays, f.oldest_glove_test_at, 'Glove test', 'test every glove port', 'Glove test every (days)']);
   let sterileValidUntil: string | null = null;
   let sterileState: StatusCode | null = null;
-  for (const [type, at, what, todo] of sterile) {
-    const days = f.valid_days?.[type] ?? VALID_DAYS_DEFAULT[type as keyof typeof VALID_DAYS_DEFAULT];
+  for (const [days, at, what, todo, field] of sterile) {
+    if (!days) { blockers.push(`${what}: its validity is not set in master data ("${field}", from the qualification): not fit for use until it is.`); sterileState = 'sterile_expired'; continue; }
     if (!at) { blockers.push(`${what}: no verified pass on record: ${todo} before use.`); sterileState = 'sterile_expired'; continue; }
     const until = addDays(plantDate(at), days - 1);
     if (!sterileValidUntil || until < sterileValidUntil) sterileValidUntil = until;

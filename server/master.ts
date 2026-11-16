@@ -33,9 +33,12 @@ export interface Care {
   pmFrequencyDays: number | null;
   calibrationFrequencyDays: number | null;
   requalificationFrequencyMonths: number | null;
+  // Platform D-38 (Logbook D-51): an isolator's or RABS's validated sterile timings, from its qualification (days).
+  decontaminationValidDays?: number | null;
+  gloveTestEveryDays?: number | null;
 }
 export const NO_CARE: Care = { cleanHoldHours: null, dirtyHoldHours: null, cleaningBasis: null, cleaningFrequencyHours: null,
-  pmFrequencyDays: null, calibrationFrequencyDays: null, requalificationFrequencyMonths: null };
+  pmFrequencyDays: null, calibrationFrequencyDays: null, requalificationFrequencyMonths: null, decontaminationValidDays: null, gloveTestEveryDays: null };
 const int = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : null);
 // The parameters are read by column name from the row as JSON, so a master_data without them (before its 0003) still works.
 const careOf = (j: Record<string, unknown> | null | undefined, kind: Kind): Care => j ? {
@@ -44,6 +47,7 @@ const careOf = (j: Record<string, unknown> | null | undefined, kind: Kind): Care
   cleaningFrequencyHours: kind === 'area' && j.cleaning_basis === 'frequency' ? int(j.cleaning_frequency_hours) : null,
   pmFrequencyDays: int(j.pm_frequency_days), calibrationFrequencyDays: kind === 'area' ? null : int(j.calibration_frequency_days),
   requalificationFrequencyMonths: int(j.requalification_frequency_months),
+  decontaminationValidDays: int(j.decontamination_valid_days), gloveTestEveryDays: int(j.glove_test_every_days),
 } : { ...NO_CARE, cleaningBasis: kind === 'area' ? 'operation' : null };
 
 export interface MasterProduct { itemId: string; code: string; name: string; version: number; active: boolean }
