@@ -407,7 +407,8 @@ export function getSignProof(meanings: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     const w = window.open(`/sign?meanings=${meanings.join(',')}`, 'medhanta-sign', 'width=480,height=640');
     if (!w) return reject(new Error('Allow pop-up windows for this site to sign.'));
-    const done = (fn: () => void) => { window.removeEventListener('message', onMessage); clearInterval(timer); fn(); };
+    let settled = false;
+    const done = (fn: () => void) => { if (settled) return; settled = true; window.removeEventListener('message', onMessage); clearInterval(timer); fn(); };
     const onMessage = (e: MessageEvent) => {
       if (e.origin !== window.location.origin || e.source !== w) return;
       const m = e.data as { signProof?: string; signError?: string };
@@ -415,6 +416,10 @@ export function getSignProof(meanings: string[]): Promise<string> {
       else if (m.signError) done(() => reject(new Error(m.signError)));
     };
     window.addEventListener('message', onMessage);
-    const timer = setInterval(() => { if (w.closed) done(() => reject(new Error('Signing was cancelled.'))); }, 500);
+    // The sign window posts the proof and then closes itself: a closed window is "cancelled" only if no proof arrives
+    // shortly after (the message can land just after the window is seen closed).
+    const timer = setInterval(() => {
+      if (w.closed) { clearInterval(timer); setTimeout(() => done(() => reject(new Error('Signing was cancelled.'))), 1500); }
+    }, 500);
   });
 }
