@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { api, ApiError, getSignProof, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type BatchChoice, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
+import { api, ApiError, getSignProof, plantDay, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type BatchChoice, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
 import { VoiceButton } from '../components/VoiceNote.js';
 import { OUTCOME_LABEL, STAGE_LABEL } from '../fields.js';
 
@@ -503,7 +503,7 @@ function RequalificationFields({ data, setData, equipment }: { data: Data; setDa
             <dl className="fields pulled">
               <div><dt>Stage</dt><dd>{STAGE_LABEL[String(data.stage)] ?? String(data.stage)}</dd></div>
               <div><dt>Result</dt><dd>{OUTCOME_LABEL[String(data.outcome)] ?? String(data.outcome)}</dd></div>
-              <div><dt>Next requalification due</dt><dd>{String(data.nextDue || '—')}</dd></div>
+              <div><dt>Next requalification due</dt><dd>{plantDay(String(data.nextDue || ''))}</dd></div>
             </dl>
           ) : null}
         </>

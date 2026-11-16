@@ -10,7 +10,7 @@ import type { Sql } from '../db.js';
 import { logbookItem, type Master } from '../master.js';
 import { parseId, requirePermission } from '../auth.js';
 import { recordLines } from '../changes.js';
-import { PLANT_TZ } from '../status.js';
+import { plantDay, plantTime } from '../status.js';
 import { present, type EntryRow } from './entries.js';
 import { auditFor, batchVersions, periodQuery, periodVersions, plantRange, reviewsFor, type AuditRow } from './review.js';
 
@@ -49,7 +49,7 @@ export function runs(text: string): { text: string; font?: string }[] {
 const cellText = (text: string, extra: Record<string, unknown> = {}): Content => ({ text: runs(text), fontSize: 7, ...extra }) as Content;
 
 export const plant = (d: Date | string | null) =>
-  d ? `${new Date(d).toLocaleString('en-GB', { timeZone: PLANT_TZ, dateStyle: 'medium', timeStyle: 'short' })} IST` : '';
+  d ? plantTime(new Date(d)) : '';
 const json = (v: unknown) => (v === null || v === undefined ? '' : JSON.stringify(v));
 // For the PDF: spaces after separators so long values wrap inside the table column.
 
@@ -232,7 +232,7 @@ export function exportRoutes(app: FastifyInstance, sql: Sql) {
     const { from, to } = await plantRange(sql, q.data.fromDay, q.data.toDay);
     const versions = await periodVersions(sql, id, from, to);
     if (versions.length > MAX_VERSIONS) return reply.code(413).send({ error: 'too_large', message: 'Choose a shorter period.' });
-    const report = await build(sql, app.master, `Logbook ${eq.code} · ${eq.name}`, `Period ${q.data.fromDay} to ${q.data.toDay} (plant time)`,
+    const report = await build(sql, app.master, `Logbook ${eq.code} · ${eq.name}`, `Period ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time)`,
       versions, await reviewsFor(sql, id, from, to));
     return send(sql, reply, format.data, `logbook-${eq.code}-${q.data.fromDay}`, report, req.user!.fullName);
   });

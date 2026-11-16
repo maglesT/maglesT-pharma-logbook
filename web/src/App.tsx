@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, can, ApiError, DUE_LABEL, type Equipment, type EquipmentStatus, type Me } from './api.js';
+import { api, can, ApiError, DUE_LABEL, plantDay, type Equipment, type EquipmentStatus, type Me } from './api.js';
 import { Login } from './pages/Login.js';
 import { Home } from './pages/Home.js';
 import { MasterData } from './pages/MasterData.js';
@@ -103,7 +103,7 @@ function PendingBanner({ onOpen }: { onOpen: (id: number) => void }) {
           const eq = byId.get(s.equipmentId);
           if (!eq) return [];
           const out = s.dues.filter((d) => d.overdue || d.soon).map((d) => ({ id: eq.id, overdue: d.overdue, sort: d.due,
-            text: `${eq.code} · ${DUE_LABEL[d.kind]} ${d.overdue ? 'overdue since' : 'due'} ${d.due}` }));
+            text: `${eq.code} · ${DUE_LABEL[d.kind]} ${d.overdue ? 'overdue since' : 'due'} ${plantDay(d.due)}` }));
           if (s.deadline?.overdue) out.push({ id: eq.id, overdue: true, sort: s.deadline.at.slice(0, 10),
             text: `${eq.code} · ${s.deadline.kind === 'frequency' ? 'Scheduled cleaning' : s.deadline.kind === 'dirty_hold' ? 'Cleaning (dirty hold)' : 'Cleaning (clean hold)'} overdue` });
           return out;

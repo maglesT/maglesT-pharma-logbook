@@ -1,4 +1,5 @@
 import { canonical } from './signatures.js';
+import { plantDay, plantTime } from './status.js';
 
 // Master-data changes in words for the history card and its exports (S11): the audit trail keeps
 // the raw old and new values; people read "Location: Block A → Block B".
@@ -18,11 +19,17 @@ const rank = (k: string) => (ORDER.includes(k) ? ORDER.indexOf(k) : ORDER.length
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === 'object' && v !== null && !Array.isArray(v);
 
+// D-49: days and times in words in plant time ("30 Jan 2027"), never ISO.
+const PLAIN_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const MOMENT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
 function text(v: unknown): string {
   if (v === null || v === undefined || v === '') return '—';
   if (v === true) return 'yes';
   if (v === false) return 'no';
-  if (isObj(v) && ('date' in v || 'ref' in v)) return [v.date, v.ref].filter((x) => x !== null && x !== undefined && x !== '').join(', ') || '—';
+  if (v instanceof Date) return plantTime(v);
+  if (typeof v === 'string' && PLAIN_DAY.test(v)) return plantDay(v);
+  if (typeof v === 'string' && MOMENT.test(v)) return plantTime(new Date(v));
+  if (isObj(v) && ('date' in v || 'ref' in v)) return [v.date ? plantDay(String(v.date)) : '', v.ref].filter((x) => x !== null && x !== undefined && x !== '').join(', ') || '—';
   if (isObj(v) || Array.isArray(v)) return canonical(v);
   return String(v).replaceAll('_', ' ');
 }

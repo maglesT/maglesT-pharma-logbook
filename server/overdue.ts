@@ -2,7 +2,7 @@ import type { Sql } from './db.js';
 import { audit } from './audit.js';
 import { logbookItems, type LogbookItem, type Master } from './master.js';
 import { QualificationOff, type Qualification } from './qualification.js';
-import { allStatuses, PLANT_TZ, statusContext, type EquipmentStatus } from './status.js';
+import { allStatuses, PLANT_TZ, plantDay, plantTime, statusContext, type EquipmentStatus } from './status.js';
 import { saveStatuses } from './item-status.js';
 import type { TrueBatchUses } from './batches.js';
 
@@ -19,7 +19,7 @@ export const OVERDUE_LABEL: Record<OverdueKind, string> = {
 
 interface Report { title: string; description: string; immediateAction: string; impactNotes: string }
 
-const plant = (d: Date) => `${d.toLocaleString('en-IN', { timeZone: PLANT_TZ, dateStyle: 'medium', timeStyle: 'short' })} IST`;
+const plant = plantTime;
 const what = (i: LogbookItem) => (i.kind === 'area' ? 'Room' : i.kind === 'instrument' ? 'Instrument' : 'Equipment');
 const named = (i: LogbookItem) => `${what(i)} ${i.code} (${i.name}${i.room ? `, ${i.room}` : ''})`;
 const AUTO = 'Raised automatically by the Logbook.';
@@ -73,22 +73,22 @@ async function report(sql: Sql, kind: OverdueKind, i: LogbookItem, s: EquipmentS
       };
     case 'pm':
       return {
-        title: `Preventive maintenance overdue: ${i.code} (due ${due})`,
-        description: `${named(i)} has preventive maintenance every ${c.pmFrequencyDays ?? '?'} days. It was due ${due} and no verified preventive maintenance was recorded by then. ${AUTO}`,
+        title: `Preventive maintenance overdue: ${i.code} (due ${plantDay(due!)})`,
+        description: `${named(i)} has preventive maintenance every ${c.pmFrequencyDays ?? '?'} days. It was due ${plantDay(due!)} and no verified preventive maintenance was recorded by then. ${AUTO}`,
         immediateAction: `${blocks} its preventive maintenance is recorded and verified. No action recorded yet: this report was raised when the preventive maintenance became overdue.`,
         impactNotes: 'Automatic report from the Logbook: QA and engineering to assess the impact (condition of the item, batches made since the due date).',
       };
     case 'calibration':
       return {
-        title: `Calibration overdue: ${i.code} (due ${due})`,
-        description: `${named(i)} needs calibration${c.calibrationFrequencyDays ? ` every ${c.calibrationFrequencyDays} days` : ''}. It was due ${due} and no passed calibration was recorded by then. ${AUTO}`,
+        title: `Calibration overdue: ${i.code} (due ${plantDay(due!)})`,
+        description: `${named(i)} needs calibration${c.calibrationFrequencyDays ? ` every ${c.calibrationFrequencyDays} days` : ''}. It was due ${plantDay(due!)} and no passed calibration was recorded by then. ${AUTO}`,
         immediateAction: `${blocks} a passed calibration is recorded and verified. No action recorded yet: this report was raised when the calibration became overdue.`,
         impactNotes: 'Automatic report from the Logbook: QA to assess the impact (results and batches that relied on the instrument after the due date).',
       };
     case 'requalification':
       return {
-        title: `Requalification overdue: ${i.code} (due ${due})`,
-        description: `${named(i)} is requalified${c.requalificationFrequencyMonths ? ` every ${c.requalificationFrequencyMonths} months` : ''}. Its requalification was due ${due} and none was completed by then. ${AUTO}`,
+        title: `Requalification overdue: ${i.code} (due ${plantDay(due!)})`,
+        description: `${named(i)} is requalified${c.requalificationFrequencyMonths ? ` every ${c.requalificationFrequencyMonths} months` : ''}. Its requalification was due ${plantDay(due!)} and none was completed by then. ${AUTO}`,
         immediateAction: `${blocks} it is requalified. No action recorded yet: this report was raised when the requalification became overdue.`,
         impactNotes: 'Automatic report from the Logbook: QA to assess the impact (qualified state of the item, batches made since the due date).',
       };

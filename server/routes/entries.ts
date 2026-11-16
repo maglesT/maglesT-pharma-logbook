@@ -223,8 +223,7 @@ async function oneActivityAtATime(tx: Tx, equipmentId: number, type: string, dat
       and (${ignoreEntryId}::bigint is null or e.entry_id <> ${ignoreEntryId}::bigint)
     order by e.activity_start desc limit 1`;
   if (open && checkOpen) {
-    const since = open.activity_start.toLocaleString('en-IN', { timeZone: process.env.DISPLAY_TZ ?? 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
-    throw new EntryError(409, 'busy', [`This item is ${ACTIVITY_LABEL[open.logbook_type] ?? 'busy'} since ${since} IST: end that first. One activity at a time.`]);
+    throw new EntryError(409, 'busy', [`This item is ${ACTIVITY_LABEL[open.logbook_type] ?? 'busy'} since ${plantTime(open.activity_start)}: end that first. One activity at a time.`]);
   }
   const [clash] = await tx<{ logbook_type: string }[]>`
     select e.logbook_type from entries e

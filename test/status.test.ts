@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem, addProduct } from './helpers.js';
+import { timeText } from '../server/dates.js';
 
 let t: TestApp;
 const c: Record<string, string> = {};
@@ -92,8 +93,9 @@ describe('cleaning status (LB-07)', () => {
     await t.owner`update entries set activity_start = activity_start - interval '2 hours', activity_end = activity_end - interval '2 hours' where equipment_id = ${id}`;
     await t.owner`alter table entries enable trigger entries_version_chain`;
     const s = await status(id);
-    const at = new Date(s.cleanUntil).toLocaleString('sv-SE', { timeZone: 'Asia/Kolkata' }).slice(0, 16);
-    expect(s.blockers).toEqual([`Clean-hold time expired at ${at} IST: clean again before use.`]);
+    // D-49: in words, never ISO ("16 Nov 2026, 3:05 pm IST").
+    expect(s.blockers).toEqual([`Clean-hold time expired at ${timeText(s.cleanUntil)}: clean again before use.`]);
+    expect(s.blockers[0]).toMatch(/at \d{1,2} [A-Z][a-z]{2} \d{4}, \d{1,2}:\d\d [ap]m IST:/);
   });
 
   it('LB-10: cleaning cannot be recorded while the equipment is in use', async () => {

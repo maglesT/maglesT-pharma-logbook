@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, ApiError, can, cleaningText, QUAL_LABEL, type Candidate, type Equipment, type Me, type Product } from '../api.js';
+import { api, ApiError, can, cleaningText, plantDay, QUAL_LABEL, type Candidate, type Equipment, type Me, type Product } from '../api.js';
 
 const KIND_LABEL = { equipment: 'Equipment', instrument: 'Instrument', area: 'Area / room' } as const;
 const ask = (what: string) => window.prompt(`Reason for ${what}:`)?.trim();
@@ -141,7 +141,7 @@ function AddItem({ onAdded }: { onAdded: () => Promise<void> }) {
             {row('Preventive maintenance', chosen.pmFrequencyDays ? `every ${chosen.pmFrequencyDays} days` : '')}
             {row('Calibration', chosen.calibrationFrequencyDays ? `every ${chosen.calibrationFrequencyDays} days` : '')}
             {row('Requalification', chosen.requalificationFrequencyMonths ? `every ${chosen.requalificationFrequencyMonths} months` : '')}
-            {list?.qualificationLinked && row('Qualification', `${QUAL_LABEL[chosen.qualification ?? ''] ?? ''}${chosen.nextReviewDue ? ` · next review ${chosen.nextReviewDue}` : ''}`)}
+            {list?.qualificationLinked && row('Qualification', `${QUAL_LABEL[chosen.qualification ?? ''] ?? ''}${chosen.nextReviewDue ? ` · next review ${plantDay(chosen.nextReviewDue)}` : ''}`)}
           </dl>
           <p className="muted">Pulled from master data and the Qualification system: nothing to type.</p>
           <div className="row">

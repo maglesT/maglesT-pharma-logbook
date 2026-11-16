@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { Qualification, QualStatus } from '../server/qualification.js';
 import { QualificationOff } from '../server/qualification.js';
 import { recordOverdue, SOURCE_PREFIX, type Deviations } from '../server/overdue.js';
+import { dayText } from '../server/dates.js';
 import { addItem, asReport, call, freshApp, login, proofFor, seedUser, type TestApp } from './helpers.js';
 
 // Owner 2026-11-12 (D-37): a missed limit (dirty hold, clean hold, scheduled cleaning, PM, calibration, requalification)
@@ -111,7 +112,7 @@ describe('missed limits are recorded for Deviations (owner 2026-11-12, D-37)', (
     expect(await events(b.id)).toHaveLength(0);
     qualCut = false;
     await record();
-    expect((await events(b.id)).map((e) => [e.kind, e.title])).toEqual([['requalification', `Requalification overdue: ${b.code} (due ${day(-3)})`]]);
+    expect((await events(b.id)).map((e) => [e.kind, e.title])).toEqual([['requalification', `Requalification overdue: ${b.code} (due ${dayText(day(-3))})`]]);
     expect(await events(a.id)).toHaveLength(0);
   });
 

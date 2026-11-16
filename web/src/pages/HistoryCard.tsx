@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
-  api, can, ApiError, EMPTY_DETAILS, MEANING_LABEL, plantTime, QUALIFICATION_LABEL, TYPE_LABEL,
+  api, can, ApiError, EMPTY_DETAILS, MEANING_LABEL, plantDay, plantTime, QUALIFICATION_LABEL, TYPE_LABEL,
   type Details, type Equipment, type EquipmentCard, type HistoryEvent, type Me,
 } from '../api.js';
 import { StatusChip } from '../components/StatusChip.js';
@@ -51,11 +51,11 @@ export function HistoryCard({ me, equipment }: { me: Me; equipment: Equipment })
           {d && <>
             <dt>Asset number</dt><dd>{d.assetNumber || '—'}</dd>
             <dt>Capacity / size</dt><dd>{d.capacity || '—'}</dd>
-            <dt>Installed</dt><dd>{d.installationDate ?? '—'}{d.supplier && ` · supplier ${d.supplier}`}</dd>
+            <dt>Installed</dt><dd>{plantDay(d.installationDate)}{d.supplier && ` · supplier ${d.supplier}`}</dd>
             <dt>Qualification</dt>
             <dd>
-              {QUALIFICATION_LABEL[d.qualificationStatus]} · IQ {d.iq.date ?? '—'} {d.iq.ref} · OQ {d.oq.date ?? '—'} {d.oq.ref} · PQ {d.pq.date ?? '—'} {d.pq.ref}
-              {d.lastRequalification && ` · last requalification ${d.lastRequalification}`}
+              {QUALIFICATION_LABEL[d.qualificationStatus]} · IQ {plantDay(d.iq.date)} {d.iq.ref} · OQ {plantDay(d.oq.date)} {d.oq.ref} · PQ {plantDay(d.pq.date)} {d.pq.ref}
+              {d.lastRequalification && ` · last requalification ${plantDay(d.lastRequalification)}`}
             </dd>
             <dt>Product contact / MOC</dt><dd>{d.productContactMoc || '—'}</dd>
             <dt>SOPs</dt><dd>{d.sopRefs || '—'}</dd>

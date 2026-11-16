@@ -74,7 +74,7 @@ test('LB-05: an instrument with an overdue calibration is shown as overdue and c
   await page.getByRole('button', { name: 'Logbooks' }).click();
   await expect(page.getByRole('button', { name: new RegExp(`^${code} `) })).toContainText('Calibration overdue');
   await openLogbook(page, code);
-  await expect(statusBar(page)).toContainText('Calibration overdue since 2020-01-01.');
+  await expect(statusBar(page)).toContainText('Calibration overdue since 1 Jan 2020.');
   const form = await tryUse(page, 'B-E2E-12');
-  await expect(form.locator('.error')).toContainText('Calibration overdue since 2020-01-01.');
+  await expect(form.locator('.error')).toContainText('Calibration overdue since 1 Jan 2020.');
 });

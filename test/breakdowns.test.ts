@@ -139,7 +139,7 @@ describe('breakdown entry (LB-02, LB-06)', () => {
     await signEntry('sup1', 'verify', bd);
     await signEntry('qa', 'release', bd);
     const s = await status(id);
-    expect(s.blockers).toEqual([expect.stringMatching(/^Re-calibration needed after the repair of \d{4}-\d{2}-\d{2}/)]);
+    expect(s.blockers).toEqual([expect.stringMatching(/^Re-calibration needed after the repair of \d{1,2} [A-Z][a-z]{2} \d{4}:/)]);
     const cal = (await entry('eng2', id, { logbookType: 'calibration', activityStart: now(), data: { result: 'pass', nextDue: '2099-01-01' }, signature: sig('eng2') })).json().id;
     expect((await status(id)).blockers).toHaveLength(1);
     await signEntry('qa', 'verify', cal);
@@ -371,7 +371,7 @@ describe('master-data changes in words (S11)', () => {
       { id: 9, version: 2, details: { model: 'VC-250', iq: { date: '2019-06-12', ref: 'IQ-1' }, qualificationStatus: 'requalification_due' } }))
       .toEqual(['Model: VC-200 → VC-250', 'Qualification: qualified → requalification due']);
     expect(changeLines(null, { id: 9, version: 1, details: { model: 'VC-200', serialNumber: '', pq: { date: '2019-07-15', ref: 'PQ-1' } } }))
-      .toEqual(['Model: VC-200', 'PQ: 2019-07-15, PQ-1']);
+      .toEqual(['Model: VC-200', 'PQ: 15 Jul 2019, PQ-1']);
   });
 });
 

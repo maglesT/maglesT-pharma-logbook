@@ -6,7 +6,7 @@ import { needsCalibrationOf, logbookItem, logbookItems, type Master } from '../m
 import { parseId, requirePermission } from '../auth.js';
 import { changeLines } from '../changes.js';
 import { canonical } from '../signatures.js';
-import { PLANT_TZ, statusOf, type StatusContext } from '../status.js';
+import { PLANT_TZ, plantDay, statusOf, type StatusContext } from '../status.js';
 import {
   breakdowns, filterAndSort, breakdownStats, checkDetails, detailsSchema, detailsVersions, inServiceSince, locationHistory, registerQuery,
   type Breakdown,
@@ -199,7 +199,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
       { heading: 'Per failure category', columns: ['Category', 'Failures'], widths: ['*', 60], rows: stats.categories.map((c) => ({ cells: [c.category, String(c.failures)] })) },
     ];
     return sendCopy(reply, 'pdf', name, await tablesPdf(sql, 'Breakdown register',
-      `Breakdowns that occurred ${q.data.fromDay} to ${q.data.toDay} (plant time)${filters ? ` · ${filters}` : ''}. Downtime runs from occurrence to QA release. MTTR: mean downtime of released breakdowns. MTBF: operating time in the period per failure.`,
+      `Breakdowns that occurred ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time)${filters ? ` · ${filters}` : ''}. Downtime runs from occurrence to QA release. MTTR: mean downtime of released breakdowns. MTBF: operating time in the period per failure.`,
       tables, req.user!.fullName));
   });
 
@@ -235,11 +235,11 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
       ['Equipment', `${eq.code} · ${eq.name} (${eq.kind})`], ['Location', eq.location], ['Make / model', `${eq.make ?? ''} ${eq.model ?? ''}`.trim()], ['Serial number', eq.serial ?? ''], ['Status', head.status?.state.replaceAll('_', ' ') ?? ''],
       ...(d ? ([
         ['Asset number', d.assetNumber], ['Capacity / size', d.capacity],
-        ['Installed / supplier', `${d.installationDate ?? ''} ${d.supplier}`.trim()], ['Qualification', `${d.qualificationStatus.replaceAll('_', ' ')} · IQ ${d.iq.date ?? '—'} ${d.iq.ref} · OQ ${d.oq.date ?? '—'} ${d.oq.ref} · PQ ${d.pq.date ?? '—'} ${d.pq.ref} · last requalification ${d.lastRequalification ?? '—'}`],
+        ['Installed / supplier', `${d.installationDate ? plantDay(d.installationDate) : ''} ${d.supplier}`.trim()], ['Qualification', `${d.qualificationStatus.replaceAll('_', ' ')} · IQ ${plantDay(d.iq.date)} ${d.iq.ref} · OQ ${plantDay(d.oq.date)} ${d.oq.ref} · PQ ${plantDay(d.pq.date)} ${d.pq.ref} · last requalification ${plantDay(d.lastRequalification)}`],
         ['Product contact / MOC', d.productContactMoc], ['SOPs', d.sopRefs], ['Details version', `${head.details!.version}, ${head.details!.changedBy}, ${plant(head.details!.changedAt)}`],
       ] as [string, string][]) : [['Details', 'not recorded']] as [string, string][]),
     ];
-    return sendCopy(reply, 'pdf', name, await tablesPdf(sql, `Equipment history card ${eq.code} · ${eq.name}`, `Period ${q.data.fromDay} to ${q.data.toDay} (plant time). All versions; superseded versions grey, breakdowns shaded.`, [
+    return sendCopy(reply, 'pdf', name, await tablesPdf(sql, `Equipment history card ${eq.code} · ${eq.name}`, `Period ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time). All versions; superseded versions grey, breakdowns shaded.`, [
       { heading: 'Equipment', columns: ['Field', 'Value'], widths: [120, '*'], rows: detailRows.map((r) => ({ cells: r })) },
       { heading: 'Location history', columns: ['When', 'By', 'From', 'To', 'Reason'], widths: [90, 90, 120, 120, '*'],
         rows: head.locationHistory.map((l) => ({ cells: [plant(l.at), l.by ?? '', l.from ?? '(created)', l.to, l.reason ?? ''] })) },

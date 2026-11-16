@@ -2,6 +2,7 @@ import type { Sql, Tx } from './db.js';
 import { careByLocalId, type Care, type Master } from './master.js';
 import type { Qualification, QualStatus } from './qualification.js';
 import { UsesOff, type TrueBatchUse, type TrueBatchUses, type UseSource } from './batches.js';
+import { dayText, timeText } from './dates.js';
 
 // Plant time zone: calibration due dates are plant-local dates (D-19).
 export const PLANT_TZ = process.env.DISPLAY_TZ ?? 'Asia/Kolkata';
@@ -69,10 +70,12 @@ export function deadline(kind: CleaningDeadline['kind'], from: Date, hours: numb
   const window = Math.max(WARN_MIN_HOURS, hours * WARN_FRACTION) * 3_600_000;
   return { kind, at, hours, overdue: left < 0, soon: left >= 0 && left <= window };
 }
-// Times in messages carry the plant time zone (e.g. "2026-11-11 11:51 IST"): the published status also has UTC times.
+// Times in messages carry the plant time zone (e.g. "11 Nov 2026, 11:51 am IST"): the published status also has UTC times.
+// D-49: days and times in words, never ISO.
 const ZONE = new Intl.DateTimeFormat('en-IN', { timeZone: PLANT_TZ, timeZoneName: 'short' }).formatToParts(new Date())
   .find((p) => p.type === 'timeZoneName')?.value ?? PLANT_TZ;
-export const plantTime = (d: Date) => `${d.toLocaleString('sv-SE', { timeZone: PLANT_TZ }).slice(0, 16)} ${ZONE}`;
+export const plantTime = (d: Date) => timeText(d, { tz: PLANT_TZ, zone: ZONE });
+export const plantDay = (v: string | Date | null | undefined) => dayText(v, { tz: PLANT_TZ });
 const addDays = (date: string, days: number) => new Date(Date.parse(`${date}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
 const plantDate = (d: Date) => d.toLocaleDateString('en-CA', { timeZone: PLANT_TZ });
 const addMonths = (date: string, months: number) => {
@@ -345,10 +348,10 @@ export function deriveStatus(f: Facts): EquipmentStatus {
           if (!calibrationDue || byFrequency < calibrationDue) calibrationDue = byFrequency;
         }
         if (calibrationDue && calibrationDue < f.today) {
-          blockers.push(`Calibration overdue since ${calibrationDue}.`);
+          blockers.push(`Calibration overdue since ${plantDay(calibrationDue)}.`);
           calState = 'calibration_overdue';
         } else if (calibrationDue && Date.parse(calibrationDue) - Date.parse(f.today) < DUE_SOON_DAYS * 86_400_000) {
-          warnings.push(`Calibration due on ${calibrationDue}.`);
+          warnings.push(`Calibration due on ${plantDay(calibrationDue)}.`);
         }
       }
     }
@@ -357,7 +360,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   // D-25: a repair that needs re-calibration blocks use until a verified passed calibration after it.
   // Where the item is not calibrated in this system, it is a warning (review S9).
   if (f.recalibration_due_since) {
-    const day = f.recalibration_due_since.toLocaleDateString('en-CA', { timeZone: PLANT_TZ });
+    const day = plantDay(f.recalibration_due_since);
     if (f.care.needsCalibration && f.calibrations_enabled) {
       blockers.push(`Re-calibration needed after the repair of ${day}: record and verify a passed calibration.`);
       calState ??= 'not_calibrated';
@@ -425,7 +428,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     const from = f.last_pm_end ?? c.addedAt;
     const d = dueOf('pm', addDays(plantDate(from), c.pmFrequencyDays), f.today, `every ${c.pmFrequencyDays} days`, plantDate(from));
     dues.push(d);
-    if (d.overdue) { blockers.push(`Preventive maintenance overdue since ${d.due}: do the PM before use.`); duesState ??= 'pm_overdue'; }
+    if (d.overdue) { blockers.push(`Preventive maintenance overdue since ${plantDay(d.due)}: do the PM before use.`); duesState ??= 'pm_overdue'; }
   }
   if (calibrationDue && (c.calibrationFrequencyDays || f.care.needsCalibration)) {
     dues.push(dueOf('calibration', calibrationDue, f.today, c.calibrationFrequencyDays ? `every ${c.calibrationFrequencyDays} days` : 'per certificate',
@@ -438,7 +441,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     const d = dueOf('requalification', requalDue, f.today, c.requalificationFrequencyMonths ? `every ${c.requalificationFrequencyMonths} months` : 'per requalification report',
       f.last_requal_at ? plantDate(f.last_requal_at) : null);
     dues.push(d);
-    if (d.overdue) { blockers.push(`Requalification overdue since ${d.due}: requalify before use.`); duesState ??= 'requalification_overdue'; }
+    if (d.overdue) { blockers.push(`Requalification overdue since ${plantDay(d.due)}: requalify before use.`); duesState ??= 'requalification_overdue'; }
   }
   if (f.qual) {
     if (f.qual.nextReviewDue) {
@@ -446,7 +449,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
         c.requalificationFrequencyMonths ? `every ${c.requalificationFrequencyMonths} months` : 'per qualification report',
         c.requalificationFrequencyMonths ? addMonths(f.qual.nextReviewDue, -c.requalificationFrequencyMonths) : (f.last_requal_at ? plantDate(f.last_requal_at) : null));
       dues.push(d);
-      if (d.overdue) { blockers.push(`Requalification overdue since ${d.due}: requalify before use.`); duesState ??= 'requalification_overdue'; }
+      if (d.overdue) { blockers.push(`Requalification overdue since ${plantDay(d.due)}: requalify before use.`); duesState ??= 'requalification_overdue'; }
     }
     if (f.qual.status === 'not_qualified' || f.qual.status === 'requalification_needed') {
       blockers.push(f.qual.status === 'not_qualified' ? 'Not qualified: see the Qualification system.' : 'Requalification needed: see the Qualification system.');

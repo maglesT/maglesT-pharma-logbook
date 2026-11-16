@@ -3,7 +3,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Fields } from '../web/src/fields.js';
 import { UseCheck } from '../web/src/pages/EquipmentPage.js';
-import type { EquipmentStatus } from '../web/src/api.js';
+import { plantTime, type EquipmentStatus } from '../web/src/api.js';
+import { dayText, timeText } from '../server/dates.js';
 
 // What the screens show, rendered as the browser gets it (owner 15 Nov 2026, end-to-end run findings).
 const text = (html: string) => html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
@@ -44,5 +45,24 @@ describe('the check before use and the entry details read in words', () => {
 
   it('LB-07: a late cleaning shows why it is late', () => {
     expect(text(renderToStaticMarkup(createElement(Fields, { data: { cleaningType: 'major', delayReason: 'Crew on line clearance' } })))).toBe('Cleaning major Why late Crew on line clearance');
+  });
+
+  it('LB-19: dates read "30 Jan 2027" in plant time, never ISO, with September as "Sep" (D-49)', () => {
+    expect(dayText('2027-01-30')).toBe('30 Jan 2027');
+    expect(dayText('2027-09-30')).toBe('30 Sep 2027');
+    // A moment is shown on its plant day: 20:00 UTC is the next day in India.
+    expect(dayText(new Date('2027-09-29T20:00:00Z'))).toBe('30 Sep 2027');
+    expect(timeText('2027-09-30T09:35:00Z')).toBe('30 Sep 2027, 3:05 pm IST');
+    expect(timeText('2027-09-29T18:40:00Z')).toBe('30 Sep 2027, 12:10 am IST');
+    expect(plantTime('2026-11-16T06:30:00Z')).toBe('16 Nov 2026, 12:00 pm IST');
+    expect(dayText(null)).toBe('—');
+    const item = text(renderToStaticMarkup(createElement(UseCheck, { status: status({ dues: [
+      { kind: 'pm', due: '2027-02-02', frequency: 'every 90 days', soon: false, overdue: false },
+      { kind: 'calibration', due: '2027-01-30', frequency: 'every 90 days', soon: false, overdue: false }] }) })));
+    expect(item).toContain('Preventive maintenance Due 2 Feb 2027');
+    expect(item).toContain('Calibration Due 30 Jan 2027');
+    const entry = text(renderToStaticMarkup(createElement(Fields, { data: { result: 'pass', nextDue: '2027-10-31', certificateRef: 'CAL-1' } })));
+    expect(entry).toContain('Next due 31 Oct 2027');
+    for (const shown of [item, entry]) expect(shown).not.toMatch(/\d{4}-\d{2}-\d{2}/);
   });
 });

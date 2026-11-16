@@ -4,6 +4,7 @@ import { requirePermission } from '../auth.js';
 import { logbookItems, type LogbookItem } from '../master.js';
 import { LOGBOOK_TYPES } from '../logbook-types.js';
 import type { Abnormal, BatchException } from '../batches.js';
+import { plantDay } from '../status.js';
 
 // Owner 2026-11-13 (D-41): the home dashboard in three parts.
 //  1. Compliance: share of scheduled activities (cleaning, PM, calibration, requalification) done before their deadline.
@@ -118,7 +119,6 @@ export function dashboardRoutes(app: FastifyInstance, sql: Sql) {
 }
 
 const OPEN = (e: BatchException) => e.status !== 'DISPOSITIONED' && e.status !== 'CLOSED';
-const plantDay = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short' });
 const TYPE_WORDS: Record<string, string> = {
   MANUAL_ENTRY_FALLBACK: 'manual weight entries (balance not read automatically)', PROCESS_MANUAL_FALLBACK: 'manual process values (instrument not read automatically)',
   IPC_MANUAL_ENTRY: 'manual in-process check values', IPC_CHECK_FAILED: 'failed in-process checks', OPERATOR_RAISED: 'exceptions raised by operators',

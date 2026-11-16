@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { api, daysLeft, DEADLINE_LABEL, plantTime, timeLeft, TYPE_LABEL, type Due, type Entry, type Equipment, type EquipmentStatus, type Me } from '../api.js';
+import { api, daysLeft, DEADLINE_LABEL, plantDay, plantTime, timeLeft, timeText, TYPE_LABEL, type Due, type Entry, type Equipment, type EquipmentStatus, type Me } from '../api.js';
 
 // Owner 2026-11-13 (D-41): the home dashboard in three parts.
 //  1. Compliance: on-time completion of scheduled activities; dues in four columns (cleaning, PM, calibration,
@@ -27,7 +27,7 @@ interface ExcData { linked: boolean; days?: number; exceptions?: Exc[];
 interface Overdue { linked: boolean; events: { id: number; equipmentId: number; code: string; name: string; label: string; dueAt: string; deviation: { number: string; status: string } | null }[] }
 
 const C = { ready: '#17803d', dirty: '#b7791f', due: '#f0b429', over: '#c0352b', life: '#a3195b', co: '#6b4fbb', use: '#1f63b8', grey: '#8a8f96' };
-const shortTime = (iso: string) => new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+const shortTime = (iso: string) => timeText(iso, { withYear: false, zone: '' });
 const age = (h: number) => (h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${Math.round(h)} h` : `${Math.round(h / 24)} days`);
 
 // ---- graph sections ----
@@ -206,7 +206,7 @@ function DueColumns({ items, onOpen }: { items: Item[]; onOpen: (id: number) => 
   const cleaning = items.filter((i) => i.st.deadline && (i.st.deadline.overdue || i.st.deadline.soon))
     .map((i) => ({ i, over: i.st.deadline!.overdue, when: i.st.deadline!.at, text: `${DEADLINE_LABEL[i.st.deadline!.kind]} · ${i.st.deadline!.overdue ? `overdue by ${timeLeft(i.st.deadline!.at)}` : `ends in ${timeLeft(i.st.deadline!.at)}`}` }));
   const col = (k: Due['kind']) => items.flatMap((i) => i.st.dues.filter((d) => d.kind === k && (d.overdue || d.soon))
-    .map((d) => ({ i, over: d.overdue, when: d.due, text: `${d.due} · ${daysLeft(d.due)}` })));
+    .map((d) => ({ i, over: d.overdue, when: d.due, text: `${plantDay(d.due)} · ${daysLeft(d.due)}` })));
   const cols = [
     { key: 'cleaning', title: 'Cleaning', rows: cleaning }, { key: 'pm', title: 'Preventive maintenance', rows: col('pm') },
     { key: 'cal', title: 'Calibration', rows: col('calibration') }, { key: 'rq', title: 'Requalification', rows: col('requalification') },

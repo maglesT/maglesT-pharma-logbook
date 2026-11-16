@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api, cleaningText, daysLeft, type Due, can, ApiError, MEANING_LABEL, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
+import { api, cleaningText, daysLeft, type Due, can, ApiError, MEANING_LABEL, plantDay, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
@@ -154,7 +154,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
           {status.inUse && <span>Batch {status.inUse.batch} {status.inUse.stage && `· ${status.inUse.stage}`}{status.inUse.source !== 'Logbook' && ` · in ${status.inUse.source}`} since {plantTime(status.inUse.since)}</span>}
           {!status.inUse && status.lastTrueBatchUse && <span>Last used by batch {status.lastTrueBatchUse.batch} in {status.lastTrueBatchUse.source}{status.lastTrueBatchUse.step && ` (${status.lastTrueBatchUse.step})`}, ended {plantTime(status.lastTrueBatchUse.endedAt)}</span>}
           {status.cleanUntil && !status.blockers.length && <span>Clean until {plantTime(status.cleanUntil)}</span>}
-          {status.calibrationDue && <span>Calibration due {status.calibrationDue.slice(0, 10)}</span>}
+          {status.calibrationDue && <span>Calibration due {plantDay(status.calibrationDue)}</span>}
           {[...status.blockers, ...status.warnings].map((b) => <span key={b} className="reason">{b}</span>)}
         </div>
       )}
@@ -328,7 +328,7 @@ export function UseCheck({ status: s }: { status: EquipmentStatus }) {
     const k = bad ? 'bad' : warn ? 'warn' : none ? 'none' : 'ok';
     return <li className={k}><span aria-hidden="true">{{ bad: '✕', warn: '!', none: '–', ok: '✓' }[k]}</span><b>{label}</b><span>{text}</span></li>;
   };
-  const dueText = (d: Due | undefined, none: string) => (d ? `${d.overdue ? 'Overdue since' : 'Due'} ${d.due} (${daysLeft(d.due)})` : none);
+  const dueText = (d: Due | undefined, none: string) => (d ? `${d.overdue ? 'Overdue since' : 'Due'} ${plantDay(d.due)} (${daysLeft(d.due)})` : none);
   const pm = due('pm');
   const cal = due('calibration');
   const rq = due('requalification');

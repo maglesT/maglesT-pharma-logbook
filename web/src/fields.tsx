@@ -1,4 +1,4 @@
-import { plantTime, VOICE_LANGUAGE_LABEL, type Part } from './api.js';
+import { plantDay, plantTime, VOICE_LANGUAGE_LABEL, type Part } from './api.js';
 
 // Field labels in the order they are shown; a breakdown reads top to bottom from failure to repair.
 export const LABELS: Record<string, string> = {
@@ -40,13 +40,14 @@ const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object
 const text = (v: unknown): string =>
   v === null || v === undefined || v === '' ? '—'
   : v === true ? 'yes' : v === false ? 'no'
-  : isObj(v) && ('date' in v || 'ref' in v) ? [v.date, v.ref].filter(Boolean).join(', ') || '—'
+  : isObj(v) && ('date' in v || 'ref' in v) ? [v.date ? plantDay(String(v.date)) : '', v.ref].filter(Boolean).join(', ') || '—'
   : typeof v === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v) ? plantTime(v)
+  : typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) ? plantDay(v)
   : Array.isArray(v) ? (v.every((x) => !isObj(x)) ? v.map(text).join(', ') : `${v.length} item${v.length === 1 ? '' : 's'}`)
   : isObj(v) ? Object.entries(v).map(([k, x]) => `${LABELS[k] ?? k}: ${text(x)}`).join('; ')
   : String(v).replaceAll('_', ' ');
 export const fieldValue = (k: string, v: unknown): string =>
-  k === 'nextDue' ? String(v).slice(0, 10)
+  k === 'nextDue' ? plantDay(String(v).slice(0, 10))
   : (k === 'detectedLanguage' || k === 'requestedLanguage') && typeof v === 'string' ? VOICE_LANGUAGE_LABEL[v] ?? v
   : k === 'durationMs' && typeof v === 'number' ? `${(v / 1000).toFixed(1)} s`
   : k === 'occurredAt' ? plantTime(String(v))

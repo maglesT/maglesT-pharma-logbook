@@ -129,13 +129,13 @@ describe('uses recorded in TrueBatch count in the status (D-46)', () => {
     await tbUse('TB260002', a.code, { startedMinutesAgo: 200, endedMinutesAgo: 120 });
     const s = await status(a.id);
     expect(s.state).toBe('dirty_expired');
-    expect(s.blockers[0]).toMatch(/^Dirty-hold time expired at \d{4}-\d\d-\d\d \d\d:\d\d IST: the cleaning is late; clean, verify and record why\.$/);
+    expect(s.blockers[0]).toMatch(/^Dirty-hold time expired at \d{1,2} [A-Z][a-z]{2} \d{4}, \d{1,2}:\d\d [ap]m IST: the cleaning is late; clean, verify and record why\.$/);
     await tick();
     const [ev] = await t.owner<{ description: string }[]>`select description from overdue_events where equipment_id = ${a.id} and kind = 'dirty_hold'`;
     expect(ev!.description).toContain('batch TB260002 in TrueBatch (granulation/charge-api)');
     const noReason = await cleaning(a.id);
     expect(noReason.statusCode).toBe(400);
-    expect(noReason.json().problems[0]).toMatch(/^The dirty hold ran out at \d{4}-\d\d-\d\d \d\d:\d\d IST: give the reason the cleaning is late\.$/);
+    expect(noReason.json().problems[0]).toMatch(/^The dirty hold ran out at \d{1,2} [A-Z][a-z]{2} \d{4}, \d{1,2}:\d\d [ap]m IST: give the reason the cleaning is late\.$/);
     const ok = await cleaning(a.id, { delayReason: 'Cleaning crew on the line clearance of RM-104' });
     expect(ok.statusCode).toBe(201);
     const [row] = await t.owner<{ data: Record<string, unknown> }[]>`select data from entries where id = ${ok.json().id}`;

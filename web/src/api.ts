@@ -1,3 +1,7 @@
+// D-49: one date format for the server and the pages (no Node APIs in it).
+import { dayText, timeText } from '../../server/dates.js';
+export { timeText };
+
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -42,11 +46,12 @@ export interface Alert {
   createdAt: string;
 }
 
-// LB-19: times are shown in plant time with the zone label.
+// LB-19: times are shown in plant time with the zone label. D-49: days in words ("30 Jan 2027"), never ISO.
 export function plantTime(iso: string | null): string {
-  if (!iso) return '—';
-  const s = new Date(iso).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', dateStyle: 'medium', timeStyle: 'short' });
-  return `${s} IST`;
+  return timeText(iso);
+}
+export function plantDay(day: string | null | undefined): string {
+  return dayText(day);
 }
 
 export interface Equipment extends Care {
