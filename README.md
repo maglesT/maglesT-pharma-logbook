@@ -56,7 +56,8 @@ every minute and after each entry; `checked_at` says when. Batches come from Bat
 stage using it closes, or the batch is approved or terminated; D-49), dirty after.
 TrueBatch Tablets Packing's uses (its `equipment_use_v1`, `TRUEBATCH_PACKING_DATABASE_URL`) count the same way, merged with
 TrueBatch's (D-47); each link off is named in its own warning. Steps are named by the view's `step_name` ("Stage › Step")
-when it has one, else by the step key (D-48).
+when it has one, else by the step key (D-48). A use ends with *Why the use ends* (D-49), required when its batch is from linked batch
+records. Days and times are shown as "30 Jan 2027, 3:05 pm IST" in plant time, never ISO (D-49).
 
 **Read-only role for the Deviations system (D-28).** Migration 0013 creates the role `logbook_report` without a login. (On the Medhanta platform, D-29, it is not created: other products read the views through platform links.)
 It can read the four views in the schema `report` (`equipment_v1`, `entry_v1`, `calibration_v1`, `logbook_sop_v1`) and
