@@ -50,6 +50,8 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
   app.get('/api/equipment', anyUser, async () => (await logbookItems(sql, app.master)).map(view));
 
   // The master items that can be added: not in the Logbook yet, active, and (with the Qualification link) qualified.
+  // D-53: an instrument is calibrated, not qualified (the Qualification product holds equipment and rooms only): it is
+  // added without a qualification, and its calibration decides its status.
   app.get('/api/equipment/candidates', admin, async () => {
     const [items, inLogbook] = await Promise.all([app.master.items(),
       sql<{ item_id: string }[]>`select item_id::text from equipment where item_id is not null`]);
@@ -61,7 +63,7 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
         const q = qual?.get(m.itemId);
         return { itemId: m.itemId, code: m.code, name: m.name, kind: m.kind, location: m.room ?? '', make: m.make, model: m.model, serial: m.serial,
           ...m.care, qualification: q?.status ?? (qual ? 'not_in_qualification' : null), nextReviewDue: q?.nextReviewDue ?? null,
-          selectable: !qual || QUALIFIED.includes(q?.status ?? '') };
+          selectable: !qual || m.kind === 'instrument' || QUALIFIED.includes(q?.status ?? '') };
       }).sort((a, b) => a.code.localeCompare(b.code)),
     };
   });
@@ -72,7 +74,7 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
     const m = (await app.master.items()).find((x) => x.itemId === body.data.itemId);
     if (!m) return reply.code(404).send({ error: 'not_found', message: 'This item is not in master data.' });
     if (!m.active) return reply.code(409).send({ error: 'inactive_item', message: `${m.code} is not active in master data.` });
-    if (app.qualification) {
+    if (app.qualification && m.kind !== 'instrument') {
       const q = (await app.qualification.statuses()).get(m.itemId);
       if (!q || !QUALIFIED.includes(q.status)) {
         return reply.code(409).send({ error: 'not_qualified', message: `${m.code} is not qualified in the Qualification system${q ? ` (${q.status.replaceAll('_', ' ')})` : ''}: it cannot be added.` });

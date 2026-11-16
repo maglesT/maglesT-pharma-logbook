@@ -88,6 +88,20 @@ describe('adding an item by its ID (owner, point 4)', () => {
     expect((await call(t.app, c.op1!, 'POST', '/api/equipment', { itemId: ok.itemId, reason: 'x' })).statusCode).toBe(403);
   });
 
+  it('PL-08 D-53: an instrument is calibrated, not qualified: it can be chosen and added without a qualification; its calibration decides its status', async () => {
+    const ins = masterItem('AD-INS', 'instrument', { calibrationFrequencyDays: 180 });
+    const row = (await call(t.app, c.admin!, 'GET', '/api/equipment/candidates')).json().items.find((x: { code: string }) => x.code === 'AD-INS');
+    expect(row).toMatchObject({ kind: 'instrument', qualification: 'not_in_qualification', selectable: true });
+    const added = await call(t.app, c.admin!, 'POST', '/api/equipment', { itemId: ins.itemId, reason: 'Filter integrity tester for the sterile filtration room' });
+    expect(added.statusCode).toBe(201);
+    // Equipment and rooms still need their qualification.
+    const eq = masterItem('AD-EQ2');
+    expect((await call(t.app, c.admin!, 'POST', '/api/equipment', { itemId: eq.itemId, reason: 'r' })).json().error).toBe('not_qualified');
+    // Not qualified is never said of an instrument: no qualification blocker in its status.
+    const s = (await call(t.app, c.qa!, 'GET', `/api/equipment/${added.json().id}/status`)).json();
+    expect(s.blockers.join(' ')).not.toMatch(/qualif/i);
+  });
+
   it('PL-08: a change of a hold time in master data shows at once; the Logbook keeps no copy', async () => {
     const id = await item({ cleanHoldHours: 24 });
     const code = `RD-${n}`;
