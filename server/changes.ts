@@ -55,7 +55,7 @@ const MORE: Record<string, string> = {
   logbookType: 'Logbook', entryVersionId: 'Entry version no.', basedOn: 'Past breakdowns used', modelVersion: 'Model', responseId: 'Model response ID',
   entryId: 'Entry no.', enteredAt: 'Entered at', enteredBy: 'Entered by (user no.)', supersedes: 'Replaces version no.', productId: 'Product no.',
   workDone: 'Work done', rootCause: 'Root cause', description: 'What happened', failureCategory: 'Failure category', occurredAt: 'Occurred',
-  postRepairChecks: 'Post-repair checks', partNumber: 'Part no.', lotSerial: 'Lot / serial no.', finalText: 'Confirmed text', lateReason: 'Late because',
+  postRepairChecks: 'Post-repair checks', partNumber: 'Part no.', lotSerial: 'Lot / serial no.', finalText: 'Confirmed text', lateReason: 'Late because', endReason: 'Why ended',
   transcribe: 'Transcription', translate: 'Translation', data: 'Entry data', partsNone: 'No parts used', cleaningType: 'Cleaning',
 };
 const keyName = (k: string) => MORE[k] ?? LABEL[k] ?? k.replace(/([a-z])([A-Z])/g, (_m, a: string, b: string) => `${a} ${b.toLowerCase()}`).replace(/^\w/, (c) => c.toUpperCase());

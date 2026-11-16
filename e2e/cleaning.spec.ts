@@ -18,8 +18,13 @@ test('LB-07: after use the equipment is dirty and blocked until a cleaning verif
   await form.getByRole('button', { name: 'Save' }).click();
   await expect(statusBar(page)).toContainText('In use');
   await expect(statusBar(page)).toContainText('Batch B-E2E-1 · Blending');
+  // D-49: "End use" offers a reason (optional here: the batch was typed, not from another product's batch records).
   await page.getByRole('button', { name: 'End use' }).click();
+  await expect(form.getByLabel('Why the use ends')).toBeVisible();
+  await form.getByLabel('Why the use ends').fill('Batch finished');
+  await form.getByRole('button', { name: 'End use' }).click();
   await expect(statusBar(page)).toContainText('Dirty');
+  await expect(page.locator('table')).toContainText('Batch finished');
 
   // A new use is refused with the reason.
   await newEntry(page, 'Operation (use)');

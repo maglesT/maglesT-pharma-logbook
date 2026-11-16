@@ -185,6 +185,8 @@ export interface Entry {
   signatures: EntrySignature[];
   awaitingVerification?: boolean;
   inProgress?: boolean;
+  // D-49: on an open use, the products whose batch records the batch is from: "End use" then needs a reason.
+  endReasonFrom?: string | null;
   // Whether the logged-in user may correct this entry (D-17), on an equipment logbook (S11).
   mayCorrect?: boolean;
   // D-26: voice notes whose signed English text is in this version.

@@ -40,6 +40,8 @@ const createBody = z.object({
 const completeBody = z.object({
   activityEnd: z.coerce.date(),
   lateReason: z.string().trim().max(500).optional(),
+  // D-49: why a use ends (data field endReason).
+  endReason: z.string().trim().max(500).optional(),
   data: z.record(z.unknown()).optional(),
   signature: credentials.optional(),
   ...voiceFields,
@@ -170,6 +172,12 @@ function cleaningFits(status: Pick<EquipmentStatus, 'inUse' | 'lastUseEnd'>, sta
     throw new EntryError(400, 'check_failed', ['A cleaning cannot start before the last use ended.']);
   }
 }
+
+// D-49: ending a use is a Logbook entry like any other, so it may say why; it must when the batch is from another product's
+// batch records (Batchwright, TrueBatch), which the Logbook does not keep: the reason is the record of why the use ended
+// here. Returns those products, or null when the reason is optional. The screen asks the same rule (S11).
+export const endReasonFrom = (app: FastifyInstance, type: string, batch: string | null) =>
+  type === 'equipment_use' && batch && app.batches ? app.batches.source.replaceAll(', ', ' or ') : null;
 
 // A1 8.45: a cycle identifier is unique per steriliser. Checked under the equipment lock.
 async function checkCycleId(tx: Tx, type: string, equipmentId: number, data: Record<string, unknown>, entryId: number | null) {
@@ -435,6 +443,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
       const repair = peek.logbook_type === 'maintenance';
       if (repair && (!b.signature || !b.data)) throw new EntryError(400, 'signature_required');
       if (!repair && b.voiceNotes.length) throw new EntryError(400, 'check_failed', ['Ending a use takes no voice note.']);
+      if (b.endReason && peek.logbook_type !== 'equipment_use') throw new EntryError(400, 'check_failed', ['Only a use ends with a reason.']);
       const signer = repair ? await authenticateSigner(sql, app.proofKey, user, b.signature!,
         { objectType: 'entry', objectId: id, meaning: 'performed', needs: [recordCode(peek.logbook_type)!] }) : null;
       const voice = await voiceSigner(sql, app.proofKey, user, b);
@@ -445,6 +454,11 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (b.activityEnd < prev.activity_start) throw new EntryError(400, 'check_failed', ['The end cannot be before the start.']);
         const late = timing(await dbNow(tx), [b.activityEnd], b.lateReason);
         let data = prev.data;
+        const from = endReasonFrom(app, prev.logbook_type, prev.batch);
+        if (from && !b.endReason) {
+          throw new EntryError(400, 'end_reason_required', [`Batch ${prev.batch} is from the batch records of ${from}: give the reason the use ends.`]);
+        }
+        if (b.endReason) data = { ...data, endReason: b.endReason };
         if (repair) {
           const eq = await loadEquipment(tx, prev.equipment_id);
           const [s] = await tx<{ settings: LogbookSettings }[]>`select settings from logbook_settings where id = ${prev.settings_id}`;
@@ -617,7 +631,9 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
   app.get<{ Params: { id: string } }>('/api/equipment/:id/entries', anyUser, async (req, reply) => {
     const id = parseId(req.params.id);
     if (id === null) return reply.code(400).send({ error: 'invalid_request' });
-    return withMayCorrect(sql, req.user!, await listEntries(sql, sql`e.equipment_id = ${id}`));
+    const list = await listEntries(sql, sql`e.equipment_id = ${id}`);
+    // D-49: an open use says whether "End use" needs a reason, by the server's own rule.
+    return withMayCorrect(sql, req.user!, list.map((e) => (e.inProgress ? { ...e, endReasonFrom: endReasonFrom(app, e.logbookType, e.batch) } : e)));
   });
 
   // All versions of one entry, oldest first, with their signatures (LB-17: originals stay readable).

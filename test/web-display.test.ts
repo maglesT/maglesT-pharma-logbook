@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Fields } from '../web/src/fields.js';
-import { UseCheck } from '../web/src/pages/EquipmentPage.js';
-import { plantTime, type EquipmentStatus } from '../web/src/api.js';
+import { EndUseDialog, UseCheck } from '../web/src/pages/EquipmentPage.js';
+import { plantTime, type Entry, type EquipmentStatus } from '../web/src/api.js';
 import { dayText, timeText } from '../server/dates.js';
 
 // What the screens show, rendered as the browser gets it (owner 15 Nov 2026, end-to-end run findings).
@@ -64,5 +64,18 @@ describe('the check before use and the entry details read in words', () => {
     const entry = text(renderToStaticMarkup(createElement(Fields, { data: { result: 'pass', nextDue: '2027-10-31', certificateRef: 'CAL-1' } })));
     expect(entry).toContain('Next due 31 Oct 2027');
     for (const shown of [item, entry]) expect(shown).not.toMatch(/\d{4}-\d{2}-\d{2}/);
+  });
+
+  it('LB-01: "End use" always shows the reason; it is marked required for a batch from another product\'s batch records (D-49)', () => {
+    const use = { id: 1, logbookType: 'equipment_use', batch: 'RAB26001', data: {} } as unknown as Entry;
+    const dialog = (from: string | null) => text(renderToStaticMarkup(createElement(EndUseDialog,
+      { entry: { ...use, endReasonFrom: from }, what: 'EQ-BLS-01 · batch RAB26001', onEnd: async () => {}, onCancel: () => {} })));
+    expect(dialog(null)).toContain('Why the use ends (optional)');
+    expect(dialog(null)).not.toContain('Required');
+    expect(dialog('Batchwright')).toContain('Why the use ends');
+    expect(dialog('Batchwright')).not.toContain('(optional)');
+    expect(dialog('Batchwright')).toContain('Required: batch RAB26001 is from the batch records of Batchwright.');
+    expect(renderToStaticMarkup(createElement(EndUseDialog, { entry: use, what: '', onEnd: async () => {}, onCancel: () => {} })))
+      .toContain('<option value="Batch record withdrawn">');
   });
 });

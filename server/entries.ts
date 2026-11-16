@@ -21,7 +21,12 @@ const isRealDate = (day: string) => {
 const outOfLimit = { comment: z.string().trim().max(1000).default(''), deviationRef: z.string().trim().max(60).default('') };
 
 export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
-  equipment_use: z.object({ stage: z.string().trim().max(80).default(''), remarks: z.string().trim().max(1000).default('') }),
+  equipment_use: z.object({
+    stage: z.string().trim().max(80).default(''),
+    remarks: z.string().trim().max(1000).default(''),
+    // D-49: why the use ended, given with "End use" (required for a batch from another product's batch records).
+    endReason: z.string().trim().max(500).optional(),
+  }),
   equipment_cleaning: z.object({
     cleaningType: z.enum(['batch_to_batch', 'product_change', 'major']),
     checklist: checklistAnswers,

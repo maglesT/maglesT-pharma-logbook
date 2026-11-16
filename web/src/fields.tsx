@@ -12,6 +12,8 @@ export const LABELS: Record<string, string> = {
   result: 'Result', certificateRef: 'Certificate', nextDue: 'Next due', notes: 'Notes', remarks: 'Remarks', comment: 'Comment', deviationRef: 'Deviation',
   // D-46: why a cleaning ended after its dirty hold ran out.
   delayReason: 'Why late',
+  // D-49: why a use ended ("End use").
+  endReason: 'Why ended',
 };
 // Master data, users and settings, as named in the audit trail.
 Object.assign(LABELS, {

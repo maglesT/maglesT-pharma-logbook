@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { api, cleaningText, daysLeft, type Due, can, ApiError, MEANING_LABEL, plantDay, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
@@ -96,6 +96,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
     void api<VoiceConfig>('GET', '/api/voice-notes/config').then(setVoice).catch(() => setVoice(undefined));
   }, []);
   const [error, setError] = useState('');
+  const [ending, setEnding] = useState<Entry | null>(null);
 
   const load = async () => {
     setEntries(await api<Entry[]>('GET', `/api/equipment/${equipment.id}/entries`));
@@ -123,19 +124,25 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
   const productName = (id: number | null) => products.find((p) => p.id === id)?.code ?? '';
   const isVerifier = can(me, 'entry.verify');
 
-  const endUse = async (e: Entry) => {
+  // Ends a use (D-49: with its reason, from its dialog, which shows a refusal) or a change over (at once).
+  const complete = async (e: Entry, endReason?: string) => {
     setError('');
-    const at = new Date().toISOString();
+    const body = { activityEnd: new Date().toISOString(), ...(endReason ? { endReason } : {}) };
     try {
-      await api('POST', `/api/entries/${e.id}/complete`, { activityEnd: at });
+      await api('POST', `/api/entries/${e.id}/complete`, body);
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'late_reason_required') {
-        const reason = window.prompt('This is a late entry. Reason:')?.trim();
-        if (reason) {
-          await api('POST', `/api/entries/${e.id}/complete`, { activityEnd: at, lateReason: reason }).catch((again: Error) => setError(again.message));
-        }
-      } else setError((err as Error).message);
+      if (!(err instanceof ApiError && err.code === 'late_reason_required')) throw err;
+      const reason = window.prompt('This is a late entry. Reason:')?.trim();
+      if (reason) await api('POST', `/api/entries/${e.id}/complete`, { ...body, lateReason: reason });
     }
+  };
+  const endChangeOver = async (e: Entry) => {
+    await complete(e).catch((err: Error) => setError(err.message));
+    await load();
+  };
+  const endUse = async (e: Entry, endReason: string) => {
+    await complete(e, endReason);
+    setEnding(null);
     await load();
   };
 
@@ -209,8 +216,8 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
                 {e.awaitingVerification && <span className="chip chip-warn">Awaiting verification</span>}
               </td>
               <td className="actions-cell">
-                {e.inProgress && e.logbookType === 'equipment_use' && <button onClick={() => endUse(e)}>End use</button>}
-                {e.inProgress && e.logbookType === 'change_over' && mayRecord('change_over') && <button onClick={() => endUse(e)}>End change over</button>}
+                {e.inProgress && e.logbookType === 'equipment_use' && <button onClick={() => setEnding(e)}>End use</button>}
+                {e.inProgress && e.logbookType === 'change_over' && mayRecord('change_over') && <button onClick={() => endChangeOver(e)}>End change over</button>}
                 {e.inProgress && e.logbookType === 'maintenance' && mayRecord('maintenance') && (
                   <button onClick={() => setForm({ type: 'maintenance', completing: e })}>Complete repair</button>
                 )}
@@ -249,6 +256,10 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
             await load();
           }}
         />
+      )}
+      {ending && (
+        <EndUseDialog entry={ending} what={`${equipment.code} · batch ${ending.batch}, in use since ${plantTime(ending.activityStart)}`}
+          onEnd={(reason) => endUse(ending, reason)} onCancel={() => setEnding(null)} />
       )}
       {verifying && (
         <SignDialog
@@ -311,6 +322,46 @@ export function VoiceLinks({ e, onOpen }: { e: Entry; onOpen: (id: number) => vo
         </button>
       ))}
     </>
+  );
+}
+
+// D-49: "End use" always offers a reason, picked or typed; it is required when the batch is from another product's
+// batch records (the server says which: endReasonFrom).
+const END_REASONS = ['The batch is done with it', 'Batch finished', 'Batch stopped or cancelled', 'Batch record withdrawn'];
+export function EndUseDialog({ entry, what, onEnd, onCancel }: { entry: Entry; what: string; onEnd: (reason: string) => Promise<void>; onCancel: () => void }) {
+  const [reason, setReason] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const from = entry.endReasonFrom ?? null;
+  const submit = async (ev: FormEvent) => {
+    ev.preventDefault();
+    if (from && !reason.trim()) { setError('Give the reason the use ends.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      await onEnd(reason.trim());
+    } catch (err) {
+      setError(err instanceof ApiError && err.problems.length ? err.problems.join(' ') : (err as Error).message);
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="overlay" role="dialog" aria-modal="true">
+      <form className="card dialog" onSubmit={submit}>
+        <h2>End use</h2>
+        <p>{what}</p>
+        <label>Why the use ends{from ? '' : ' (optional)'}
+          <input list="end-reasons" value={reason} onChange={(ev) => setReason(ev.target.value)} maxLength={500} required={Boolean(from)} aria-label="Why the use ends" />
+        </label>
+        <datalist id="end-reasons">{END_REASONS.map((r) => <option key={r} value={r} />)}</datalist>
+        {from && <p className="muted">Required: batch {entry.batch} is from the batch records of {from}.</p>}
+        {error && <p className="error">{error}</p>}
+        <div className="actions">
+          <button type="button" onClick={onCancel}>Cancel</button>
+          <button className="primary" type="submit" disabled={busy}>End use</button>
+        </div>
+      </form>
+    </div>
   );
 }
 

@@ -78,6 +78,20 @@ describe('equipment use (LB-01, LB-10)', () => {
     expect(v2.activityEnd).not.toBeNull();
   });
 
+  it('LB-01: "End use" may say why the use ended; without batch records linked the reason is optional (D-49)', async () => {
+    const item = await ready();
+    const id = (await create('op1', item, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B2403', data: { stage: 'Blending' } })).json().id;
+    const open = (await call(t.app, cookies.op1!, 'GET', `/api/equipment/${item}/entries`)).json().find((e: { id: number }) => e.id === id);
+    expect(open).toMatchObject({ inProgress: true, endReasonFrom: null });
+    expect((await call(t.app, cookies.op1!, 'POST', `/api/entries/${id}/complete`, { activityEnd: now(), endReason: '  Batch finished ' })).statusCode).toBe(200);
+    const [, v2] = await versions(id);
+    expect(v2!.data).toEqual({ stage: 'Blending', remarks: '', endReason: 'Batch finished' });
+    // Without a reason the use ends as before.
+    const other = (await create('op1', await ready(), { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B2404', data: {} })).json().id;
+    expect((await call(t.app, cookies.op1!, 'POST', `/api/entries/${other}/complete`, { activityEnd: now() })).statusCode).toBe(200);
+    expect((await versions(other))[1]!.data).not.toHaveProperty('endReason');
+  });
+
   it('LB-01: product and batch are required for a use entry', async () => {
     const res = await create('op1', await ready(), { logbookType: 'equipment_use', activityStart: now(), data: {} });
     expect(res.statusCode).toBe(400);

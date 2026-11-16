@@ -99,6 +99,30 @@ describe('batches from the batch records (owner 2026-11-12)', () => {
     expect(bad.json().problems).toEqual(['Batch PCM26010 is not in production in Batchwright (QA_REVIEWED).']);
   });
 
+  it('LB-01: ending a use of a batch from the batch records needs the reason, kept with the use; it needs no link to end (D-49)', async () => {
+    const press = await addItem(t, { code: 'CMP-T9', location: 'COMP-T' });
+    const id = (await use(press, { batch: 'MET26007' })).json().id;
+    const open = (await call(t.app, c.op1!, 'GET', `/api/equipment/${press}/entries`)).json().find((e: { id: number }) => e.id === id);
+    expect(open).toMatchObject({ inProgress: true, endReasonFrom: 'Batchwright' });
+    const end = (body: object = {}) => call(t.app, c.op1!, 'POST', `/api/entries/${id}/complete`, { activityEnd: now(), ...body });
+    for (const missing of [{}, { endReason: '   ' }]) {
+      const refused = await end(missing);
+      expect(refused.statusCode).toBe(400);
+      expect(refused.json()).toEqual({ error: 'end_reason_required', problems: ['Batch MET26007 is from the batch records of Batchwright: give the reason the use ends.'] });
+    }
+    // The reason is a Logbook record: ending needs no answer from Batchwright.
+    await t.owner.unsafe(`revoke select on all tables in schema ${S} from logbook_app`);
+    try {
+      expect((await end({ endReason: 'Batch record withdrawn' })).statusCode).toBe(200);
+    } finally {
+      await t.owner.unsafe(`grant select on all tables in schema ${S} to logbook_app`);
+    }
+    const [v1, v2] = (await call(t.app, c.qa!, 'GET', `/api/entries/${id}/versions`)).json();
+    expect(v1.data).not.toHaveProperty('endReason');
+    expect(v2).toMatchObject({ change: 'completed', batch: 'MET26007', data: { stage: 'Granulation', endReason: 'Batch record withdrawn' } });
+    expect(v2.activityEnd).not.toBeNull();
+  });
+
   it('PL-08: with the link to Batchwright cut, the batch list and a new use stop with "connection off"', async () => {
     await t.owner.unsafe(`revoke select on all tables in schema ${S} from logbook_app`);
     try {
