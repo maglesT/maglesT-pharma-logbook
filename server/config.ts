@@ -18,6 +18,8 @@ const schema = z.object({
   TRUEBATCH_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   // D-47: TrueBatch Tablets Packing's database through the platform link (equipment_use_v1, as TrueBatch's).
   TRUEBATCH_PACKING_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
+  // D-52: TrueBatch Injectables' database through the platform link (batch_fact_v1 and equipment_use_v1, as TrueBatch's).
+  TRUEBATCH_INJECTABLES_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   // Sign-on through Medhanta core (D-29), written by the platform's apply.
   OIDC_ISSUER: z.string().url(),
   OIDC_CLIENT_ID: z.string().default('logbook'),

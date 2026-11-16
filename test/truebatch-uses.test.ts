@@ -17,6 +17,7 @@ let reader: Sql;
 const c: Record<string, string> = {};
 const TB = `tbu_${process.pid}`;
 const TBP = `tbp_${process.pid}`;
+const TBI = `tbi_${process.pid}`;
 const PACKING_OFF = usesOffWarning('TrueBatch Packing');
 const sig = (u: string) => ({ proof: proofFor(u) });
 const now = () => new Date().toISOString();
@@ -55,9 +56,10 @@ const tick = () => recordOverdue(t.sql, t.master, null, t.app.trueBatchUses);
 beforeAll(async () => {
   // The reader logs in as the Logbook's link does; the views are stood in for by tables of the same names and columns.
   reader = connect(TEST_DATABASE_URL, { role: 'logbook_app' });
-  t = await freshApp({ trueBatchUses: [sqlTrueBatchUses(reader, TB), sqlTrueBatchUses(reader, TBP, 'TrueBatch Packing', null)] });
+  t = await freshApp({ trueBatchUses: [sqlTrueBatchUses(reader, TB), sqlTrueBatchUses(reader, TBP, 'TrueBatch Packing', null), sqlTrueBatchUses(reader, TBI, 'TrueBatch Injectables')] });
   await t.owner.unsafe(`create schema ${TB}`);
   await t.owner.unsafe(`create schema ${TBP}`);
+  await t.owner.unsafe(`create schema ${TBI}`);
   await t.owner.unsafe(`create table ${TB}.batch_fact_v1 (batch_id uuid, batch_number text, product_code text, strength text, status text, issued_at timestamptz,
       completed_at timestamptz, released boolean, read_at timestamptz default now(), data_as_of timestamptz);
     create table ${TB}.equipment_use_v1 (batch_number text, equipment_code text, equipment_type text, room_code text, step text, started_at timestamptz,
@@ -70,7 +72,16 @@ beforeAll(async () => {
     -- Packing's view as before D-48: no step_name column.
     create table ${TBP}.equipment_use_v1 (batch_number text, equipment_code text, equipment_type text, room_code text, step text, started_at timestamptz,
       ended_at timestamptz, read_at timestamptz default now(), data_as_of timestamptz);
-    grant usage on schema ${TBP} to logbook_app; grant select on all tables in schema ${TBP} to logbook_app;`);
+    grant usage on schema ${TBP} to logbook_app; grant select on all tables in schema ${TBP} to logbook_app;
+    -- D-52: TrueBatch Injectables publishes the same two views as TrueBatch.
+    create table ${TBI}.batch_fact_v1 (batch_id uuid, batch_number text, product_code text, strength text, status text, issued_at timestamptz,
+      completed_at timestamptz, released boolean, read_at timestamptz default now(), data_as_of timestamptz);
+    create table ${TBI}.equipment_use_v1 (batch_number text, equipment_code text, equipment_type text, room_code text, step text, started_at timestamptz,
+      ended_at timestamptz, read_at timestamptz default now(), data_as_of timestamptz, step_name text);
+    insert into ${TBI}.batch_fact_v1 (batch_number, product_code, status, issued_at, completed_at, released) values
+      ('TI260001', 'FG-TI', 'IN_PRODUCTION', now() - interval '1 day', null, false),
+      ('TI250099', 'FG-TI', 'REJECTED', now() - interval '9 days', now() - interval '8 days', false);
+    grant usage on schema ${TBI} to logbook_app; grant select on all tables in schema ${TBI} to logbook_app;`);
   for (const [u, roles] of [['admin', ['admin']], ['qa1', ['qa']], ['op1', ['operator']], ['sup1', ['supervisor']]] as const) await seedUser(t.owner, u, [...roles]);
   for (const [k, u] of [['admin', 'admin'], ['qa', 'qa1'], ['op1', 'op1'], ['sup1', 'sup1']] as const) c[k] = (await login(t.app, u)).cookie;
   product = await addProduct(t, 'FG-TB', 'Product TB');
@@ -81,6 +92,7 @@ afterAll(async () => {
   await reader?.end();
   await t.owner.unsafe(`drop schema if exists ${TB} cascade`).catch(() => {});
   await t.owner.unsafe(`drop schema if exists ${TBP} cascade`).catch(() => {});
+  await t.owner.unsafe(`drop schema if exists ${TBI} cascade`).catch(() => {});
 });
 
 describe('uses recorded in TrueBatch count in the status (D-46)', () => {
@@ -273,5 +285,29 @@ describe('uses recorded in TrueBatch Packing count too, merged with TrueBatch\'s
     expect(((await published(a.code))!.checked_at as Date).getTime()).toBeGreaterThan(before.getTime());
     expect((await status(b.id)).inUse).toMatchObject({ batch: 'PK260003', source: 'TrueBatch Packing' });
     expect((await status(b.id)).warnings).not.toContain(PACKING_OFF);
+  });
+});
+
+describe('uses recorded in TrueBatch Injectables count too, merged with the others (D-52)', () => {
+  it('LB-08: an autoclave is in use while its Injectables step is open; the messages name TrueBatch Injectables; published with the batch', async () => {
+    const a = await item();
+    await verify((await cleaning(a.id)).json().id);
+    await tbUse('TI260001', a.code, { schema: TBI });
+    const s = await status(a.id);
+    expect(s).toMatchObject({ state: 'in_use', inUse: { batch: 'TI260001', source: 'TrueBatch Injectables', entryId: null } });
+    expect((await cleaning(a.id)).json().problems).toEqual(['In use by batch TI260001 in TrueBatch Injectables: record the cleaning once the batch is done with it in TrueBatch Injectables.']);
+    await tick();
+    expect(await published(a.code)).toMatchObject({ state: 'in_use', in_use_batch: 'TI260001' });
+  });
+
+  it('LB-07: after the Injectables step is signed done the item is dirty until a verified cleaning; an open use of a rejected batch does not hold it', async () => {
+    const a = await item();
+    await verify((await cleaning(a.id)).json().id);
+    await tbUse('TI260001', a.code, { schema: TBI, startedMinutesAgo: 0, endedMinutesAgo: 0 });
+    expect(await status(a.id)).toMatchObject({ lastTrueBatchUse: { batch: 'TI260001', source: 'TrueBatch Injectables' } });
+    const b = await item();
+    await verify((await cleaning(b.id)).json().id);
+    await tbUse('TI250099', b.code, { schema: TBI });
+    expect((await status(b.id)).state).not.toBe('in_use');
   });
 });

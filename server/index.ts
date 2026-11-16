@@ -34,11 +34,13 @@ const dv = config.DEVIATIONS_DATABASE_URL ? connect(config.DEVIATIONS_DATABASE_U
 const ebmr = config.EBMR_DATABASE_URL ? connect(config.EBMR_DATABASE_URL) : null;
 const tb = config.TRUEBATCH_DATABASE_URL ? connect(config.TRUEBATCH_DATABASE_URL) : null;
 const tbp = config.TRUEBATCH_PACKING_DATABASE_URL ? connect(config.TRUEBATCH_PACKING_DATABASE_URL) : null;
+const tbi = config.TRUEBATCH_INJECTABLES_DATABASE_URL ? connect(config.TRUEBATCH_INJECTABLES_DATABASE_URL) : null;
 // D-45: batches from Batchwright, TrueBatch or both.
 const batches = mergeBatches([ebmr ? sqlBatches(ebmr) : null, tb ? sqlBatches(tb, 'report', 'TrueBatch') : null]);
 // D-46: TrueBatch's machine and room uses count in the status as Logbook uses do; D-47: TrueBatch Packing's too (its
-// batches are not read).
-const trueBatchUses = [...(tb ? [sqlTrueBatchUses(tb)] : []), ...(tbp ? [sqlTrueBatchUses(tbp, 'report', 'TrueBatch Packing', null)] : [])];
+// batches are not read); D-52: TrueBatch Injectables' too (its batches read as TrueBatch's).
+const trueBatchUses = [...(tb ? [sqlTrueBatchUses(tb)] : []), ...(tbp ? [sqlTrueBatchUses(tbp, 'report', 'TrueBatch Packing', null)] : []),
+  ...(tbi ? [sqlTrueBatchUses(tbi, 'report', 'TrueBatch Injectables')] : [])];
 const master = sqlMaster(md);
 const qualification = qual ? sqlQualification(qual) : null;
 const app = await buildApp({ sql, signOn, proofKey, master, qualification, deviations: dv ? sqlDeviations(dv) : null, batches, trueBatchUses, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
@@ -60,6 +62,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     await ebmr?.end();
     await tb?.end();
     await tbp?.end();
+    await tbi?.end();
     process.exit(0);
   });
 }
