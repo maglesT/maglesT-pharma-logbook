@@ -180,9 +180,10 @@ interface Facts {
 const DUE_SOON_DAYS = 7;
 /** The blocker of a use in progress (D-45: the published status leaves it out; in_use_batch says it). */
 export const IN_USE = 'In use: end the current use first.';
-/** D-46: the blocker of a use open in TrueBatch (D-47: or TrueBatch Packing); it ends when the step is signed done there. */
+/** D-46: the blocker of a use open in TrueBatch (D-47: or TrueBatch Packing). D-49: since TrueBatch 1.6.0 a use ends when
+ * the batch is done with the item there (the last stage using it closes, or the batch is approved or terminated). */
 export const inTrueBatch = (batch: string, step: string, source: UseSource = 'TrueBatch') =>
-  `In use by batch ${batch} in ${source}${step ? ` (${step})` : ''}: it ends when the step is signed done in ${source}.`;
+  `In use by batch ${batch} in ${source}${step ? ` (${step})` : ''}: it ends when the batch is done with it in ${source} (its last stage using it closes, or the batch is approved or terminated).`;
 export const isInUse = (blocker: string) => blocker === IN_USE || blocker.startsWith('In use by batch ');
 
 // One query for any number of items: the facts status is derived from. The entry scan is limited

@@ -90,13 +90,13 @@ describe('uses recorded in TrueBatch count in the status (D-46)', () => {
     await tbUse('TB260001', a.code.toLowerCase());
     const s = await status(a.id);
     expect(s).toMatchObject({ state: 'in_use', inUse: { batch: 'TB260001', stage: 'granulation/charge-api', source: 'TrueBatch', entryId: null } });
-    expect(s.blockers).toEqual(['In use by batch TB260001 in TrueBatch (granulation/charge-api): it ends when the step is signed done in TrueBatch.']);
+    expect(s.blockers).toEqual(['In use by batch TB260001 in TrueBatch (granulation/charge-api): it ends when the batch is done with it in TrueBatch (its last stage using it closes, or the batch is approved or terminated).']);
     const use = await entry(a.id, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'TB260002', data: {} });
     expect(use.statusCode).toBe(409);
     expect(use.json().problems[0]).toMatch(/^In use by batch TB260001 in TrueBatch/);
     const clean = await cleaning(a.id);
     expect(clean.statusCode).toBe(409);
-    expect(clean.json().problems).toEqual(['In use by batch TB260001 in TrueBatch: record the cleaning once the step is signed done in TrueBatch.']);
+    expect(clean.json().problems).toEqual(['In use by batch TB260001 in TrueBatch: record the cleaning once the batch is done with it in TrueBatch.']);
     await tick();
     // As a Logbook use (D-45): the use itself does not count against fit for use; in_use_batch names the batch.
     expect(await published(a.code)).toMatchObject({ state: 'in_use', in_use_batch: 'TB260001', fit_for_use: true, blockers: [] });
@@ -195,7 +195,7 @@ describe('the step is shown by its readable name (D-48)', () => {
     const b = await item();
     await t.owner.unsafe(`insert into ${TB}.equipment_use_v1 (batch_number, equipment_code, equipment_type, room_code, step, step_name, started_at, data_as_of)
       values ('TB260001', '${b.code}', 'machine', 'GRAN-TB', 'granulation/granulate', 'Granulation › Granulate to an end point', now(), now())`);
-    expect((await status(b.id)).blockers).toEqual(['In use by batch TB260001 in TrueBatch (Granulation › Granulate to an end point): it ends when the step is signed done in TrueBatch.']);
+    expect((await status(b.id)).blockers).toEqual(['In use by batch TB260001 in TrueBatch (Granulation › Granulate to an end point): it ends when the batch is done with it in TrueBatch (its last stage using it closes, or the batch is approved or terminated).']);
     // An empty step_name falls back to the key.
     const c2 = await item();
     await t.owner.unsafe(`insert into ${TB}.equipment_use_v1 (batch_number, equipment_code, equipment_type, room_code, step, step_name, started_at, data_as_of)
@@ -223,11 +223,11 @@ describe('uses recorded in TrueBatch Packing count too, merged with TrueBatch\'s
     await pkUse('PK260001', a.code);
     const s = await status(a.id);
     expect(s).toMatchObject({ state: 'in_use', inUse: { batch: 'PK260001', source: 'TrueBatch Packing', entryId: null } });
-    expect(s.blockers).toEqual(['In use by batch PK260001 in TrueBatch Packing (granulation/charge-api): it ends when the step is signed done in TrueBatch Packing.']);
+    expect(s.blockers).toEqual(['In use by batch PK260001 in TrueBatch Packing (granulation/charge-api): it ends when the batch is done with it in TrueBatch Packing (its last stage using it closes, or the batch is approved or terminated).']);
     const use = await entry(a.id, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'TB260002', data: {} });
     expect(use.statusCode).toBe(409);
     expect(use.json().problems[0]).toMatch(/^In use by batch PK260001 in TrueBatch Packing/);
-    expect((await cleaning(a.id)).json().problems).toEqual(['In use by batch PK260001 in TrueBatch Packing: record the cleaning once the step is signed done in TrueBatch Packing.']);
+    expect((await cleaning(a.id)).json().problems).toEqual(['In use by batch PK260001 in TrueBatch Packing: record the cleaning once the batch is done with it in TrueBatch Packing.']);
     await tick();
     expect(await published(a.code)).toMatchObject({ state: 'in_use', in_use_batch: 'PK260001', fit_for_use: true });
   });

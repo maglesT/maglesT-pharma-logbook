@@ -122,10 +122,11 @@ export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'Bat
 /**
  * D-46 (owner 15 Nov 2026): a machine or room use recorded in TrueBatch (equipment_use_v1), read live for the status as if
  * the use had been entered in the Logbook. The item is TrueBatch's equipment_code (a room's row names the room there).
- * Open while its step is not signed done (ended_at null); an open use counts only while its batch is in production, so a
+ * Open while the batch is not done with the item (ended_at null; D-49: since TrueBatch 1.6.0, until the last stage using it
+ * closes, or the batch is approved or terminated); an open use counts only while its batch is in production, so a
  * step left open in a finished or cancelled batch never holds an item.
  * D-47: TrueBatch Tablets Packing publishes the same view, read the same way through its own link; its batches are not
- * read (`batchView` null), so an open packing step holds the item until it is signed done there.
+ * read (`batchView` null), so an open packing use holds the item until packing ends it.
  * D-48: the step is shown by its readable name (`step_name`, "Stage › Step", a column both products append to the view)
  * when there is one, else by its key (`step`, "stage/step"). Read through the row as JSON, so a view without the column
  * (a product not yet updated) still answers.

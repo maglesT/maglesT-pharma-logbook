@@ -52,7 +52,8 @@ master_data's own views.
 `report.equipment_status_v1` (D-45) publishes each item's status as the Logbook works it out (for TrueBatch Tablets), refreshed
 every minute and after each entry; `checked_at` says when. Batches come from Batchwright (`EBMR_DATABASE_URL`), TrueBatch
 (`TRUEBATCH_DATABASE_URL`) or both, through their platform links. With TrueBatch linked, its machine and room uses
-(`equipment_use_v1`, read live) count in the status as Logbook uses do (D-46): in use while the step is open, dirty after.
+(`equipment_use_v1`, read live) count in the status as Logbook uses do (D-46): in use until the batch is done with the item in TrueBatch (its last
+stage using it closes, or the batch is approved or terminated; D-49), dirty after.
 TrueBatch Tablets Packing's uses (its `equipment_use_v1`, `TRUEBATCH_PACKING_DATABASE_URL`) count the same way, merged with
 TrueBatch's (D-47); each link off is named in its own warning. Steps are named by the view's `step_name` ("Stage › Step")
 when it has one, else by the step key (D-48).
