@@ -123,6 +123,67 @@ describe('glove integrity (LB-15)', () => {
   });
 });
 
+describe('sterile status for TrueBatch Injectables (D-50)', () => {
+  const daysAgo = (d: number) => new Date(Date.now() - d * 86_400_000).toISOString();
+  async function verify(id: number) {
+    const v = (await call(t.app, c.qa!, 'GET', `/api/entries/${id}/versions`)).json()[0];
+    expect((await call(t.app, c.sup1!, 'POST', `/api/entries/${id}/verify`, { ...sig('sup1'), contentHash: v.contentHash })).statusCode).toBe(200);
+  }
+  const late = { lateReason: 'entered from the paper record' };
+
+  it('LB-12: a steriliser is fit only with a verified passed test within its validity (default: today)', async () => {
+    const ac = await addItem(t, { code: `AC-${++n}`, name: 'Autoclave D-50', kind: 'equipment', sterile: true });
+    const old = await entry('op1', ac, { logbookType: 'steriliser_test', activityStart: daysAgo(2), data: { test: 'air_removal', result: 'pass' }, signature: sig('op1'), ...late });
+    expect(old.statusCode, old.body).toBe(201);
+    await verify(old.json().id);
+    let s = await status(ac);
+    expect(s.state).toBe('sterile_expired');
+    expect(s.blockers.some((b: string) => /^Steriliser test overdue since .*: pass a leak or air-removal test before use\.$/.test(b))).toBe(true);
+    // The test is how it is renewed: not a cycle blocker.
+    expect(s.cycleBlockers.some((b: string) => /Steriliser test/.test(b))).toBe(false);
+    await passedTest(ac);
+    s = await status(ac);
+    expect(s.blockers).toEqual([]);
+    expect(s.sterileValidUntil).toBe(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }));
+  });
+
+  it('LB-15: an isolator is fit only with a verified passed VHP decontamination and every glove port tested within their validity', async () => {
+    const iso = await addItem(t, { code: `IS-${++n}`, name: 'Isolator D-50', kind: 'equipment', sterile: true });
+    const vhp = (start: string, id: string, extra: object = {}) => entry('op1', iso, { logbookType: 'steriliser_cycle', activityStart: start, activityEnd: start,
+      data: { cycleType: 'vhp', cycleId: id, programme: 'VHP-2', load: 'Empty chamber', result: 'pass', controllerRecordRef: `ISO-${id}` }, signature: sig('op1'), ...extra });
+    const old = await vhp(daysAgo(8), 'V-1', late);
+    expect(old.statusCode, old.body).toBe(201);
+    await verify(old.json().id);
+    expect((await entry('op1', iso, { logbookType: 'glove_integrity', activityStart: daysAgo(8), data: { port: 'G1', result: 'pass' }, ...late })).statusCode).toBe(201);
+    expect((await entry('op1', iso, { logbookType: 'glove_integrity', activityStart: now(), data: { port: 'G2', result: 'pass' } })).statusCode).toBe(201);
+    let s = await status(iso);
+    expect(s.state).toBe('sterile_expired');
+    expect(s.blockers.filter((b: string) => /^(Decontamination \(VHP\)|Glove test) overdue since/.test(b))).toHaveLength(2);
+    // A new decontamination counts only once verified.
+    const fresh = await vhp(now(), 'V-2');
+    expect(fresh.statusCode, fresh.body).toBe(201);
+    expect((await status(iso)).blockers.some((b: string) => /Decontamination/.test(b))).toBe(true);
+    await verify(fresh.json().id);
+    s = await status(iso);
+    expect(s.blockers.some((b: string) => /Decontamination/.test(b))).toBe(false);
+    expect(s.blockers.some((b: string) => /Glove test overdue/.test(b))).toBe(true);
+    // The site may approve a longer glove-test validity (settings, validDays).
+    await approve('glove_integrity', { validDays: 10 });
+    s = await status(iso);
+    expect(s.blockers).toEqual([]);
+    expect(new Date(s.lastDecontamination).getTime()).toBeGreaterThan(Date.now() - 3_600_000);
+    await approve('glove_integrity');
+  });
+
+  it('LB-12: the validity is a whole number of days from 1 to 366', async () => {
+    for (const validDays of [0, 1.5, 400]) {
+      const res = await call(t.app, c.admin!, 'POST', '/api/settings', { logbookType: 'steriliser_test',
+        settings: { enabled: true, sopRef: '', checklist: [], verificationRequired: false, validDays }, effectiveFrom: now() });
+      expect(res.statusCode).toBe(400);
+    }
+  });
+});
+
 describe('pressure readings (LB-16)', () => {
   it('LB-16: readings are taken only at approved non-critical points', async () => {
     const res = await entry('op1', room, { logbookType: 'pressure_reading', activityStart: now(), data: { point: 'Unknown point', value: 15 } });

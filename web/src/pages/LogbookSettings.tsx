@@ -5,6 +5,13 @@ import { SignDialog } from '../components/SignDialog.js';
 const blank: Settings = { enabled: true, sopRef: '', checklist: [], verificationRequired: false, limits: {}, pressurePoints: [] };
 
 // Pressure points are edited as lines: name; CCS reference; min; max
+// D-50: how long a pass keeps the item fit (plant days), on the three sterile types; empty = the default.
+const VALID_LABEL: Record<string, string> = {
+  steriliser_test: 'A passed steriliser test is valid for (days; 1 = today only)',
+  steriliser_cycle: 'A passed decontamination (VHP) of an isolator or RABS is valid for (days)',
+  glove_integrity: 'A glove port test is valid for (days)',
+};
+const VALID_DEFAULT: Record<string, number> = { steriliser_test: 1, steriliser_cycle: 7, glove_integrity: 7 };
 const pointsToText = (s: Settings) => s.pressurePoints.map((p) => `${p.name}; ${p.ccsRef}; ${p.min}; ${p.max}`).join('\n');
 const textToPoints = (text: string) =>
   text
@@ -87,7 +94,7 @@ export function LogbookSettings({ me }: { me: Me }) {
             await load();
           }}
         >
-          <SettingsSummary v={approving.version} />
+          <SettingsSummary v={approving.version} typeKey={approving.type.key} />
         </SignDialog>
       )}
     </>
@@ -158,6 +165,12 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
         {type.key === 'breakdown_advice' && (
           <p className="muted">D-27: when switched on, the text of related past breakdowns (machines, failures, repairs and parts, no people's names) is sent to Google Gemini, which suggests causes, checks and parts. Advice only: it is never part of an entry. Needs the supplier assessment.</p>
         )}
+        {VALID_LABEL[type.key] && (
+          <label>{VALID_LABEL[type.key]}
+            <input type="number" min={1} max={366} step={1} value={s.validDays ?? ''} placeholder={String(VALID_DEFAULT[type.key])}
+              onChange={(e) => setS({ ...s, validDays: e.target.value ? Number(e.target.value) : undefined })} />
+          </label>
+        )}
         {type.key === 'pressure_reading' && (
           <label>Non-critical pressure points (one per line: name; CCS reference; min Pa; max Pa)<textarea value={points} onChange={(e) => setPoints(e.target.value)} /></label>
         )}
@@ -172,7 +185,7 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
   );
 }
 
-function SettingsSummary({ v }: { v: SettingsVersion }) {
+function SettingsSummary({ v, typeKey }: { v: SettingsVersion; typeKey: string }) {
   const s = v.settings;
   return (
     <dl className="summary">
@@ -180,6 +193,7 @@ function SettingsSummary({ v }: { v: SettingsVersion }) {
       <dt>SOP</dt><dd>{s.sopRef || '—'}</dd>
       <dt>Effective from</dt><dd>{plantTime(v.effectiveFrom)} (or the approval time, if later)</dd>
       <dt>Second-person verification</dt><dd>{s.verificationRequired ? 'Required' : 'As the rules require'}</dd>
+      {VALID_LABEL[typeKey] && (<><dt>{VALID_LABEL[typeKey]}</dt><dd>{s.validDays ?? `${VALID_DEFAULT[typeKey]} (default)`}</dd></>)}
       {s.checklist.length > 0 && (<><dt>Checklist</dt><dd><ul>{s.checklist.map((c) => <li key={c}>{c}</li>)}</ul></dd></>)}
       {(s.voiceLanguages ?? []).length > 0 && (
         <><dt>Voice-note languages</dt><dd>{s.voiceLanguages!.map((l) => VOICE_LANGUAGE_LABEL[l] ?? l).join(', ')}</dd></>

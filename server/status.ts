@@ -3,6 +3,7 @@ import { careByLocalId, type Care, type Master } from './master.js';
 import type { Qualification, QualStatus } from './qualification.js';
 import { UsesOff, type TrueBatchUse, type TrueBatchUses, type UseSource } from './batches.js';
 import { dayText, timeText } from './dates.js';
+import { VALID_DAYS_DEFAULT } from './logbook-types.js';
 
 // Plant time zone: calibration due dates are plant-local dates (D-19).
 export const PLANT_TZ = process.env.DISPLAY_TZ ?? 'Asia/Kolkata';
@@ -10,7 +11,7 @@ export const PLANT_TZ = process.env.DISPLAY_TZ ?? 'Asia/Kolkata';
 // Equipment and area status (LB-05–08), computed from the latest entry versions. Nothing is stored:
 // the log is the single source of truth.
 
-export type StatusCode = 'in_use' | 'in_change_over' | 'dirty' | 'dirty_expired' | 'clean' | 'clean_expired' | 'cleaning_due' | 'pm_overdue' | 'requalification_overdue' | 'not_qualified' | 'out_of_service' | 'calibration_overdue' | 'calibration_failed' | 'not_calibrated' | 'available';
+export type StatusCode = 'in_use' | 'in_change_over' | 'sterile_expired' | 'dirty' | 'dirty_expired' | 'clean' | 'clean_expired' | 'cleaning_due' | 'pm_overdue' | 'requalification_overdue' | 'not_qualified' | 'out_of_service' | 'calibration_overdue' | 'calibration_failed' | 'not_calibrated' | 'available';
 
 export interface EquipmentStatus {
   equipmentId: number;
@@ -28,6 +29,12 @@ export interface EquipmentStatus {
   // D-46: the last use, when it was recorded in TrueBatch or TrueBatch Packing (it ended after the Logbook's last use).
   lastTrueBatchUse: { batch: string; step: string; endedAt: Date; source: UseSource } | null;
   hasPassedSterilizerTest: boolean;
+  // D-50: the sterile facts published for TrueBatch Injectables. lastDecontamination: the newest verified passed VHP
+  // cycle; lastGloveTest: the port whose last test is oldest (the one that expires first); sterileValidUntil: the last
+  // plant day the item is fit on its steriliser test, decontamination and glove tests (the earliest of them).
+  lastDecontamination: Date | null;
+  lastGloveTest: Date | null;
+  sterileValidUntil: string | null;
   cleanUntil: Date | null;
   // Plant-local date (YYYY-MM-DD).
   calibrationDue: string | null;
@@ -175,6 +182,13 @@ interface Facts {
   has_passed_steriliser_test: boolean;
   failed_glove_ports: string[] | null;
   last_cycle_result: string | null;
+  // D-50: steriliser test, VHP decontamination and glove tests, with their validity in days (approved settings).
+  has_steriliser_tests: boolean;
+  last_steriliser_pass_at: Date | null;
+  has_vhp_cycles: boolean;
+  last_vhp_pass_at: Date | null;
+  oldest_glove_test_at: Date | null;
+  valid_days: Record<string, number | null>;
   pressure_out_of_limit: string[] | null;
   today: string;
   now: Date;
@@ -203,7 +217,8 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
       where ${scope} and not exists (select 1 from entries x where x.supersedes = e.id)
     ),
     enabled as (
-      select distinct on (s.logbook_type) s.logbook_type, (s.settings->>'enabled')::boolean as on
+      select distinct on (s.logbook_type) s.logbook_type, (s.settings->>'enabled')::boolean as on,
+        (s.settings->>'validDays')::int as valid_days
       from logbook_settings s
       join signatures g on g.object_type = 'settings' and g.object_id = s.id and g.meaning = 'approved'
       where s.effective_from <= now()
@@ -266,6 +281,19 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
          order by l.data->>'port', l.activity_start desc) g where g.result = 'fail') as failed_glove_ports,
       (select l.data->>'result' from latest l where l.equipment_id = q.id and l.logbook_type = 'steriliser_cycle'
          order by l.activity_start desc limit 1) as last_cycle_result,
+      -- D-50: the sterile facts and their validity (settings validDays).
+      exists (select 1 from latest l where l.equipment_id = q.id and l.logbook_type = 'steriliser_test') as has_steriliser_tests,
+      (select max(coalesce(l.activity_end, l.activity_start)) from latest l where l.equipment_id = q.id and l.logbook_type = 'steriliser_test'
+         and l.verified and l.data->>'result' = 'pass') as last_steriliser_pass_at,
+      exists (select 1 from latest l where l.equipment_id = q.id and l.logbook_type = 'steriliser_cycle' and l.data->>'cycleType' = 'vhp') as has_vhp_cycles,
+      (select max(coalesce(l.activity_end, l.activity_start)) from latest l where l.equipment_id = q.id and l.logbook_type = 'steriliser_cycle'
+         and l.data->>'cycleType' = 'vhp' and l.verified and l.data->>'result' = 'pass') as last_vhp_pass_at,
+      (select min(g.at) from (
+         select distinct on (l.data->>'port') coalesce(l.activity_end, l.activity_start) as at
+         from latest l where l.equipment_id = q.id and l.logbook_type = 'glove_integrity'
+         order by l.data->>'port', l.activity_start desc) g) as oldest_glove_test_at,
+      (select jsonb_object_agg(en.logbook_type, en.valid_days) from enabled en
+        where en.logbook_type in ('steriliser_test', 'steriliser_cycle', 'glove_integrity')) as valid_days,
       (select array_agg(p.point) from (
          select distinct on (l.data->>'point') l.data->>'point' as point, (l.data->>'outOfLimit')::boolean as oos
          from latest l where l.equipment_id = q.id and l.logbook_type = 'pressure_reading'
@@ -372,6 +400,22 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   for (const test of f.failed_steriliser_tests ?? []) blockers.push(`Steriliser ${TEST_LABEL[test] ?? test} failed or awaiting verification: a verified pass is needed before use.`);
   for (const port of f.failed_glove_ports ?? []) blockers.push(`Glove integrity failed on port ${port}: replace and pass before use.`);
   if (f.last_cycle_result === 'fail') warnings.push('The last sterilisation cycle failed: see its deviation.');
+  // D-50 (TrueBatch Injectables plan 3b): a steriliser is fit only with a verified passed test within its validity
+  // (default: today); an isolator or RABS only with a verified passed decontamination (VHP) and every glove port tested
+  // within theirs. Each applies to an item that keeps that record. Valid through the last plant day.
+  const sterile: [string, Date | null, string, string][] = [];
+  if (f.has_steriliser_tests) sterile.push(['steriliser_test', f.last_steriliser_pass_at, 'Steriliser test', 'pass a leak or air-removal test']);
+  if (f.has_vhp_cycles) sterile.push(['steriliser_cycle', f.last_vhp_pass_at, 'Decontamination (VHP)', 'decontaminate']);
+  if (f.oldest_glove_test_at) sterile.push(['glove_integrity', f.oldest_glove_test_at, 'Glove test', 'test every glove port']);
+  let sterileValidUntil: string | null = null;
+  let sterileState: StatusCode | null = null;
+  for (const [type, at, what, todo] of sterile) {
+    const days = f.valid_days?.[type] ?? VALID_DAYS_DEFAULT[type as keyof typeof VALID_DAYS_DEFAULT];
+    if (!at) { blockers.push(`${what}: no verified pass on record: ${todo} before use.`); sterileState = 'sterile_expired'; continue; }
+    const until = addDays(plantDate(at), days - 1);
+    if (!sterileValidUntil || until < sterileValidUntil) sterileValidUntil = until;
+    if (until < f.today) { blockers.push(`${what} overdue since ${plantDay(addDays(until, 1))}: ${todo} before use.`); sterileState = 'sterile_expired'; }
+  }
   for (const point of f.pressure_out_of_limit ?? []) warnings.push(`Last pressure reading out of limits: ${point}.`);
 
   // LB-07: cleaning status, where the site tracks cleaning for this kind of item. A frequency-based room is due its
@@ -462,14 +506,15 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   // LB-08: the item in use shows what is in it.
   if (inUse) blockers.push(inUse.source === 'Logbook' ? IN_USE : inTrueBatch(inUse.batch!, inUse.stage, inUse.source));
   // Cycles are stopped by everything except the cleaning status (review S6-1: including use).
-  const cycleBlockers = blockers.filter((b) => !/^(Dirty|Clean-hold|Cleaning overdue)/.test(b));
+  // D-50: nor by an expired sterile status (the cycle or test is how it is renewed).
+  const cycleBlockers = blockers.filter((b) => !/^(Dirty|Clean-hold|Cleaning overdue|Steriliser test|Decontamination \(VHP\)|Glove test)/.test(b));
 
   const state: StatusCode = inUse
     ? 'in_use'
     : f.open_change_over_since ? 'in_change_over'
     : f.open_breakdowns > 0 || (f.failed_steriliser_tests?.length ?? 0) > 0 || (f.failed_glove_ports?.length ?? 0) > 0
       ? 'out_of_service'
-      : (calState ?? duesState ?? cleanState ?? 'available');
+      : (calState ?? sterileState ?? duesState ?? cleanState ?? 'available');
 
   return {
     equipmentId: f.id,
@@ -481,6 +526,9 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     lastUseEnd: f.last_use_end,
     lastTrueBatchUse,
     hasPassedSterilizerTest: f.has_passed_steriliser_test,
+    lastDecontamination: f.last_vhp_pass_at,
+    lastGloveTest: f.oldest_glove_test_at,
+    sterileValidUntil,
     cleanUntil,
     calibrationDue,
     schedule,
