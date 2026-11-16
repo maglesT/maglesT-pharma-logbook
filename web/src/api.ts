@@ -116,6 +116,7 @@ export interface Settings {
   limits: Record<string, { min?: number; max?: number; unit: string }>;
   pressurePoints: { name: string; critical: false; ccsRef: string; min: number; max: number; unit: string }[];
   voiceLanguages?: string[];
+  validDays?: number;
 }
 
 export interface SettingsVersion {
@@ -249,6 +250,7 @@ export function daysLeft(date: string): string {
 export const STATE_LABEL: Record<string, [string, string]> = {
   in_use: ['In use', 'chip-info'],
   in_change_over: ['Change over', 'chip-info'],
+  sterile_expired: ['Sterile status expired', 'chip-bad'],
   dirty: ['Dirty', 'chip-warn'],
   dirty_expired: ['Dirty hold expired', 'chip-bad'],
   cleaning_due: ['Cleaning overdue', 'chip-bad'],

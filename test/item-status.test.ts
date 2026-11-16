@@ -15,7 +15,8 @@ let n = 0;
 const sig = (u: string) => ({ proof: proofFor(u) });
 const now = () => new Date().toISOString();
 const COLUMNS = ['master_id', 'code', 'kind', 'state', 'fit_for_use', 'blockers', 'warnings', 'in_use_batch', 'cleaned_at', 'cleaned_by',
-  'clean_until', 'calibration_due', 'qualification', 'checked_at', 'read_at', 'data_as_of'];
+  'clean_until', 'calibration_due', 'qualification', 'checked_at', 'read_at', 'data_as_of', 'last_decontamination', 'sterile_valid_until',
+  'last_glove_test'];
 
 async function approve(type: string) {
   const id = (await call(t.app, c.admin!, 'POST', '/api/settings', { logbookType: type, settings: { enabled: true, sopRef: '', checklist: [], verificationRequired: false }, effectiveFrom: now() })).json().id;
