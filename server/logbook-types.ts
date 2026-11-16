@@ -33,10 +33,6 @@ export const settingsSchema = z.object({
     )
     .max(100)
     .default([]),
-  // D-50 (TrueBatch Injectables): how many plant days a pass stays valid. Steriliser test: a passed test (default 1 =
-  // today only); sterilisation / decontamination cycle: a passed VHP decontamination of an isolator or RABS (default 7);
-  // glove integrity: every port's last test (default 7). Past it, the item is not fit for use.
-  validDays: z.number().int().min(1).max(366).optional(),
   // Voice notes site setting only: the languages a speaker may use (D-26).
   voiceLanguages: z.array(z.enum(VOICE_LANGUAGES)).max(VOICE_LANGUAGES.length).default([]),
 });
@@ -50,9 +46,6 @@ export interface LogbookType {
   // A second-person check required by a clause regardless of settings (LB-03, LB-12).
   alwaysVerified: boolean;
 }
-
-/** D-50: the validity used when the approved settings give none. */
-export const VALID_DAYS_DEFAULT = { steriliser_test: 1, steriliser_cycle: 7, glove_integrity: 7 } as const;
 
 export const LOGBOOK_TYPES: LogbookType[] = [
   { key: 'equipment_use', label: 'Equipment use', appliesTo: ['equipment', 'instrument', 'area'], sterile: false, alwaysVerified: false },

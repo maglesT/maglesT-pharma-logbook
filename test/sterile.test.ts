@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem , addProduct } from './helpers.js';
+import { call, changeItem, freshApp, login, seedUser, type TestApp, proofFor, addItem , addProduct } from './helpers.js';
 
 let t: TestApp;
 const c: Record<string, string> = {};
@@ -43,7 +43,7 @@ beforeAll(async () => {
   for (const [k, u] of [['admin', 'admin'], ['qa', 'qa1'], ['op1', 'op1'], ['sup1', 'sup1']] as const) c[k] = (await login(t.app, u)).cookie;
   const eq = async (body: object) => (await addItem(t, { code: `S-${++n}`, name: 'Item', ...body })) as number;
   autoclave = await eq({ kind: 'equipment', sterile: true });
-  isolator = await eq({ kind: 'equipment', sterile: true });
+  isolator = await eq({ kind: 'equipment', sterile: true, decontaminationValidDays: 7, gloveTestEveryDays: 7 });
   room = await eq({ kind: 'area', sterile: true, classified: true });
   nonSterile = await eq({ kind: 'equipment' });
   for (const type of ['steriliser_cycle', 'steriliser_test', 'glove_integrity']) await approve(type);
@@ -147,8 +147,9 @@ describe('sterile status for TrueBatch Injectables (D-50)', () => {
     expect(s.sterileValidUntil).toBe(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }));
   });
 
-  it('LB-15: an isolator is fit only with a verified passed VHP decontamination and every glove port tested within their validity', async () => {
-    const iso = await addItem(t, { code: `IS-${++n}`, name: 'Isolator D-50', kind: 'equipment', sterile: true });
+  it('LB-15: an isolator is fit only with a verified passed VHP decontamination and every glove port tested within the days its qualification set in master data (D-51)', async () => {
+    const code = `IS-${++n}`;
+    const iso = await addItem(t, { code, name: 'Isolator D-51', kind: 'equipment', sterile: true, decontaminationValidDays: 7, gloveTestEveryDays: 7 });
     const vhp = (start: string, id: string, extra: object = {}) => entry('op1', iso, { logbookType: 'steriliser_cycle', activityStart: start, activityEnd: start,
       data: { cycleType: 'vhp', cycleId: id, programme: 'VHP-2', load: 'Empty chamber', result: 'pass', controllerRecordRef: `ISO-${id}` }, signature: sig('op1'), ...extra });
     const old = await vhp(daysAgo(8), 'V-1', late);
@@ -167,20 +168,19 @@ describe('sterile status for TrueBatch Injectables (D-50)', () => {
     s = await status(iso);
     expect(s.blockers.some((b: string) => /Decontamination/.test(b))).toBe(false);
     expect(s.blockers.some((b: string) => /Glove test overdue/.test(b))).toBe(true);
-    // The site may approve a longer glove-test validity (settings, validDays).
-    await approve('glove_integrity', { validDays: 10 });
+    // A new qualification sets a longer glove-test interval in master data (a new version): read at once.
+    changeItem(t, code, { care: { ...t.master.items_.get(code)!.care, gloveTestEveryDays: 10 } });
     s = await status(iso);
     expect(s.blockers).toEqual([]);
     expect(new Date(s.lastDecontamination).getTime()).toBeGreaterThan(Date.now() - 3_600_000);
-    await approve('glove_integrity');
   });
 
-  it('LB-12: the validity is a whole number of days from 1 to 366', async () => {
-    for (const validDays of [0, 1.5, 400]) {
-      const res = await call(t.app, c.admin!, 'POST', '/api/settings', { logbookType: 'steriliser_test',
-        settings: { enabled: true, sopRef: '', checklist: [], verificationRequired: false, validDays }, effectiveFrom: now() });
-      expect(res.statusCode).toBe(400);
-    }
+  it('LB-15: an isolator whose timings are not set in master data is not fit; nothing is assumed (D-51)', async () => {
+    const iso = await addItem(t, { code: `IS-${++n}`, name: 'Isolator, timings not set', kind: 'equipment', sterile: true });
+    expect((await entry('op1', iso, { logbookType: 'glove_integrity', activityStart: now(), data: { port: 'G1', result: 'pass' } })).statusCode).toBe(201);
+    const s = await status(iso);
+    expect(s.state).toBe('sterile_expired');
+    expect(s.blockers).toEqual(['Glove test: its validity is not set in master data ("Glove test every (days)", from the qualification): not fit for use until it is.']);
   });
 });
 

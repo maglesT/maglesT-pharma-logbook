@@ -77,7 +77,7 @@ export async function addItem(t: TestApp, b: ItemBody): Promise<number> {
   return (await addToLogbook(t.sql, m, { sterile: b.sterile ?? false, classified: b.classified ?? false }))!;
 }
 // Changes an item in master data (a new version), e.g. a rename or retirement.
-export function changeItem(t: TestApp, code: string, change: Partial<Pick<MasterItem, 'name' | 'active' | 'room'>>) {
+export function changeItem(t: TestApp, code: string, change: Partial<Pick<MasterItem, 'name' | 'active' | 'room' | 'care'>>) {
   const i = t.master.items_.get(code)!;
   t.master.items_.set(code, { ...i, ...change, version: i.version + 1 });
 }
