@@ -12,8 +12,8 @@ import { settingsInForce } from './settings.js';
 import { allStatuses, plantTime, statusOf, type EquipmentStatus } from '../status.js';
 import { VoiceError, confirmVoiceNotes, unsignedDrafts, voiceNotesFor, type VoiceUse } from '../voice.js';
 
-// Product default (LB-04): an activity time older than this makes the entry a late entry.
-export const LATE_MINUTES = 30;
+import { LATE_MINUTES } from '../entries.js';
+export { LATE_MINUTES };
 
 // A signing proof from core's re-authentication (B1-4, PL-05).
 const credentials = proofOnly;

@@ -103,6 +103,13 @@ function csv(r: Report): string {
   return csvText(head, rows);
 }
 
+// D-57: the page header "Site (code) · title"; an empty site name or code prints nothing, never "() ·".
+export const pdfHeader = (site: { name: string; code: string } | undefined, title: string) => {
+  const name = site?.name?.trim() ?? '';
+  const code = site?.code?.trim() ?? '';
+  return [[name, code && `(${code})`].filter(Boolean).join(' '), title].filter(Boolean).join(' · ');
+};
+
 // The common page frame of every PDF copy: site header, title, generated-by footer with page x of y (D-20).
 function render(site: { name: string; code: string } | undefined, title: string, by: string, content: Content[]): Promise<Buffer> {
   const def: TDocumentDefinitions = {
@@ -110,7 +117,7 @@ function render(site: { name: string; code: string } | undefined, title: string,
     pageSize: 'A4',
     pageMargins: [28, 50, 28, 36],
     defaultStyle: { font: 'Noto', fontSize: 9 },
-    header: { text: runs(`${site?.name ?? ''} (${site?.code ?? ''}) · ${title}`), margin: [28, 20, 28, 0], fontSize: 9, bold: true },
+    header: { text: runs(pdfHeader(site, title)), margin: [28, 20, 28, 0], fontSize: 9, bold: true },
     footer: (page, pages) => ({
       text: `Generated ${plant(new Date())} by ${by} · true copy of the electronic record · page ${page} of ${pages}`,
       margin: [28, 10, 28, 0],

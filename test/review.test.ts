@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem, addProduct } from './helpers.js';
-import { runs } from '../server/routes/exports.js';
+import { pdfHeader, runs } from '../server/routes/exports.js';
 
 let t: TestApp;
 const c: Record<string, string> = {};
@@ -152,6 +152,13 @@ describe('review fixes (S5)', () => {
     expect(runs('रमेश 5 µm')).toEqual([{ text: 'रमेश 5 µm' }]);
     expect(runs('a ≤ b')).toEqual([{ text: 'a ' }, { text: '≤', font: 'NotoMath' }, { text: ' b' }]);
     expect(runs('ok \u{1F600}')).toEqual([{ text: 'ok [U+1F600]' }]);
+  });
+
+  it('LB-22: the PDF header prints no empty brackets or separators when the site has no name or code (D-57)', () => {
+    expect(pdfHeader({ name: 'Plant One', code: 'P1' }, 'Logbook M-1')).toBe('Plant One (P1) · Logbook M-1');
+    expect(pdfHeader(undefined, 'Logbook M-1')).toBe('Logbook M-1');
+    expect(pdfHeader({ name: '', code: '' }, 'Logbook M-1')).toBe('Logbook M-1');
+    expect(pdfHeader({ name: 'Plant One', code: '' }, 'Logbook M-1')).toBe('Plant One · Logbook M-1');
   });
 
   it('LB-22: CSV cells starting with a tab or spaces before a formula are neutralised', async () => {

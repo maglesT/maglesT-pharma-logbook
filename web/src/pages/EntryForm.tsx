@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { api, ApiError, getSignProof, plantDay, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type BatchChoice, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
+import { api, ApiError, getSignProof, joinParts, plantDay, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type BatchChoice, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
 import { VoiceButton } from '../components/VoiceNote.js';
 import { OUTCOME_LABEL, STAGE_LABEL } from '../fields.js';
 
@@ -238,8 +238,8 @@ export function EntryForm({
         {type === 'equipment_use' && linkedBatches && (
           <>
             <BatchSelect label="Batch (from the batch records)" value={batch} onChange={setBatch} batches={linkedBatches} inProductionOnly />
-            <p className="muted batch-product">Product: <strong>{chosen ? (chosen.productName ? `${chosen.productCode} · ${chosen.productName}` : chosen.productCode) : '—'}</strong>
-              {chosen && ` · ${chosen.strength ?? ''} · ${chosen.status.replaceAll('_', ' ').toLowerCase()}`}</p>
+            <p className="muted batch-product">Product: <strong>{chosen ? joinParts([chosen.productCode, chosen.productName]) || '—' : '—'}</strong>
+              {chosen && joinParts([chosen.strength, chosen.status.replaceAll('_', ' ').toLowerCase()]).replace(/^(?=.)/, ' · ')}</p>
           </>
         )}
         {type === 'change_over' && linkedBatches && (
@@ -534,7 +534,7 @@ function BatchSelect({ label, value, onChange, batches, inProductionOnly = false
   label: string; value: string; onChange: (v: string) => void; batches: BatchChoice[]; inProductionOnly?: boolean;
 }) {
   const shown = batches.filter((b) => !inProductionOnly || b.inProduction);
-  const text = (b: BatchChoice) => `${b.batchNumber} · ${b.productCode}${b.strength ? ` ${b.strength}` : ''} · ${b.status.replaceAll('_', ' ').toLowerCase()}`
+  const text = (b: BatchChoice) => joinParts([b.batchNumber, [b.productCode, b.strength].filter(Boolean).join(' '), b.status.replaceAll('_', ' ').toLowerCase()])
     + (b.productId === null ? ' (product not in master data)' : '');
   const group = (title: string, list: BatchChoice[]) => list.length > 0 && (
     <optgroup label={title}>{list.map((b) => <option key={b.batchNumber} value={b.batchNumber} disabled={b.productId === null && inProductionOnly}>{text(b)}</option>)}</optgroup>

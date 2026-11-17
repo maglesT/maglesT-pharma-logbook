@@ -2,6 +2,9 @@ import { z } from 'zod';
 import type { Permission } from './auth.js';
 import { typeByKey, type LogbookSettings } from './logbook-types.js';
 
+// Product default (LB-04): an activity time older than this makes the entry a late entry.
+export const LATE_MINUTES = 30;
+
 // Entry data per built-in logbook type (D-07). Sterile types arrive in S6.
 const checklistAnswers = z.record(z.string().max(200), z.boolean()).default({});
 const isoTime = z.string().datetime({ offset: true }).transform((t) => new Date(t).toISOString());

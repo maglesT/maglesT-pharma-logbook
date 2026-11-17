@@ -222,13 +222,34 @@ describe('breakdown register (LB-02, LB-22)', () => {
     expect(statsA.mttrHours).toBe(3);
   });
 
+  it('LB-02: a past breakdown recorded after its repair is down until its repair end, not until it was entered or released (D-58)', async () => {
+    const id = await newItem({ location: 'Block P' });
+    const day = 24 * 60;
+    // Happened about 3 days ago, repaired within 3 hours; written down and released today.
+    const past = (await entry('eng1', id, { logbookType: 'maintenance', activityStart: ago(3 * day - 30), activityEnd: ago(3 * day - 180), lateReason: 'past breakdown from the paper log',
+      data: repairData({ occurredAt: ago(3 * day) }), signature: sig('eng1') })).json().id;
+    // A breakdown recorded as it happens keeps its downtime to QA release.
+    const live = (await entry('eng1', id, { logbookType: 'maintenance', activityStart: ago(25), activityEnd: ago(5), data: repairData({ occurredAt: ago(40) }), signature: sig('eng1') })).json().id;
+    for (const v of [past, live]) {
+      await signEntry('sup1', 'verify', v);
+      await signEntry('qa', 'release', v);
+    }
+    const week = new Date(Date.now() - 7 * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    const all = (await call(t.app, c.op1!, 'GET', `/api/breakdowns?fromDay=${week}&toDay=${today()}&equipmentId=${id}`)).json();
+    const [recent, old] = all.items;
+    expect(old).toMatchObject({ status: 'released', downtimeFinal: true, downtimeMinutes: 180 });
+    expect(recent.downtimeMinutes).toBeGreaterThanOrEqual(39);
+    expect(recent.downtimeMinutes).toBeLessThanOrEqual(41);
+    expect(all.stats.machines[0].mttrHours).toBeLessThan(2);
+  });
+
   it('LB-02: MTTR and MTBF are computed from the records', () => {
     const h = 3_600_000;
     const from = new Date('2026-01-01T00:00:00Z');
     const to = new Date('2026-01-11T00:00:00Z');
     const bd = (occurred: number, released: number | null): Breakdown => ({
       equipmentId: 1, code: 'M1', name: 'M', occurredAt: new Date(from.getTime() + occurred * h), releasedAt: released === null ? null : new Date(from.getTime() + released * h),
-      downtimeMinutes: released === null ? 0 : (released - occurred) * 60, downtimeFinal: released !== null, failureCategory: 'mechanical',
+      downtimeEnd: new Date(released === null ? 8.64e15 : from.getTime() + released * h), downtimeMinutes: released === null ? 0 : (released - occurred) * 60, downtimeFinal: released !== null, failureCategory: 'mechanical',
     }) as Breakdown;
     // 240 h window, two failures: 4 h and 8 h down.
     const { machines } = breakdownStats([bd(10, 14), bd(100, 108)], from, to, new Date('2027-01-01'), new Map());
@@ -356,6 +377,11 @@ describe('history card (LB-01, LB-22)', () => {
     expect(csv.statusCode).toBe(200);
     expect(csv.body).toContain('"maintenance"');
     expect(csv.body).toContain('Downtime 0 h');
+    // D-56: entry data in labelled words, not the stored JSON.
+    expect(csv.body).toContain('Root cause: Worn contactor');
+    expect(csv.body).toContain('Batch B-HC-1 · Stage: Mixing');
+    expect(csv.body).not.toContain('{"');
+    expect(csv.body).not.toContain('rootCause');
     const pdf = await call(t.app, c.op1!, 'GET', `/api/export/history.pdf?equipmentId=${id}&${period()}`);
     expect(pdf.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
   });

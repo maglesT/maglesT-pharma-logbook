@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { api, cleaningText, daysLeft, type Due, can, ApiError, MEANING_LABEL, plantDay, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
+import { api, cleaningText, daysLeft, joinParts, type Due, can, ApiError, MEANING_LABEL, plantDay, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
@@ -200,7 +200,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
               </td>
               <td>{TYPE_LABEL[e.logbookType]}{e.late && <><br /><span className="chip chip-warn" title={e.lateReason ?? ''}>Late entry</span></>}</td>
               <td>
-                {e.batch && <>{productName(e.productId)} · batch {e.batch}<br /></>}
+                {e.batch && <>{joinParts([productName(e.productId), `batch ${e.batch}`])}<br /></>}
                 <Summary e={e} />
                 <VoiceLinks e={e} onOpen={setListening} />
                 {e.change === 'corrected' && <><br /><span className="muted">Corrected (version {e.version}): {e.correctionReason}</span></>}

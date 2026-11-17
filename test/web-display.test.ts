@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Fields } from '../web/src/fields.js';
 import { EndUseDialog, UseCheck } from '../web/src/pages/EquipmentPage.js';
-import { plantTime, type Entry, type EquipmentStatus } from '../web/src/api.js';
+import { joinParts, plantTime, type Entry, type EquipmentStatus } from '../web/src/api.js';
 import { dayText, timeText } from '../server/dates.js';
 
 // What the screens show, rendered as the browser gets it (owner 15 Nov 2026, end-to-end run findings).
@@ -77,5 +77,15 @@ describe('the check before use and the entry details read in words', () => {
     expect(dialog('Batchwright')).toContain('Required: batch RAB26001 is from the batch records of Batchwright.');
     expect(renderToStaticMarkup(createElement(EndUseDialog, { entry: use, what: '', onEnd: async () => {}, onCancel: () => {} })))
       .toContain('<option value="Batch record withdrawn">');
+  });
+
+  it('LB-02: a change over shows its fields by label, not stored names (D-55)', () => {
+    const shown = text(renderToStaticMarkup(createElement(Fields, { data: { fromProduct: 'PCM-500', fromBatch: 'TB260001', toProduct: 'IBU-400', toBatch: 'TB260002', checklist: {}, remarks: '' } })));
+    expect(shown).toBe('From product PCM-500 From batch TB260001 To product IBU-400 To batch TB260002');
+  });
+
+  it('a line of parts leaves the empty ones out: no "· ·" (D-55)', () => {
+    expect(joinParts(['PCM-500', null, '', ' ', 'in production'])).toBe('PCM-500 · in production');
+    expect(joinParts(['', null])).toBe('');
   });
 });
