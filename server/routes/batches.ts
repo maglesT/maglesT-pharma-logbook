@@ -4,12 +4,12 @@ import { parseId, requirePermission } from '../auth.js';
 import { logbookItem, logbookProducts } from '../master.js';
 import type { Batch } from '../batches.js';
 
-// Owner 2026-11-12: the batch list of the use and change-over forms, from Batchwright's batch records (platform link).
+// Owner 2026-11-12: the batch list of the use and change-over forms, from the TrueBatch products' batch records (platform links, D-45).
 export const RECENT_DAYS = 60;
 
 export interface BatchChoice extends Batch { productId: number | null; productName: string | null; onThisItem: boolean }
 
-/** Batchwright's batch with the Logbook's product for its product code (null when master data has no such product). */
+/** A batch-record batch with the Logbook's product for its product code (null when master data has no such product). */
 export async function batchWithProduct(q: Sql | Tx, app: FastifyInstance, batchNumber: string) {
   const batch = await app.batches!.get(batchNumber);
   if (!batch) return null;

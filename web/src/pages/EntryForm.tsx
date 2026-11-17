@@ -118,7 +118,7 @@ export function EntryForm({
   const [productId, setProductId] = useState<number | ''>(correcting?.productId ?? '');
   const [batch, setBatch] = useState(correcting?.batch ?? '');
   const [lateReason, setLateReason] = useState('');
-  // Owner 2026-11-12: batches come from the batch records (Batchwright) when the site links it; null until known.
+  // Owner 2026-11-12: batches come from the batch records (TrueBatch, D-45) when the site links it; null until known.
   const [batchList, setBatchList] = useState<{ linked: boolean; batches: BatchChoice[]; error?: string } | null>(null);
   useEffect(() => {
     if (type !== 'equipment_use' && type !== 'change_over') return;

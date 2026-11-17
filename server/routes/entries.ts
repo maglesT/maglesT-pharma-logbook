@@ -174,7 +174,7 @@ function cleaningFits(status: Pick<EquipmentStatus, 'inUse' | 'lastUseEnd'>, sta
 }
 
 // D-49: ending a use is a Logbook entry like any other, so it may say why; it must when the batch is from another product's
-// batch records (Batchwright, TrueBatch), which the Logbook does not keep: the reason is the record of why the use ended
+// batch records (TrueBatch), which the Logbook does not keep: the reason is the record of why the use ended
 // here. Returns those products, or null when the reason is optional. The screen asks the same rule (S11).
 export const endReasonFrom = (app: FastifyInstance, type: string, batch: string | null) =>
   type === 'equipment_use' && batch && app.batches ? app.batches.source.replaceAll(', ', ' or ') : null;
@@ -365,7 +365,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
             throw new EntryError(400, 'check_failed', [`The dirty hold ran out at ${plantTime(status.dirtyUntil)}: give the reason the cleaning is late.`]);
           }
         }
-        // Owner 2026-11-12: with Batchwright (or TrueBatch, D-45) linked, the batch is one of its batch records and the product is the batch's.
+        // Owner 2026-11-12, D-45: with TrueBatch linked, the batch is one of its batch records and the product is the batch's.
         if (app.batches && isUse) {
           if (!b.batch) throw new EntryError(400, 'check_failed', ['Choose the batch from the batch records.']);
           const found = await batchWithProduct(tx, app, b.batch);

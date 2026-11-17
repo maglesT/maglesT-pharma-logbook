@@ -11,10 +11,8 @@ const schema = z.object({
   // Owner 2026-11-12: the Qualification product's database through the platform link (qualification_v1, protocol_v1).
   QUAL_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   // D-37: the Deviations product's database through the platform link (deviation_v1: numbers of raised deviations).
-  // Owner 2026-11-12: Batchwright's database through the platform link (batch_fact_v1, equipment_use_v1): batches are chosen, not typed.
-  EBMR_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   DEVIATIONS_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
-  // D-45: TrueBatch Tablets' database through the platform link (batch_fact_v1, equipment_use_v1, as Batchwright's).
+  // D-45: TrueBatch Tablets' database through the platform link (batch_fact_v1, equipment_use_v1): batches are chosen, not typed.
   TRUEBATCH_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   // D-47: TrueBatch Tablets Packing's database through the platform link (equipment_use_v1, as TrueBatch's).
   TRUEBATCH_PACKING_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),

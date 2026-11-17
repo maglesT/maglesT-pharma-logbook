@@ -40,8 +40,9 @@ test('LB-06: PM due within 15 days shows in Dues and in the sign-in banner; scan
   await expect(banner).toContainText(`${item.code} · Preventive maintenance due`);
   const dues = page.locator('[aria-label="Preventive maintenance dues"]');
   await expect(dues.locator('.due-row').filter({ hasText: item.code })).toContainText('in 3 days');
-  // Owner 2026-11-13 (D-41): three parts; the graph has four sections and zooms into lifecycle management.
-  for (const t of ['Compliance', 'Workflow', 'Open exceptions and abnormalities']) await expect(page.getByRole('tab', { name: new RegExp(t) })).toBeVisible();
+  // Owner 2026-11-13 (D-41): the parts (D-68: two, the exceptions part went with Batchwright); the graph has four sections and zooms into lifecycle management.
+  for (const t of ['Compliance', 'Workflow']) await expect(page.getByRole('tab', { name: new RegExp(t) })).toBeVisible();
+  await expect(page.getByRole('tab', { name: /Open exceptions/ })).toHaveCount(0);
   const graph = page.getByRole('region', { name: 'Status of the plant' });
   for (const g of ['Cleaning status', 'Lifecycle management', 'Change over', 'In use']) await expect(graph).toContainText(g);
   await graph.locator('.section-card').filter({ hasText: 'Lifecycle management' }).click();

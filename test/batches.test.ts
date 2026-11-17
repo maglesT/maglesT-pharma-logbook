@@ -4,12 +4,13 @@ import { addItem, addProduct, call, freshApp, login, proofFor, seedUser, type Te
 import { connect, type Sql } from '../server/db.js';
 import { TEST_DATABASE_URL } from './helpers.js';
 
-// Owner 2026-11-12: the batch of a use or change over is chosen from Batchwright's batch records (report.batch_fact_v1,
+// Owner 2026-11-12: the batch of a use or change over is chosen from the batch records (report.batch_fact_v1,
 // report.equipment_use_v1, read through the platform link); the product is the batch's. Nothing is typed.
+// D-68: the first product here is TrueBatch Injectables (the generic columns only); Batchwright is retired.
 let t: TestApp;
 let reader: Sql;
 const c: Record<string, string> = {};
-const S = `bw_${process.pid}`;
+const S = `ti_${process.pid}`;
 // D-45: TrueBatch's views of the same names and columns (its own statuses: IN_PRODUCTION until production approval).
 const TB = `tb_${process.pid}`;
 const sig = (u: string) => ({ proof: proofFor(u) });
@@ -43,7 +44,7 @@ beforeAll(async () => {
     insert into ${TB}.equipment_use_v1 (batch_number, equipment_code, equipment_type, room_code, step) values ('TBM26001', 'CMP-TB1', 'machine', 'COMP-T', 'compression/press');
     grant usage on schema ${TB} to logbook_app; grant select on all tables in schema ${TB} to logbook_app;`);
   reader = connect(TEST_DATABASE_URL, { role: 'logbook_app' });
-  t.app.batches = sqlBatches(reader, S);
+  t.app.batches = sqlBatches(reader, S, 'TrueBatch Injectables');
   for (const [u, roles] of [['admin', ['admin']], ['qa1', ['qa']], ['op1', ['operator']]] as const) await seedUser(t.owner, u, [...roles]);
   for (const [k, u] of [['admin', 'admin'], ['qa', 'qa1'], ['op1', 'op1']] as const) c[k] = (await login(t.app, u)).cookie;
   met = await addProduct(t, 'FG-MET500', 'Metformin tablets 500 mg');
@@ -78,8 +79,8 @@ describe('batches from the batch records (owner 2026-11-12)', () => {
   });
 
   it('LB-02: a use takes its batch from the batch records and its product from the batch; a typed or finished batch is refused', async () => {
-    expect((await use(mill, { batch: 'TYPED-1', productId: met })).json().problems).toEqual(['Batch TYPED-1 is not in the batch records (Batchwright).']);
-    expect((await use(mill, { batch: 'PCM26010' })).json().problems).toEqual(['Batch PCM26010 is not in production in Batchwright (QA_REVIEWED).']);
+    expect((await use(mill, { batch: 'TYPED-1', productId: met })).json().problems).toEqual(['Batch TYPED-1 is not in the batch records (TrueBatch Injectables).']);
+    expect((await use(mill, { batch: 'PCM26010' })).json().problems).toEqual(['Batch PCM26010 is not in production in TrueBatch Injectables (QA_REVIEWED).']);
     expect((await use(mill, { batch: 'XYZ26001' })).json().problems[0]).toContain('The product FG-XYZ of batch XYZ26001 is not in master data');
     expect((await use(mill, {})).json().problems).toEqual(['Choose the batch from the batch records.']);
     const ok = await use(mill, { batch: 'PCM26011', productId: met });   // the product is the batch's, whatever is sent
@@ -96,21 +97,21 @@ describe('batches from the batch records (owner 2026-11-12)', () => {
     expect(row!.data).toMatchObject({ fromBatch: 'PCM26010', fromProduct: 'FG-PCM500 · Paracetamol tablets 500 mg', toBatch: 'MET26007', toProduct: 'FG-MET500 · Metformin tablets 500 mg' });
     const bad = await call(t.app, c.op1!, 'POST', `/api/equipment/${mill}/entries`, { logbookType: 'change_over', activityStart: now(),
       data: { fromBatch: 'MET26007', toBatch: 'PCM26010', checklist: {} }, signature: sig('op1') });
-    expect(bad.json().problems).toEqual(['Batch PCM26010 is not in production in Batchwright (QA_REVIEWED).']);
+    expect(bad.json().problems).toEqual(['Batch PCM26010 is not in production in TrueBatch Injectables (QA_REVIEWED).']);
   });
 
   it('LB-01: ending a use of a batch from the batch records needs the reason, kept with the use; it needs no link to end (D-49)', async () => {
     const press = await addItem(t, { code: 'CMP-T9', location: 'COMP-T' });
     const id = (await use(press, { batch: 'MET26007' })).json().id;
     const open = (await call(t.app, c.op1!, 'GET', `/api/equipment/${press}/entries`)).json().find((e: { id: number }) => e.id === id);
-    expect(open).toMatchObject({ inProgress: true, endReasonFrom: 'Batchwright' });
+    expect(open).toMatchObject({ inProgress: true, endReasonFrom: 'TrueBatch Injectables' });
     const end = (body: object = {}) => call(t.app, c.op1!, 'POST', `/api/entries/${id}/complete`, { activityEnd: now(), ...body });
     for (const missing of [{}, { endReason: '   ' }]) {
       const refused = await end(missing);
       expect(refused.statusCode).toBe(400);
-      expect(refused.json()).toEqual({ error: 'end_reason_required', problems: ['Batch MET26007 is from the batch records of Batchwright: give the reason the use ends.'] });
+      expect(refused.json()).toEqual({ error: 'end_reason_required', problems: ['Batch MET26007 is from the batch records of TrueBatch Injectables: give the reason the use ends.'] });
     }
-    // The reason is a Logbook record: ending needs no answer from Batchwright.
+    // The reason is a Logbook record: ending needs no answer from the batch records.
     await t.owner.unsafe(`revoke select on all tables in schema ${S} from logbook_app`);
     try {
       expect((await end({ endReason: 'Batch record withdrawn' })).statusCode).toBe(200);
@@ -123,62 +124,61 @@ describe('batches from the batch records (owner 2026-11-12)', () => {
     expect(v2.activityEnd).not.toBeNull();
   });
 
-  it('PL-08: with the link to Batchwright cut, the batch list and a new use stop with "connection off"', async () => {
+  it('PL-08: with the link cut, the batch list and a new use stop with "connection off"', async () => {
     await t.owner.unsafe(`revoke select on all tables in schema ${S} from logbook_app`);
     try {
       const r = await call(t.app, c.op1!, 'GET', `/api/equipment/${rmg}/batches`);
       expect(r.statusCode).toBe(503);
-      expect(r.json().message).toContain('Batchwright');
+      expect(r.json().message).toContain('TrueBatch Injectables');
     } finally {
       await t.owner.unsafe(`grant select on all tables in schema ${S} to logbook_app`);
     }
   });
 });
 
-describe('batches from TrueBatch as well (D-45)', () => {
-  let bw: ReturnType<typeof sqlBatches>;
+describe('batches from two TrueBatch products (D-45, D-61)', () => {
+  let ti: ReturnType<typeof sqlBatches>;
   let press: number;
   let blender: number;
   beforeAll(async () => {
-    bw = t.app.batches!;
+    ti = t.app.batches!;
     press = await addItem(t, { code: 'CMP-TB1', location: 'COMP-T' });
     blender = await addItem(t, { code: 'BLD-TB2', location: 'COMP-T' });
-    t.app.batches = mergeBatches([bw, sqlBatches(reader, TB, 'TrueBatch')]);
+    t.app.batches = mergeBatches([ti, sqlBatches(reader, TB, 'TrueBatch')]);
   });
-  afterAll(() => { t.app.batches = bw; });
+  afterAll(() => { t.app.batches = ti; });
 
-  it('LB-02: with both linked, the list has the batches of both, a TrueBatch batch using this item on top; a number in both is Batchwright\'s', async () => {
+  it('LB-02: with both linked, the list has the batches of both, a TrueBatch batch using this item on top; a number in both is the first product\'s', async () => {
     const r = (await call(t.app, c.op1!, 'GET', `/api/equipment/${press}/batches`)).json();
     expect(r.linked).toBe(true);
     expect(r.batches[0]).toMatchObject({ batchNumber: 'TBM26001', source: 'TrueBatch', onThisItem: true, inProduction: true, productName: 'Metformin tablets 500 mg' });
     const numbers = r.batches.map((b: { batchNumber: string }) => b.batchNumber);
     expect(numbers).toEqual(expect.arrayContaining(['TBM26001', 'TBM26002', 'PCM26011', 'MET26007']));
     expect(numbers.filter((b: string) => b === 'MET26007')).toHaveLength(1);
-    expect(r.batches.find((b: { batchNumber: string }) => b.batchNumber === 'MET26007')).toMatchObject({ source: 'Batchwright', productCode: 'FG-MET500' });
+    expect(r.batches.find((b: { batchNumber: string }) => b.batchNumber === 'MET26007')).toMatchObject({ source: 'TrueBatch Injectables', productCode: 'FG-MET500' });
   });
 
   it('LB-02: a use takes a TrueBatch batch and its product; a TrueBatch batch past production or a number in neither is refused', async () => {
     expect((await use(blender, { batch: 'TBM26002' })).json().problems).toEqual(['Batch TBM26002 is not in production in TrueBatch (PRODUCTION_APPROVED).']);
-    expect((await use(blender, { batch: 'NONE-1' })).json().problems).toEqual(['Batch NONE-1 is not in the batch records (Batchwright, TrueBatch).']);
+    expect((await use(blender, { batch: 'NONE-1' })).json().problems).toEqual(['Batch NONE-1 is not in the batch records (TrueBatch Injectables, TrueBatch).']);
     const ok = await use(press, { batch: 'TBM26001' });
     expect(ok.statusCode).toBe(201);
     const [row] = await t.owner<{ code: string; batch: string }[]>`select p.code, e.batch from entries e join products p on p.id = e.product_id where e.id = ${ok.json().id}`;
     expect(row).toEqual({ code: 'FG-MET500', batch: 'TBM26001' });
   });
 
-  it('LB-02: with TrueBatch alone, batches come from TrueBatch and the batch-record exceptions on Home are not linked', async () => {
+  it('LB-02: with TrueBatch alone, batches come from TrueBatch', async () => {
     t.app.batches = mergeBatches([null, sqlBatches(reader, TB, 'TrueBatch')]);
     try {
       const r = (await call(t.app, c.op1!, 'GET', `/api/equipment/${blender}/batches`)).json();
       expect(r.batches.map((b: { batchNumber: string }) => b.batchNumber).sort()).toEqual(['MET26007', 'TBM26001', 'TBM26002']);
-      expect((await call(t.app, c.op1!, 'GET', '/api/dashboard/exceptions')).json()).toEqual({ linked: false });
       expect((await use(blender, { batch: 'PCM26011' })).json().problems).toEqual(['Batch PCM26011 is not in the batch records (TrueBatch).']);
     } finally {
-      t.app.batches = mergeBatches([bw, sqlBatches(reader, TB, 'TrueBatch')]);
+      t.app.batches = mergeBatches([ti, sqlBatches(reader, TB, 'TrueBatch')]);
     }
   });
 
-  it('PL-08: with the link to TrueBatch cut, the list stops with "connection off"; a Batchwright batch is still found, an unknown one is not refused as unknown', async () => {
+  it('PL-08: with the link to TrueBatch cut, the list stops with "connection off"; the other product\'s batch is still found, an unknown one is not refused as unknown', async () => {
     await t.owner.unsafe(`revoke select on all tables in schema ${TB} from logbook_app`);
     try {
       const r = await call(t.app, c.op1!, 'GET', `/api/equipment/${blender}/batches`);
@@ -213,7 +213,7 @@ describe('batches from the packing products as well (D-61)', () => {
     t.app.batches = mergeBatches([sqlBatches(reader, TB, 'TrueBatch'), sqlBatches(reader, PK, 'TrueBatch Packing', 'packing_batch_v1')]);
   });
   afterAll(async () => {
-    t.app.batches = sqlBatches(reader, S);
+    t.app.batches = sqlBatches(reader, S, 'TrueBatch Injectables');
     await t.owner.unsafe(`drop schema if exists ${PK} cascade`);
   });
 

@@ -1,29 +1,21 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { api, daysLeft, DEADLINE_LABEL, plantDay, plantTime, timeLeft, timeText, TYPE_LABEL, type Due, type Entry, type Equipment, type EquipmentStatus, type Me } from '../api.js';
 
-// Owner 2026-11-13 (D-41): the home dashboard in three parts.
+// Owner 2026-11-13 (D-41): the home dashboard.
 //  1. Compliance: on-time completion of scheduled activities; dues in four columns (cleaning, PM, calibration,
 //     requalification; due once 85 % of the allowed time has passed); a graph in four sections (cleaning status,
 //     lifecycle management, change over, in use) that zooms into each section.
 //  2. Pending review and approval: mine (green normal, yellow getting late) and, for senior people, others' by department.
-//  3. Open exceptions and abnormalities from the batch records (Batchwright), with an analysis and suggestions.
+// D-68: the third part (exceptions and abnormalities from Batchwright's batch records) went with Batchwright.
 
 interface Item { eq: Equipment; st: EquipmentStatus }
-type Tab = 'compliance' | 'review' | 'exceptions';
+type Tab = 'compliance' | 'review';
 interface Compliance { days: number; total: number; onTime: number; percent: number | null;
   byKind: Record<'cleaning' | 'pm' | 'calibration' | 'requalification', { total: number; onTime: number; missed: number; percent: number | null }> }
 interface Pending { kind: 'verify' | 'release' | 'approve'; id: number; equipmentId: number | null; code: string; name: string; what: string; by: string;
   byMe: boolean; since: string; ageHours: number; late: boolean; department: string }
 interface PendingData { lateAfterHours: number; total: number; forMe: Pending[]; mine: Pending[]; others: Pending[] | null;
   byDepartment: { department: string; normal: number; late: number }[] | null }
-interface Exc { batchNumber: string; exceptionId: string; type: string; category: string; severity: string; step: string | null; stepTitle: string | null;
-  description: string | null; status: string; disposition: string | null; raisedAt: string }
-interface ExcData { linked: boolean; days?: number; exceptions?: Exc[];
-  ipc?: { batchNumber: string; stepTitle: string | null; checkKind: string; item: string | null; value: string | null; unit: string | null; lower: string | null; upper: string | null; result: string; recordedAt: string }[];
-  process?: { batchNumber: string; step: string | null; tag: string; value: string | null; unit: string | null; lower: string | null; upper: string | null; recordedAt: string }[];
-  alarms?: { code: string; source: string; subject: string | null; raisedAt: string }[];
-  analysis?: { open: number; openExceptions: number; abnormalReadings: number; bySeverity: { key: string; n: number }[]; byCategory: { key: string; n: number }[];
-    byType: { key: string; n: number }[]; byBatch: { key: string; n: number }[]; oldOpen: number; insights: { level: 'high' | 'medium' | 'info'; text: string }[] } }
 interface Overdue { linked: boolean; events: { id: number; equipmentId: number; code: string; name: string; label: string; dueAt: string; deviation: { number: string; status: string } | null }[] }
 
 const C = { ready: '#17803d', dirty: '#b7791f', due: '#f0b429', over: '#c0352b', life: '#a3195b', co: '#6b4fbb', use: '#1f63b8', grey: '#8a8f96' };
@@ -322,61 +314,6 @@ function Review({ d, onOpen }: { d: PendingData | null; onOpen: (id: number) => 
   );
 }
 
-// ---- exceptions from the batch records ----
-const SEV_COLOR = (s: string) => (/CRITICAL/i.test(s) ? C.over : /ACTION|MAJOR/i.test(s) ? '#d9622b' : C.due);
-const words = (s: string) => s.toLowerCase().replaceAll('_', ' ');
-function Exceptions({ d }: { d: ExcData | null }) {
-  if (!d) return null;
-  if (!d.linked) return <section className="dash-panel"><p className="muted">The batch records (Batchwright) are not linked on this site.</p></section>;
-  const a = d.analysis!;
-  const open = d.exceptions!.filter((e) => e.status !== 'DISPOSITIONED' && e.status !== 'CLOSED');
-  return (
-    <>
-      <div className="kpis">
-        <div className={a.openExceptions ? 'kpi bad' : 'kpi ok'}><b>{a.openExceptions}</b><span>Open exceptions</span></div>
-        <div className={a.abnormalReadings ? 'kpi warn' : 'kpi ok'}><b>{a.abnormalReadings}</b><span>Abnormal readings ({d.days} days)</span></div>
-        <div className={d.alarms!.length ? 'kpi bad' : 'kpi ok'}><b>{d.alarms!.length}</b><span>GMP alarms not acknowledged</span></div>
-        <div className={a.oldOpen ? 'kpi warn' : 'kpi ok'}><b>{a.oldOpen}</b><span>Open more than 3 days</span></div>
-      </div>
-      <section className="dash-panel" aria-label="Analysis">
-        <div className="panel-head"><h2>Analysis and suggestions</h2><span className="muted">fixed rules over the abnormal records only</span></div>
-        <ul className="insights">{a.insights.map((x, n) => <li key={n} className={x.level}><span className="ins-tag">{x.level === 'high' ? 'Act now' : x.level === 'medium' ? 'Look into' : 'OK'}</span>{x.text}</li>)}</ul>
-        <div className="three-col">
-          <div><h4>By category</h4><Bars rows={a.byCategory.map((r) => ({ key: r.key, label: words(r.key), n: r.n, color: C.life }))} /></div>
-          <div><h4>By severity</h4><Bars rows={a.bySeverity.map((r) => ({ key: r.key, label: words(r.key), n: r.n, color: SEV_COLOR(r.key) }))} /></div>
-          <div><h4>Batches with most abnormal records</h4><Bars rows={a.byBatch.map((r) => ({ key: r.key, label: r.key, n: r.n, color: C.use }))} /></div>
-        </div>
-      </section>
-      <section className="dash-panel" aria-label="Open exceptions">
-        <div className="panel-head"><h2>Open exceptions</h2><span className="pill bad">{open.length}</span></div>
-        {open.length === 0 ? <p className="all-good"><span aria-hidden="true">✓</span> No open exception.</p> : (
-          <table className="plain-table">
-            <thead><tr><th>Batch</th><th>Exception</th><th>Step</th><th>Severity</th><th>Status</th><th>Raised</th></tr></thead>
-            <tbody>{open.map((e) => (
-              <tr key={e.exceptionId}><td><strong>{e.batchNumber}</strong></td><td>{words(e.type)}<small className="cell-sub">{e.description ?? words(e.category)}</small></td>
-                <td>{e.stepTitle ?? e.step ?? '—'}</td><td><span className="sev" style={{ background: SEV_COLOR(e.severity) }}>{words(e.severity)}</span></td>
-                <td>{words(e.status)}{e.disposition ? ` · ${words(e.disposition)}` : ''}</td><td>{shortTime(e.raisedAt)}</td></tr>))}</tbody>
-          </table>
-        )}
-      </section>
-      <section className="dash-panel" aria-label="Abnormal readings">
-        <div className="panel-head"><h2>Abnormal readings</h2><span className="muted">in-process checks failed or on alert, process values out of limits · last {d.days} days</span></div>
-        {d.ipc!.length + d.process!.length === 0 ? <p className="all-good"><span aria-hidden="true">✓</span> None.</p> : (
-          <table className="plain-table">
-            <thead><tr><th>Batch</th><th>Check / value</th><th>Result</th><th>Limits</th><th>Recorded</th></tr></thead>
-            <tbody>
-              {d.ipc!.map((r, n) => <tr key={`i${n}`}><td><strong>{r.batchNumber}</strong></td><td>{r.item ?? words(r.checkKind)}<small className="cell-sub">{r.stepTitle}</small></td>
-                <td><span className="sev" style={{ background: r.result === 'FAIL' ? C.over : C.due }}>{r.result.toLowerCase()}</span> {r.value}{r.unit ? ` ${r.unit}` : ''}</td><td>{r.lower ?? '–'} to {r.upper ?? '–'}</td><td>{shortTime(r.recordedAt)}</td></tr>)}
-              {d.process!.map((r, n) => <tr key={`p${n}`}><td><strong>{r.batchNumber}</strong></td><td>{r.tag}<small className="cell-sub">{r.step}</small></td>
-                <td><span className="sev" style={{ background: C.over }}>out of limits</span> {r.value}{r.unit ? ` ${r.unit}` : ''}</td><td>{r.lower ?? '–'} to {r.upper ?? '–'}</td><td>{shortTime(r.recordedAt)}</td></tr>)}
-            </tbody>
-          </table>
-        )}
-      </section>
-    </>
-  );
-}
-
 const DEV_STEP: Record<string, string> = { classification: 'awaiting QA classification', approval: 'awaiting approval', investigation: 'under investigation',
   closure: 'awaiting closure', closed: 'closed', rejected: 'rejected' };
 
@@ -387,7 +324,6 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
   const [open, setOpen] = useState<Entry[]>([]);
   const [compliance, setCompliance] = useState<Compliance | null>(null);
   const [pending, setPending] = useState<PendingData | null>(null);
-  const [exc, setExc] = useState<ExcData | null>(null);
   const [raised, setRaised] = useState<Overdue | null>(null);
   const [updated, setUpdated] = useState<string | null>(null);
 
@@ -395,9 +331,9 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
     const get = <T,>(u: string) => api<T>('GET', u, undefined, background);
     const [s, e, o] = await Promise.all([get<EquipmentStatus[]>('/api/equipment/status'), get<Equipment[]>('/api/equipment'), get<Entry[]>('/api/entries/open')]);
     setStatuses(s); setEquipment(e); setOpen(o);
-    const [c, p, x, r] = await Promise.all([get<Compliance>('/api/dashboard/compliance').catch(() => null), get<PendingData>('/api/dashboard/pending').catch(() => null),
-      get<ExcData>('/api/dashboard/exceptions').catch(() => ({ linked: true, error: true }) as unknown as ExcData), get<Overdue>('/api/overdue').catch(() => null)]);
-    setCompliance(c); setPending(p); setExc(x); setRaised(r);
+    const [c, p, r] = await Promise.all([get<Compliance>('/api/dashboard/compliance').catch(() => null), get<PendingData>('/api/dashboard/pending').catch(() => null),
+      get<Overdue>('/api/overdue').catch(() => null)]);
+    setCompliance(c); setPending(p); setRaised(r);
     setUpdated(new Date().toISOString());
   };
   useEffect(() => {
@@ -415,7 +351,6 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
   const tabs: { key: Tab; title: string; value: string; sub: string; tone: string }[] = [
     { key: 'compliance', title: 'Compliance', value: pct === null || pct === undefined ? '—' : `${pct}%`, sub: 'on-time logbook completion', tone: pct === null || pct === undefined ? '' : pct >= 95 ? 'ok' : pct >= 85 ? 'warn' : 'bad' },
     { key: 'review', title: 'Workflow', value: String(pending ? pending.forMe.length : '—'), sub: `pending review and approval${pending?.others ? ` · ${pending.total} in all` : ''}`, tone: pending?.forMe.some((p) => p.late) ? 'warn' : 'info' },
-    { key: 'exceptions', title: 'Open exceptions and abnormalities', value: exc?.linked && exc.analysis ? String(exc.analysis.open) : '—', sub: 'from the batch records', tone: exc?.analysis?.open ? 'bad' : 'ok' },
   ];
 
   return (
@@ -470,7 +405,6 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
         </>
       )}
       {tab === 'review' && <Review d={pending} onOpen={onOpen} />}
-      {tab === 'exceptions' && <Exceptions d={exc} />}
     </>
   );
 }
