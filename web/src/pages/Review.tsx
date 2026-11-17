@@ -7,7 +7,7 @@ import { Fields } from '../fields.js';
 type PeriodEntry = Entry & { latest: boolean; open: boolean; equipmentCode?: string };
 interface Period {
   entries: PeriodEntry[];
-  openItems: { notFinishedOrNotVerified: number; late: number; corrected: number; failedCalibrations: number };
+  openItems: { notFinishedOrNotVerified: number; late: number; corrected: number; failedCalibrations: number; typedByHand: number };
   audit: AuditRow[];
   contentHash: string;
   reviews: { id: number; periodFrom: string; periodTo: string; reviewedBy: string; reviewedAt: string; superseded: boolean; valid: boolean }[];
@@ -82,6 +82,7 @@ function PeriodReview({ me }: { me: Me }) {
             <span className={period.openItems.late ? 'reason' : ''}>{period.openItems.late} late</span>
             <span className={period.openItems.corrected ? 'reason' : ''}>{period.openItems.corrected} corrections</span>
             <span className={period.openItems.failedCalibrations ? 'reason' : ''}>{period.openItems.failedCalibrations} failed calibrations</span>
+            <span className={period.openItems.typedByHand ? 'reason' : ''}>{period.openItems.typedByHand} typed by hand or not checked</span>
           </div>
           {period.reviews.map((r) => (
             <p key={r.id}>

@@ -1,6 +1,6 @@
 import type { Sql, Tx } from './db.js';
 import { careByLocalId, type Care, type Master } from './master.js';
-import type { Qualification, QualStatus } from './qualification.js';
+import { QualificationOff, type Qualification, type QualStatus } from './qualification.js';
 import { UsesOff, type TrueBatchUse, type TrueBatchUses, type UseSource } from './batches.js';
 import { dayText, timeText } from './dates.js';
 
@@ -119,7 +119,9 @@ function dueOf(kind: Due['kind'], due: string, today: string, frequency: string,
 /** What the status needs from master data and the Qualification product, by local item id (platform D-24). */
 export interface StatusContext {
   care: Map<number, Care & { needsCalibration: boolean; addedAt: Date; active: boolean }>;
-  qual: Map<number, QualStatus> | null;           // null: no Qualification link
+  qual: Map<number, QualStatus> | null;           // null: no Qualification link, or it is down
+  // D-70 (G15): Qualification is linked but does not answer: the status goes on without it and says so.
+  qualDown?: boolean;
   // D-46: the uses recorded in TrueBatch and TrueBatch Packing (D-47) by local item id (the newest open and the newest
   // ended, of both); null: neither is linked.
   trueBatch?: Map<number, { open: TrueBatchUse | null; last: TrueBatchUse | null }> | null;
@@ -150,7 +152,13 @@ export async function statusContext(sql: Sql | Tx, master: Master, qualification
   const care = await careByLocalId(sql, master);
   const tb = { ...(uses.length ? await trueBatchUses(sql, uses) : { trueBatch: null }), antibiotics: new Set((await master.products()).filter((p) => p.antibiotic).map((p) => p.code)) };
   if (!qualification) return { care, qual: null, ...tb };
-  const byMaster = await qualification.statuses();
+  // D-70 (owner 17 Nov 2026, G15): a Qualification link that is down counts as not linked (with a warning), so it never
+  // stops every entry; adding an item and a requalification still wait for it.
+  let byMaster: Map<string, QualStatus>;
+  try { byMaster = await qualification.statuses(); } catch (e) {
+    if (e instanceof QualificationOff) return { care, qual: null, qualDown: true, ...tb };
+    throw e;
+  }
   const ids = await sql<{ id: number; item_id: string }[]>`select id::int, item_id::text from equipment where item_id is not null`;
   return { care, qual: new Map(ids.flatMap((r) => (byMaster.has(r.item_id) ? [[r.id, byMaster.get(r.item_id)!] as const] : []))), ...tb };
 }
@@ -167,6 +175,8 @@ export function antibioticBlocker(last: { code: string; antibiotic?: boolean } |
 export const usesOffWarning = (source: UseSource) =>
   `Connection to ${source} is off: machine and room uses recorded in ${source} (in use, dirty after use) are not shown. Ask your administrator.`;
 export const TRUEBATCH_USES_OFF = usesOffWarning('TrueBatch');
+/** D-70: what a Qualification link that is down leaves out of the status. */
+export const QUAL_DOWN_WARNING = 'Qualification not reachable: qualification not checked.';
 
 interface Facts {
   id: number;
@@ -178,6 +188,7 @@ interface Facts {
   tb: { open: TrueBatchUse | null; last: TrueBatchUse | null } | null;
   antibiotics: Set<string>;
   usesOff: UseSource[];
+  qualDown: boolean;
   last_pm_end: Date | null;
   last_cal_pass_at: Date | null;
   open_change_over_since: Date | null;
@@ -237,7 +248,7 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
   const scope = ids === null ? q`true` : q`e.equipment_id = any(${ids}::bigint[])`;
   // D-46: the end of the last TrueBatch (or TrueBatch Packing) use counts as a use end (a cleaning must follow it).
   const tbEnds = [...(ctx.trueBatch ?? [])].filter(([id, u]) => u.last?.endedAt && (ids === null || ids.includes(id)));
-  const rows = await q<Omit<Facts, 'care' | 'qual' | 'hasQual' | 'tb' | 'usesOff' | 'antibiotics'>[]>`
+  const rows = await q<Omit<Facts, 'care' | 'qual' | 'hasQual' | 'tb' | 'usesOff' | 'qualDown' | 'antibiotics'>[]>`
     with latest as (
       select e.*,
         exists (select 1 from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'verified') as verified
@@ -364,7 +375,7 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
   const none = { cleanHoldHours: null, dirtyHoldHours: null, cleaningBasis: null, cleaningFrequencyHours: null, pmFrequencyDays: null,
     calibrationFrequencyDays: null, requalificationFrequencyMonths: null, needsCalibration: false, addedAt: new Date(0) };
   return rows.map((r) => ({ ...r, care: ctx.care.get(r.id) ?? none, qual: ctx.qual?.get(r.id) ?? null, hasQual: ctx.qual !== null,
-    tb: ctx.trueBatch?.get(r.id) ?? null, usesOff: ctx.usesOff ?? [], antibiotics: ctx.antibiotics ?? new Set() }));
+    tb: ctx.trueBatch?.get(r.id) ?? null, usesOff: ctx.usesOff ?? [], qualDown: ctx.qualDown ?? false, antibiotics: ctx.antibiotics ?? new Set() }));
 }
 
 export function deriveStatus(f: Facts): EquipmentStatus {
@@ -380,6 +391,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   const lastTrueBatchUse = tbLast?.endedAt && f.last_use_end && tbLast.endedAt.getTime() === f.last_use_end.getTime()
     ? { batch: tbLast.batchNumber, step: tbLast.step, endedAt: tbLast.endedAt, source: tbLast.source } : null;
   for (const source of f.usesOff) warnings.push(usesOffWarning(source));
+  if (f.qualDown) warnings.push(QUAL_DOWN_WARNING);
 
   // LB-06 / SchM 18.4.3: defective equipment is withdrawn until released.
   if (f.open_breakdowns > 0) blockers.push('Out of service: a breakdown has not been released by QA.');

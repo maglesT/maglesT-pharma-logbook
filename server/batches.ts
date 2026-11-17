@@ -4,7 +4,8 @@ import { ConnectionOff } from './master.js';
 // Owner 2026-11-12: the batch of a use or change over is chosen from the batch records, never typed. The Logbook reads
 // the batch-record products' report views through the platform links (report.batch_fact_v1: batches with product and
 // status; report.equipment_use_v1: which equipment a batch uses), live, with its own login. Nothing is copied or written.
-// Without a link the batch is typed as before.
+// Without a link the batch is typed as before. D-69: each linked product is read on its own; a batch none of them lists
+// may be typed by hand (its product picked from master data), and the entry is marked "Typed by hand".
 // D-45 (owner 15 Nov 2026): TrueBatch Tablets publishes these views (TRUEBATCH_DATABASE_URL). D-68: Batchwright is
 // retired; its link, its abnormal records (Home, D-41) and their reader are gone.
 // D-61: TrueBatch Injectables' batches (its batch_fact_v1) and the packing products' batches (report.packing_batch_v1:
@@ -126,30 +127,52 @@ export function sqlTrueBatchUses(q: Sql, schema = 'report', source: UseSource = 
   };
 }
 
+/** The batch records of every linked product, read each on its own (D-69): a product that does not answer is left out. */
+export interface BatchRecords {
+  /** The linked batch-record products, in words (for messages). */
+  source: string;
+  /** The batches of the products that answered, and the products that did not. */
+  list(recentDays: number): Promise<{ batches: Batch[]; down: BatchSource[] }>;
+  /** The batch, from the first product (in the order given) that has it; and the products that did not answer. */
+  get(batchNumber: string): Promise<{ batch: Batch | null; down: BatchSource[] }>;
+  /** Batch numbers the products that answered show as using one of these equipment or room codes. */
+  usedOn(codes: string[]): Promise<Set<string>>;
+}
+/** D-69: the one-line note for a batch-record product that does not answer. */
+export const batchesOffNote = (source: string) => `Connection to ${source} is off: its batches are not listed.`;
+
 /**
  * D-45: the batch records of every linked product as one (null when none is linked). A batch number is looked up in
- * each; the first product (in the order given) that has it wins. The list and "used on" need every linked product to
- * answer: one that does not stops them with its own "connection off" (PL-08), as a single link does. A batch found in
- * one product is used even while another does not answer; a batch found in none while one does not answer is that
- * product's "connection off", never "unknown".
+ * each; the first product (in the order given) that has it wins.
+ * D-69 (owner 17 Nov 2026, G2): each product is read on its own. One that does not answer is skipped and named in
+ * `down` (the picker says so in one line); the others still answer, so one link down never stops every use.
  */
-export function mergeBatches(sources: (Batches | null)[]): Batches | null {
+export function mergeBatches(sources: (Batches | null)[]): BatchRecords | null {
   const all = sources.filter((s): s is Batches => s !== null);
-  if (all.length <= 1) return all[0] ?? null;
+  if (!all.length) return null;
+  // Every product's answer, or null for one whose link is off; any other error stops as before.
+  const each = async <T>(f: (s: Batches) => Promise<T>) => {
+    const got = await Promise.allSettled(all.map(f));
+    const down: BatchSource[] = [];
+    const values: T[] = [];
+    got.forEach((g, i) => {
+      if (g.status === 'fulfilled') values.push(g.value);
+      else if (g.reason instanceof TrueBatchOff) down.push(all[i]!.source as BatchSource);
+      else throw g.reason;
+    });
+    return { values, down };
+  };
   return {
     source: all.map((s) => s.source).join(', '),
     list: async (recentDays) => {
+      const { values, down } = await each((s) => s.list(recentDays));
       const seen = new Set<string>();
-      return (await Promise.all(all.map((s) => s.list(recentDays)))).flat()
-        .filter((b) => !seen.has(b.batchNumber) && seen.add(b.batchNumber));
+      return { batches: values.flat().filter((b) => !seen.has(b.batchNumber) && seen.add(b.batchNumber)), down };
     },
     get: async (batchNumber) => {
-      const got = await Promise.allSettled(all.map((s) => s.get(batchNumber)));
-      for (const g of got) if (g.status === 'fulfilled' && g.value) return g.value;
-      const off = got.find((g) => g.status === 'rejected');
-      if (off) throw (off as PromiseRejectedResult).reason;
-      return null;
+      const { values, down } = await each((s) => s.get(batchNumber));
+      return { batch: values.find((b) => b !== null) ?? null, down };
     },
-    usedOn: async (codes) => new Set((await Promise.all(all.map((s) => s.usedOn(codes)))).flatMap((u) => [...u])),
+    usedOn: async (codes) => new Set((await each((s) => s.usedOn(codes))).values.flatMap((u) => [...u])),
   };
 }

@@ -3,6 +3,8 @@ import { z } from 'zod';
 import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
 import { batchWithProduct } from './batches.js';
+import { batchesOffNote } from '../batches.js';
+import { QualificationOff } from '../qualification.js';
 import { parseId, requirePermission, type SessionUser } from '../auth.js';
 import { LOGBOOK_TYPES, typeByKey, type LogbookSettings } from '../logbook-types.js';
 import { DATA_SCHEMAS, REPORTED_FIELDS, checkData, correctCodes, mayCorrect, mayRecord, recordCode, performerSigns, verificationNeeded, type EntryContext, type EquipmentInfo } from '../entries.js';
@@ -29,6 +31,8 @@ const createBody = z.object({
   activityEnd: z.coerce.date().optional(),
   productId: z.number().int().positive().optional(),
   batch: z.string().trim().min(1).max(60).optional(),
+  // D-69: the batch (of a change over: the batches not in the list) typed by hand, its product picked from master data.
+  batchTyped: z.boolean().default(false),
   data: z.record(z.unknown()),
   lateReason: z.string().trim().max(500).optional(),
   // Required for types whose performer signs (D-16).
@@ -51,6 +55,7 @@ const correctBody = z.object({
   activityEnd: z.coerce.date().nullable().optional(),
   productId: z.number().int().positive().nullable().optional(),
   batch: z.string().trim().min(1).max(60).nullable().optional(),
+  batchTyped: z.boolean().default(false),
   data: z.record(z.unknown()),
   reason: z.string().trim().min(1).max(500),
   lateReason: z.string().trim().max(500).optional(),
@@ -176,8 +181,35 @@ function cleaningFits(status: Pick<EquipmentStatus, 'inUse' | 'lastUseEnd'>, sta
 // D-49: ending a use is a Logbook entry like any other, so it may say why; it must when the batch is from another product's
 // batch records (TrueBatch), which the Logbook does not keep: the reason is the record of why the use ended
 // here. Returns those products, or null when the reason is optional. The screen asks the same rule (S11).
-export const endReasonFrom = (app: FastifyInstance, type: string, batch: string | null) =>
-  type === 'equipment_use' && batch && app.batches ? app.batches.source.replaceAll(', ', ' or ') : null;
+// D-69: a batch typed by hand is not from the batch records.
+export const endReasonFrom = (app: FastifyInstance, type: string, batch: string | null, data: Record<string, unknown> = {}) =>
+  type === 'equipment_use' && batch && app.batches && !data.batchTyped ? app.batches.source.replaceAll(', ', ' or ') : null;
+
+/**
+ * D-69 (owner 17 Nov 2026, G2): with batch records linked, a batch is pulled from the product that lists it, with that
+ * product. A batch none of them lists (its product is not linked here, or its link is down) may be typed by hand, its
+ * product picked from master data; the entry says so ("Typed by hand") for the reviewer. A typed batch that a linked
+ * product lists with another product is refused. Returns the product and, for a typed batch, why it was typed.
+ */
+async function linkedBatch(tx: Tx, app: FastifyInstance, n: string, o: { typed: boolean; mustRun: boolean; product: { id?: number | null; label?: string } }) {
+  const { found, down } = await batchWithProduct(tx, app, n);
+  if (found) {
+    const { batch } = found;
+    if (o.mustRun && !batch.inProduction) throw new EntryError(409, 'check_failed', [`Batch ${n} is not in production in ${batch.source} (${batch.status}).`]);
+    if (!found.productId) throw new EntryError(409, 'check_failed', [`The product ${batch.productCode} of batch ${n} is not in master data: ask your master data editor.`]);
+    const other = o.typed && ((o.product.id && o.product.id !== found.productId) || (o.product.label && o.product.label !== found.productLabel));
+    if (other) throw new EntryError(409, 'check_failed', [`Batch ${n} is in ${batch.source} with the product ${found.productLabel}: choose it from the list.`]);
+    return { productId: found.productId, productLabel: found.productLabel, typed: null };
+  }
+  const notes = down.map(batchesOffNote);
+  if (!o.typed) {
+    throw new EntryError(400, 'check_failed', [`Batch ${n} is not in the batch records (${app.batches!.source}): choose it from the list or type it by hand.`, ...notes]);
+  }
+  const products = (await logbookProducts(tx, app.master)).filter((p) => p.active);
+  const p = products.find((x) => (o.product.id ? x.id === o.product.id : `${x.code} · ${x.name}` === o.product.label));
+  if (!p) throw new EntryError(400, 'check_failed', [`Pick the product of batch ${n} from master data.`]);
+  return { productId: p.id, productLabel: `${p.code} · ${p.name}`, typed: down.length ? `${down.join(', ')} not reachable` : 'not in the linked batch records' };
+}
 
 // A1 8.45: a cycle identifier is unique per steriliser. Checked under the equipment lock.
 async function checkCycleId(tx: Tx, type: string, equipmentId: number, data: Record<string, unknown>, entryId: number | null) {
@@ -350,7 +382,10 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         const isUse = b.logbookType === 'equipment_use';
         // LB-05–07: a new use is refused unless the item is fit; the reasons are shown to the user.
         // The equipment row is locked, so the status cannot change before this entry commits.
-        const status = (await statusOf(tx, equipmentId, await app.statusContext(tx)))!;
+        const ctx = await app.statusContext(tx);
+        // D-70 (G15): a requalification waits for the Qualification product when its link is down.
+        if (b.logbookType === 'requalification' && ctx.qualDown) throw new QualificationOff();
+        const status = (await statusOf(tx, equipmentId, ctx))!;
         if (isUse && status.blockers.length) throw new EntryError(409, 'not_fit_for_use', status.blockers);
         // A sterilisation cycle needs a steriliser that is in service, calibrated and has passed its tests.
         if (b.logbookType === 'steriliser_cycle' && status.cycleBlockers.length) throw new EntryError(409, 'not_fit_for_use', status.cycleBlockers);
@@ -366,31 +401,34 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           }
         }
         // Owner 2026-11-12, D-45: with TrueBatch linked, the batch is one of its batch records and the product is the batch's.
+        // D-69: or typed by hand when no linked product lists it (flags.batchTyped says so on the entry).
+        const flags: Record<string, string> = {};
+        const typedLines: string[] = [];
         if (app.batches && isUse) {
-          if (!b.batch) throw new EntryError(400, 'check_failed', ['Choose the batch from the batch records.']);
-          const found = await batchWithProduct(tx, app, b.batch);
-          if (!found) throw new EntryError(400, 'check_failed', [`Batch ${b.batch} is not in the batch records (${app.batches.source}).`]);
-          if (!found.batch.inProduction) throw new EntryError(409, 'check_failed', [`Batch ${b.batch} is not in production in ${found.batch.source} (${found.batch.status}).`]);
-          if (!found.productId) throw new EntryError(409, 'check_failed', [`The product ${found.batch.productCode} of batch ${b.batch} is not in master data: ask your master data editor.`]);
-          b.productId = found.productId;
+          if (!b.batch) throw new EntryError(400, 'check_failed', ['Choose the batch from the batch records, or type it by hand.']);
+          const got = await linkedBatch(tx, app, b.batch, { typed: b.batchTyped, mustRun: true, product: { id: b.productId } });
+          b.productId = got.productId;
+          if (got.typed) typedLines.push(`Batch ${b.batch}: ${got.typed}`);
         }
         if (app.batches && b.logbookType === 'change_over') {
-          for (const [k, product, must] of [['fromBatch', 'fromProduct', false], ['toBatch', 'toProduct', true]] as const) {
+          for (const [k, product, must, what] of [['fromBatch', 'fromProduct', false, 'From batch'], ['toBatch', 'toProduct', true, 'To batch']] as const) {
             const n = String(b.data[k] ?? '').trim();
             if (!n) continue;
-            const found = await batchWithProduct(tx, app, n);
-            if (!found) throw new EntryError(400, 'check_failed', [`Batch ${n} is not in the batch records (${app.batches.source}).`]);
-            if (must && !found.batch.inProduction) throw new EntryError(409, 'check_failed', [`Batch ${n} is not in production in ${found.batch.source} (${found.batch.status}).`]);
-            b.data[product] = found.productLabel;
+            const got = await linkedBatch(tx, app, n, { typed: b.batchTyped, mustRun: must, product: { label: String(b.data[product] ?? '').trim() } });
+            b.data[product] = got.productLabel;
+            if (got.typed) typedLines.push(`${what} ${n}: ${got.typed}`);
           }
         }
+        if (typedLines.length) flags.batchTyped = typedLines.join('; ');
+        // D-70 (G15): a use while Qualification is linked but down is not checked against it; the entry says so.
+        if (isUse && ctx.qualDown) flags.qualNotChecked = 'Qualification was not reachable';
         if (isUse && (!b.productId || !b.batch)) throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
         // D-67: a product change to or from an antibiotic needs a product-changeover cleaning after the last use.
         if (isUse && status.schedule !== null && status.lastUseEnd) {
           const products = await logbookProducts(tx, app.master);
           // The last use's product; for a TrueBatch use without one from its uses (packing), from the batch records.
           const lastCode = status.lastUseProductCode
-            ?? (status.lastTrueBatchUse && app.batches ? (await app.batches.get(status.lastTrueBatchUse.batch))?.productCode ?? null : null);
+            ?? (status.lastTrueBatchUse && app.batches ? (await app.batches.get(status.lastTrueBatchUse.batch)).batch?.productCode ?? null : null);
           const next = products.find((p) => p.id === b.productId);
           const last = lastCode ? products.find((p) => p.code === lastCode) ?? { code: lastCode, antibiotic: false } : undefined;
           const problem = next ? antibioticBlocker(last, next, status.changeoverCleaned) : null;
@@ -417,7 +455,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (end && end < b.activityStart) throw new EntryError(400, 'check_failed', ['The end cannot be before the start.']);
         if (b.productId) await activeProduct(tx, app.master, b.productId);
         const late = timing(await dbNow(tx), [b.activityStart, end], b.lateReason);
-        const data = validate(b.logbookType, b.data, settings, eq, b.activityStart, { end, legacy: false });
+        const data = { ...validate(b.logbookType, b.data, settings, eq, b.activityStart, { end, legacy: false }), ...flags };
         await checkCycleId(tx, b.logbookType, equipmentId, data, null);
         await guardVoice(tx, user, equipmentId, b.logbookType, data, b.voiceNotes);
         const row = await insertVersion(tx, app.master, {
@@ -465,7 +503,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (b.activityEnd < prev.activity_start) throw new EntryError(400, 'check_failed', ['The end cannot be before the start.']);
         const late = timing(await dbNow(tx), [b.activityEnd], b.lateReason);
         let data = prev.data;
-        const from = endReasonFrom(app, prev.logbook_type, prev.batch);
+        const from = endReasonFrom(app, prev.logbook_type, prev.batch, prev.data);
         if (from && !b.endReason) {
           throw new EntryError(400, 'end_reason_required', [`Batch ${prev.batch} is from the batch records of ${from}: give the reason the use ends.`]);
         }
@@ -538,11 +576,14 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (prev.logbook_type === 'equipment_use' && (b.productId === null || b.batch === null)) {
           throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
         }
+        // D-69, D-70: what the entry says about typed batches and an unchecked qualification stays with it; a corrected
+        // batch is checked again (pulled, or typed by hand).
+        const flags: Record<string, unknown> = Object.fromEntries(['batchTyped', 'qualNotChecked'].filter((k) => prev.data[k]).map((k) => [k, prev.data[k]]));
         if (app.batches && prev.logbook_type === 'equipment_use' && b.batch && b.batch !== prev.batch) {
-          const found = await batchWithProduct(tx, app, b.batch);
-          if (!found) throw new EntryError(400, 'check_failed', [`Batch ${b.batch} is not in the batch records (${app.batches.source}).`]);
-          if (!found.productId) throw new EntryError(409, 'check_failed', [`The product ${found.batch.productCode} of batch ${b.batch} is not in master data: ask your master data editor.`]);
-          b.productId = found.productId;
+          const got = await linkedBatch(tx, app, b.batch, { typed: b.batchTyped, mustRun: false, product: { id: b.productId } });
+          b.productId = got.productId;
+          if (got.typed) flags.batchTyped = `Batch ${b.batch}: ${got.typed}`;
+          else delete flags.batchTyped;
         }
         if (b.productId && b.productId !== prev.product_id) await activeProduct(tx, app.master, b.productId);
         const now = await dbNow(tx);
@@ -555,7 +596,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           throw new EntryError(400, 'late_reason_required', [`The corrected time is more than ${LATE_MINUTES} minutes before the entry was made: give a reason.`]);
         }
         const breakdownEntry = prev.logbook_type === 'maintenance' && prev.data.kind === 'breakdown';
-        const data = validate(prev.logbook_type, b.data, s!.settings, eq, b.activityStart, { end, legacy: breakdownEntry && await isLegacyBreakdown(tx, prev.entry_id) });
+        const data = { ...validate(prev.logbook_type, b.data, s!.settings, eq, b.activityStart, { end, legacy: breakdownEntry && await isLegacyBreakdown(tx, prev.entry_id) }), ...flags };
         // An open repair stays a breakdown until it is completed (D-25).
         if (prev.activity_end === null && prev.logbook_type === 'maintenance' && data.kind !== 'breakdown') {
           throw new EntryError(400, 'check_failed', ['An open breakdown stays a breakdown; complete the repair first.']);
@@ -644,7 +685,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
     if (id === null) return reply.code(400).send({ error: 'invalid_request' });
     const list = await listEntries(sql, sql`e.equipment_id = ${id}`);
     // D-49: an open use says whether "End use" needs a reason, by the server's own rule.
-    return withMayCorrect(sql, req.user!, list.map((e) => (e.inProgress ? { ...e, endReasonFrom: endReasonFrom(app, e.logbookType, e.batch) } : e)));
+    return withMayCorrect(sql, req.user!, list.map((e) => (e.inProgress ? { ...e, endReasonFrom: endReasonFrom(app, e.logbookType, e.batch, e.data) } : e)));
   });
 
   // All versions of one entry, oldest first, with their signatures (LB-17: originals stay readable).

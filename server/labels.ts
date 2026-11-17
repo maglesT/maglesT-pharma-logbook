@@ -33,6 +33,8 @@ export const ENTRY_FIELD_LABEL: Record<string, string> = {
   delayReason: 'Why late',
   // D-49: why a use ended ("End use").
   endReason: 'Why ended',
+  // D-69: a batch typed by hand (not from the batch records), and why; D-70: a use the Qualification product did not check.
+  batchTyped: 'Typed by hand', qualNotChecked: 'Qualification not checked',
 };
 
 export const FAILURE_CATEGORY_LABEL: Record<string, string> = {

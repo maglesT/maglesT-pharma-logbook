@@ -64,7 +64,7 @@ export async function refreshStatus(sql: Sql, context: () => Promise<StatusConte
   if (!id) return;
   let ctx: StatusContext;
   try { ctx = await context(); } catch (e) { if (e instanceof ConnectionOff) return; throw e; }
-  if (ctx.usesOff?.length) return;
+  if (ctx.usesOff?.length || ctx.qualDown) return;
   const s = await statusOf(sql, id, ctx);
   if (s) await saveStatuses(sql, [s], ctx);
 }

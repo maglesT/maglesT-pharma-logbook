@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { Qualification, QualStatus } from '../server/qualification.js';
+import { QualificationOff, type Qualification, type QualStatus } from '../server/qualification.js';
 import { NO_CARE, type MasterItem } from '../server/master.js';
 import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem, addProduct } from './helpers.js';
 import { randomUUID } from 'node:crypto';
@@ -14,9 +14,10 @@ let product: number;
 let n = 0;
 const qual = new Map<string, QualStatus>();
 const protocols: Record<string, unknown>[] = [];
+let qualDown = false;   // D-70: the link is on but does not answer
 const fakeQualification: Qualification = {
-  statuses: async () => new Map(qual),
-  protocols: async (masterId) => protocols.filter((p) => p.masterId === masterId) as never,
+  statuses: async () => { if (qualDown) throw new QualificationOff(); return new Map(qual); },
+  protocols: async (masterId) => { if (qualDown) throw new QualificationOff(); return protocols.filter((p) => p.masterId === masterId) as never; },
 };
 
 const sig = (username: string) => ({ proof: proofFor(username) });
@@ -239,3 +240,41 @@ describe('activities (owner, slides 1-3): change over, requalification, one acti
   });
 });
 
+
+describe('Qualification link down (D-70, owner 17 Nov 2026, G15)', () => {
+  it('entries go on as if not linked, the status warns and a use is marked; adding an item and requalification wait for it', async () => {
+    const id = await item({ requalificationFrequencyMonths: 12 });
+    const waiting = masterItem('QD-NEW');
+    qualify(waiting);
+    qualDown = true;
+    try {
+      const s = await status(id);
+      expect(s.warnings).toContain('Qualification not reachable: qualification not checked.');
+      expect(s.qualification).toBeNull();
+      // Cleaning, maintenance and use are recorded.
+      await clean(id);
+      const pm = await entry('eng1', id, { logbookType: 'maintenance', activityStart: now(), activityEnd: now(),
+        data: { kind: 'preventive', description: 'PM', workDone: 'Done', partsNone: true }, signature: sig('eng1') });
+      expect(pm.statusCode, pm.body).toBe(201);
+      const use = await entry('op1', id, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'QD1', data: { stage: 'S' } });
+      expect(use.statusCode, use.body).toBe(201);
+      const [v] = (await call(t.app, c.qa!, 'GET', `/api/entries/${use.json().id}/versions`)).json();
+      expect(v.data).toMatchObject({ qualNotChecked: 'Qualification was not reachable' });
+      expect((await call(t.app, c.op1!, 'POST', `/api/entries/${use.json().id}/complete`, { activityEnd: now() })).statusCode).toBe(200);
+      const today = day(0);
+      expect((await call(t.app, c.qa!, 'GET', `/api/equipment/${id}/period?fromDay=${today}&toDay=${today}`)).json().openItems.typedByHand).toBe(1);
+      // Still waiting: adding an item and a requalification (by protocol or by hand).
+      const add = await call(t.app, c.admin!, 'POST', '/api/equipment', { itemId: waiting.itemId, reason: 'New line' });
+      expect(add.statusCode).toBe(503);
+      expect(add.json().message).toBe('Connection to the Qualification system is off. Ask your administrator.');
+      for (const data of [{ source: 'protocol', protocolNumber: 'PRT-2026-0042', outcome: 'pass' }, { source: 'manual', outcome: 'pass', reportRef: 'VR-1' }]) {
+        const rq = await entry('eng1', id, { logbookType: 'requalification', activityStart: now(), signature: sig('eng1'), data });
+        expect(rq.statusCode).toBe(503);
+      }
+    } finally {
+      qualDown = false;
+    }
+    // Back up: no warning, no mark.
+    expect((await status(id)).warnings).not.toContain('Qualification not reachable: qualification not checked.');
+  });
+});
