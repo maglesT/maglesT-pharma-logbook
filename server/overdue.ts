@@ -2,7 +2,7 @@ import type { Sql } from './db.js';
 import { audit } from './audit.js';
 import { OVERDUE_LABEL as OVERDUE_WORDS } from './labels.js';
 import { logbookItems, type LogbookItem, type Master } from './master.js';
-import { QualificationOff, type Qualification } from './qualification.js';
+import type { Qualification } from './qualification.js';
 import { allStatuses, PLANT_TZ, plantDay, plantTime, statusContext, type EquipmentStatus } from './status.js';
 import { saveStatuses } from './item-status.js';
 import type { TrueBatchUses } from './batches.js';
@@ -96,15 +96,9 @@ async function report(sql: Sql, kind: OverdueKind, i: LogbookItem, s: EquipmentS
 /** Records every limit now overdue that is not on record yet, and publishes the statuses (D-45). Returns the number of new records. */
 export async function recordOverdue(sql: Sql, master: Master, qualification: Qualification | null, trueBatch: TrueBatchUses[] = []): Promise<number> {
   // Without the Qualification product the requalification due date is not known for sure: no requalification records.
-  let ctx;
-  let qualKnown = qualification !== null;
-  try {
-    ctx = await statusContext(sql, master, qualification, trueBatch);
-  } catch (e) {
-    if (!(e instanceof QualificationOff)) throw e;
-    ctx = await statusContext(sql, master, null, trueBatch);
-    qualKnown = false;
-  }
+  // D-70: a Qualification link that is down reads as not linked (ctx.qualDown).
+  const ctx = await statusContext(sql, master, qualification, trueBatch);
+  const qualKnown = qualification !== null && !ctx.qualDown;
   const items = new Map((await logbookItems(sql, master)).filter((i) => i.active).map((i) => [i.id, i]));
   const statuses = await allStatuses(sql, ctx);
   // D-45: the same check publishes each item's status (report.equipment_status_v1). Not while Qualification is linked

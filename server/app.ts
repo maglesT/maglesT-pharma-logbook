@@ -23,7 +23,7 @@ import type { SignOn } from './signon.js';
 import { ConnectionOff, type Master } from './master.js';
 import type { Qualification } from './qualification.js';
 import type { Deviations } from './overdue.js';
-import type { Batches, TrueBatchUses } from './batches.js';
+import type { BatchRecords, TrueBatchUses } from './batches.js';
 import { batchRoutes } from './routes/batches.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { overdueRoutes } from './routes/overdue.js';
@@ -49,7 +49,7 @@ export interface AppOptions {
   // D-37: the Deviations product's deviation_v1 (numbers of the deviations raised for missed limits); null without the link.
   deviations?: Deviations | null;
   // D-45: the TrueBatch products' batch records (batch_fact_v1, equipment_use_v1), merged; null without a link (batch typed).
-  batches?: Batches | null;
+  batches?: BatchRecords | null;
   // D-46: TrueBatch's machine and room uses (equipment_use_v1), counted in the status, and TrueBatch Packing's (D-47);
   // empty without either link.
   trueBatchUses?: TrueBatchUses[];
@@ -141,7 +141,7 @@ declare module 'fastify' {
     master: Master;
     qualification: Qualification | null;
     deviations: Deviations | null;
-    batches: Batches | null;
+    batches: BatchRecords | null;
     trueBatchUses: TrueBatchUses[];
     // What every status needs from master data and the Qualification product (platform D-24).
     statusContext: (q?: Sql | Tx) => Promise<StatusContext>;

@@ -119,14 +119,17 @@ export function EntryForm({
   const [batch, setBatch] = useState(correcting?.batch ?? '');
   const [lateReason, setLateReason] = useState('');
   // Owner 2026-11-12: batches come from the batch records (TrueBatch, D-45) when the site links it; null until known.
-  const [batchList, setBatchList] = useState<{ linked: boolean; batches: BatchChoice[]; error?: string } | null>(null);
+  // D-69: a linked product that does not answer is named in a note; a batch not in the list is typed by hand.
+  const [batchList, setBatchList] = useState<{ linked: boolean; batches: BatchChoice[]; notes?: string[]; error?: string } | null>(null);
+  const [batchTyped, setBatchTyped] = useState(Boolean(correcting?.data.batchTyped));
   useEffect(() => {
     if (type !== 'equipment_use' && type !== 'change_over') return;
-    api<{ linked: boolean; batches: BatchChoice[] }>('GET', `/api/equipment/${equipment.id}/batches`)
+    api<{ linked: boolean; batches: BatchChoice[]; notes: string[] }>('GET', `/api/equipment/${equipment.id}/batches`)
       .then(setBatchList)
       .catch((e) => setBatchList({ linked: true, batches: [], error: e instanceof Error ? e.message : String(e) }));
   }, [type, equipment.id]);
-  const linkedBatches = batchList?.linked ? batchList.batches : null;
+  const linkedBatches = batchList?.linked && !batchTyped ? batchList.batches : null;
+  const productLabels = products.filter((p) => p.active).map((p) => `${p.code} · ${p.name}`);
   const chosen = linkedBatches?.find((b) => b.batchNumber === batch) ?? null;
   const [reason, setReason] = useState('');
   const [problems, setProblems] = useState<string[]>([]);
@@ -191,6 +194,7 @@ export function EntryForm({
     // Completing with the end left as offered means "now", to the second, as "End use" does (review S9).
     if (showEnd) body.activityEnd = completing && end === initialEnd ? new Date().toISOString() : new Date(end).toISOString();
     if (type === 'equipment_use') Object.assign(body, { productId: productId || undefined, batch: batch || undefined });
+    if (batchList?.linked && batchTyped && !completing) body.batchTyped = true;
     try {
       // One password entry at core covers both signatures of this save (performed / corrected, voice note confirmed).
       const proof = signs || voiceDrafts.length
@@ -237,6 +241,11 @@ export function EntryForm({
         {settings.sopRef && <p className="muted">SOP {settings.sopRef}</p>}
 
         {batchList?.error && <p className="error" role="alert">{batchList.error}</p>}
+        {(batchList?.notes ?? []).map((n) => <p key={n} className="reason" role="status">{n}</p>)}
+        {(type === 'equipment_use' || type === 'change_over') && batchList?.linked && (
+          <label className="check"><input type="checkbox" checked={batchTyped} onChange={(e) => setBatchTyped(e.target.checked)} />
+            Batch not in the list: type it by hand (the entry is marked "Typed by hand")</label>
+        )}
         {type === 'equipment_use' && linkedBatches && (
           <>
             <BatchSelect label="Batch (from the batch records)" value={batch} onChange={setBatch} batches={linkedBatches} inProductionOnly />
@@ -250,7 +259,22 @@ export function EntryForm({
             <BatchSelect label="To batch" value={String(data.toBatch ?? '')} onChange={(v) => set('toBatch', v)} batches={linkedBatches} inProductionOnly />
           </>
         )}
-        {type === 'equipment_use' && batchList && !batchList.linked && (
+        {type === 'change_over' && batchList?.linked && batchTyped && (
+          <>
+            {([['fromProduct', 'From product'], ['toProduct', 'To product']] as const).map(([k, label]) => (
+              <label key={k}>
+                {label} (from master data)
+                <select value={String(data[k] ?? '')} onChange={(e) => set(k, e.target.value)}>
+                  <option value="">Choose…</option>
+                  {productLabels.map((l) => <option key={l} value={l}>{l}</option>)}
+                </select>
+              </label>
+            ))}
+            <label>From batch<input value={String(data.fromBatch ?? '')} onChange={(e) => set('fromBatch', e.target.value)} /></label>
+            <label>To batch<input value={String(data.toBatch ?? '')} onChange={(e) => set('toBatch', e.target.value)} /></label>
+          </>
+        )}
+        {type === 'equipment_use' && batchList && (!batchList.linked || batchTyped) && (
           <>
             <label>
               Product
@@ -312,7 +336,7 @@ export function EntryForm({
             ))}
           </fieldset>
         )}
-        {(TEXT_FIELDS[type] ?? []).filter(([k]) => !(linkedBatches && type === 'change_over' && ['fromProduct', 'fromBatch', 'toProduct', 'toBatch'].includes(k))).map(([k, label, long]) =>
+        {(TEXT_FIELDS[type] ?? []).filter(([k]) => !(batchList?.linked && type === 'change_over' && ['fromProduct', 'fromBatch', 'toProduct', 'toBatch'].includes(k))).map(([k, label, long]) =>
           type === 'maintenance' && k === 'impactAssessment' && !equipment.sterile ? null : (
             <Fragment key={k}>
               <label>
@@ -471,9 +495,11 @@ function MaintenanceFields({
 // result and next due date filled in, read only), or written by hand, e.g. done by a vendor outside it.
 interface QualProtocol { number: string; stage: string; step: string; reportOutcome: string | null; nextReviewDueDecided: string | null; reportApprovedAt: string | null }
 function RequalificationFields({ data, setData, equipment }: { data: Data; setData: (d: Data) => void; equipment: Equipment }) {
-  const [list, setList] = useState<{ linked: boolean; protocols: QualProtocol[] } | null>(null);
+  const [list, setList] = useState<{ linked: boolean; protocols: QualProtocol[]; error?: string } | null>(null);
   useEffect(() => {
-    void api<{ linked: boolean; protocols: QualProtocol[] }>('GET', `/api/equipment/${equipment.id}/protocols`).then(setList, () => setList({ linked: false, protocols: [] }));
+    // D-70: while the Qualification link is down a requalification waits for it (the server refuses it).
+    void api<{ linked: boolean; protocols: QualProtocol[] }>('GET', `/api/equipment/${equipment.id}/protocols`)
+      .then(setList, (e: unknown) => setList({ linked: false, protocols: [], error: e instanceof Error ? e.message : String(e) }));
   }, [equipment.id]);
   const approved = (list?.protocols ?? []).filter((p) => p.reportApprovedAt && p.reportOutcome);
   const set = (patch: Data) => setData({ ...data, ...patch });
@@ -487,7 +513,8 @@ function RequalificationFields({ data, setData, equipment }: { data: Data; setDa
         <legend>Source</legend>
         <label className="check"><input type="radio" checked={data.source === 'protocol'} disabled={!list?.linked} onChange={() => set({ source: 'protocol' })} />From a protocol in the Qualification system</label>
         <label className="check"><input type="radio" checked={data.source === 'manual'} onChange={() => set({ source: 'manual', protocolNumber: '' })} />Written by hand (e.g. done by a vendor)</label>
-        {list && !list.linked && <p className="muted">The Qualification system is not linked: write the requalification by hand.</p>}
+        {list?.error && <p className="error" role="alert">{list.error}</p>}
+        {list && !list.linked && !list.error && <p className="muted">The Qualification system is not linked: write the requalification by hand.</p>}
       </fieldset>
       {data.source === 'protocol' ? (
         <>
