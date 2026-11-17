@@ -2,6 +2,7 @@ import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'r
 import { api, ApiError, getSignProof, joinParts, plantDay, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type BatchChoice, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
 import { VoiceButton } from '../components/VoiceNote.js';
 import { OUTCOME_LABEL, STAGE_LABEL } from '../fields.js';
+import { choices, FAILURE_CATEGORY_LABEL } from '../../../server/labels.js';
 
 type Data = Record<string, unknown>;
 
@@ -26,13 +27,14 @@ const EMPTY: Record<string, Data> = {
 };
 
 const OPTIONS: Record<string, Record<string, [string, string][]>> = {
-  equipment_cleaning: { cleaningType: [['batch_to_batch', 'Batch to batch'], ['product_change', 'Product changeover'], ['major', 'Major']] },
-  maintenance: { kind: [['preventive', 'Preventive'], ['breakdown', 'Breakdown'], ['repair', 'Repair']] },
-  calibration: { result: [['pass', 'Pass'], ['fail', 'Fail']] },
-  area_cleaning: { cleaningType: [['daily', 'Daily'], ['weekly', 'Weekly'], ['batch_to_batch', 'Batch to batch'], ['product_change', 'Product changeover'], ['other', 'Other']] },
-  steriliser_cycle: { cycleType: [['steam', 'Steam (autoclave)'], ['dry_heat', 'Dry heat / depyrogenation'], ['sip', 'Steam in place'], ['vhp', 'VHP bio-decontamination']], result: [['pass', 'Pass'], ['fail', 'Fail']] },
-  steriliser_test: { test: [['air_removal', 'Air removal (Bowie-Dick)'], ['leak', 'Leak (vacuum) test']], result: [['pass', 'Pass'], ['fail', 'Fail']] },
-  glove_integrity: { result: [['pass', 'Pass'], ['fail', 'Fail']] },
+  // D-60: the words come from one list (server/labels.ts), so screens and printed copies say the same.
+  equipment_cleaning: { cleaningType: choices('cleaningType', ['batch_to_batch', 'product_change', 'major']) },
+  maintenance: { kind: choices('kind', ['preventive', 'breakdown', 'repair']) },
+  calibration: { result: choices('result', ['pass', 'fail']) },
+  area_cleaning: { cleaningType: choices('cleaningType', ['daily', 'weekly', 'batch_to_batch', 'product_change', 'other']) },
+  steriliser_cycle: { cycleType: choices('cycleType', ['steam', 'dry_heat', 'sip', 'vhp']), result: choices('result', ['pass', 'fail']) },
+  steriliser_test: { test: choices('test', ['air_removal', 'leak']), result: choices('result', ['pass', 'fail']) },
+  glove_integrity: { result: choices('result', ['pass', 'fail']) },
 };
 
 const TEXT_FIELDS: Record<string, [string, string, boolean?][]> = {
@@ -358,9 +360,6 @@ export function EntryForm({
   );
 }
 
-const FAILURE_LABEL: Record<string, string> = {
-  mechanical: 'Mechanical', electrical: 'Electrical', utility: 'Utility', instrumentation: 'Instrumentation', software: 'Software', operator: 'Operator', other: 'Other',
-};
 
 // Maintenance and breakdown fields (S9, D-25): the report (when it occurred, what failed), the repair
 // times, and what was done and used.
@@ -417,7 +416,7 @@ function MaintenanceFields({
             Failure category
             <select value={String(data.failureCategory ?? '')} onChange={(e) => set('failureCategory', e.target.value)} disabled={locked}>
               <option value="">Choose…</option>
-              {FAILURE_CATEGORIES.map((c) => <option key={c} value={c}>{FAILURE_LABEL[c]}</option>)}
+              {FAILURE_CATEGORIES.map((c) => <option key={c} value={c}>{FAILURE_CATEGORY_LABEL[c]}</option>)}
             </select>
           </label>
           {text('description', 'Failure / symptom', true, locked)}
@@ -511,7 +510,7 @@ function RequalificationFields({ data, setData, equipment }: { data: Data; setDa
         <>
           <label>Done by
             <select value={String(data.doneBy)} onChange={(e) => set({ doneBy: e.target.value })}>
-              <option value="in_house">In house</option><option value="vendor">External vendor</option>
+              <option value="in_house">In-house</option><option value="vendor">External vendor</option>
             </select>
           </label>
           {data.doneBy === 'vendor' && <label>Vendor name<input value={String(data.vendorName ?? '')} onChange={(e) => set({ vendorName: e.target.value })} /></label>}

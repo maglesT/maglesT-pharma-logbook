@@ -207,13 +207,15 @@ export interface MachineStats {
 const hours = (ms: number) => Math.round((ms / 3_600_000) * 10) / 10;
 
 // Counts per machine and per category, MTTR and MTBF per machine (D-25). The window for a machine is
-// the period, cut to what has already passed and to when the machine was installed (or created).
+// the period, cut to what has already passed and to when the machine was installed (or created); D-59: never
+// after its first breakdown counted (it was in service then), so every counted failure's downtime is in it.
 export function breakdownStats(list: Breakdown[], from: Date, to: Date, now: Date, inServiceSince: Map<number, Date>) {
   const byMachine = new Map<number, Breakdown[]>();
   for (const b of list) byMachine.set(b.equipmentId, [...(byMachine.get(b.equipmentId) ?? []), b]);
   const windowEnd = Math.min(to.getTime(), now.getTime());
   const machines: MachineStats[] = [...byMachine.entries()].map(([id, items]) => {
-    const start = Math.max(from.getTime(), inServiceSince.get(id)?.getTime() ?? from.getTime());
+    const firstFailure = Math.min(...items.map((b) => b.occurredAt.getTime()));
+    const start = Math.min(Math.max(from.getTime(), inServiceSince.get(id)?.getTime() ?? from.getTime()), firstFailure);
     const window = Math.max(0, windowEnd - start);
     // Overlapping breakdowns are down only once (review S9).
     const spans = items

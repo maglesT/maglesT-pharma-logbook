@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, ApiError, plantTime, BREAKDOWN_STATUS_LABEL, type AdviceResponse } from '../api.js';
+import { api, ApiError, plantTime, BREAKDOWN_STATUS_LABEL, FAILURE_CATEGORY_LABEL, type AdviceResponse } from '../api.js';
 
 const CONFIDENCE: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High' };
 
@@ -51,7 +51,7 @@ export function AdviceDialog({ versionId, code, onClose }: { versionId: number; 
                       <td>#{s.entryId}</td>
                       <td>{s.code}<br /><span className="muted">{s.relationLabel}</span></td>
                       <td>{plantTime(s.occurredAt)}</td>
-                      <td>{s.failureCategory ?? '—'}</td>
+                      <td>{s.failureCategory ? FAILURE_CATEGORY_LABEL[s.failureCategory] ?? s.failureCategory : '—'}</td>
                       <td>{s.description || '—'}</td>
                       <td>{s.rootCause || '—'}</td>
                       <td>{s.workDone || '—'}</td>

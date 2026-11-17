@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, BREAKDOWN_STATUS_LABEL, downtimeText, FAILURE_CATEGORIES, plantTime, type Equipment, type Register } from '../api.js';
+import { api, BREAKDOWN_STATUS_LABEL, downtimeText, FAILURE_CATEGORIES, FAILURE_CATEGORY_LABEL, plantTime, type Equipment, type Register } from '../api.js';
 
 const day = (offset: number) => {
   const d = new Date();
@@ -46,7 +46,7 @@ export function Breakdowns({ onOpen }: { onOpen: (equipmentId: number) => void }
           Failure type
           <select value={f.category} onChange={(e) => set('category', e.target.value)}>
             <option value="">All</option>
-            {FAILURE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            {FAILURE_CATEGORIES.map((c) => <option key={c} value={c}>{FAILURE_CATEGORY_LABEL[c]}</option>)}
           </select>
         </label>
         <label>
@@ -85,7 +85,7 @@ export function Breakdowns({ onOpen }: { onOpen: (equipmentId: number) => void }
                     <td>{plantTime(b.occurredAt)}</td>
                     <td>{plantTime(b.repairEnd)}<br /><span className="muted">QA: {plantTime(b.releasedAt)}</span></td>
                     <td>{downtimeText(b)}</td>
-                    <td>{b.failureCategory ?? '—'}</td>
+                    <td>{b.failureCategory ? FAILURE_CATEGORY_LABEL[b.failureCategory] ?? b.failureCategory : '—'}</td>
                     <td>{b.description}</td>
                     <td>{b.rootCause || '—'}</td>
                     <td>{b.workDone || '—'}</td>
@@ -113,7 +113,7 @@ export function Breakdowns({ onOpen }: { onOpen: (equipmentId: number) => void }
           <h2>Per failure category</h2>
           <table>
             <thead><tr><th>Category</th><th>Failures</th></tr></thead>
-            <tbody>{data.stats.categories.map((c) => <tr key={c.category}><td>{c.category}</td><td>{c.failures}</td></tr>)}</tbody>
+            <tbody>{data.stats.categories.map((c) => <tr key={c.category}><td>{FAILURE_CATEGORY_LABEL[c.category] ?? c.category}</td><td>{c.failures}</td></tr>)}</tbody>
           </table>
         </>
       )}

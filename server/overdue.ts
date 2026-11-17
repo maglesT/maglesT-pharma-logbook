@@ -1,5 +1,6 @@
 import type { Sql } from './db.js';
 import { audit } from './audit.js';
+import { OVERDUE_LABEL as OVERDUE_WORDS } from './labels.js';
 import { logbookItems, type LogbookItem, type Master } from './master.js';
 import { QualificationOff, type Qualification } from './qualification.js';
 import { allStatuses, PLANT_TZ, plantDay, plantTime, statusContext, type EquipmentStatus } from './status.js';
@@ -12,10 +13,7 @@ import type { TrueBatchUses } from './batches.js';
 // each one; the Logbook reads the deviation numbers back from Deviations' report.deviation_v1 (source_ref).
 
 export type OverdueKind = 'dirty_hold' | 'clean_hold' | 'frequency' | 'pm' | 'calibration' | 'requalification';
-export const OVERDUE_LABEL: Record<OverdueKind, string> = {
-  dirty_hold: 'Dirty hold expired', clean_hold: 'Clean hold expired', frequency: 'Scheduled cleaning missed',
-  pm: 'Preventive maintenance overdue', calibration: 'Calibration overdue', requalification: 'Requalification overdue',
-};
+export const OVERDUE_LABEL = OVERDUE_WORDS as Record<OverdueKind, string>;
 
 interface Report { title: string; description: string; immediateAction: string; impactNotes: string }
 
