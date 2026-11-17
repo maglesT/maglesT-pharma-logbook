@@ -1,6 +1,6 @@
 import type { Sql, Tx } from './db.js';
 import { careByLocalId, type Care, type Master } from './master.js';
-import { QualificationOff, type Qualification, type QualStatus } from './qualification.js';
+import { QualificationOff, type MediaFill, type Qualification, type QualStatus } from './qualification.js';
 import { UsesOff, type TrueBatchUse, type TrueBatchUses, type UseSource } from './batches.js';
 import { dayText, timeText } from './dates.js';
 
@@ -55,6 +55,9 @@ export interface EquipmentStatus {
   // D-67: the product code that alone may follow (the last use's antibiotic product, until a verified product-changeover
   // or major cleaning); published as equipment_status_v1.only_product for TrueBatch. Null otherwise.
   onlyProduct: string | null;
+  // D-73: a sterile barrier's newest approved media fill (of it or its room), from Qualification; null: not a barrier,
+  // Qualification not linked or down, or none approved (then a warning says so).
+  mediaFill: { number: string; itemCode: string; outcome: string | null; approvedAt: string; nextDue: string | null; overdue: boolean } | null;
   checkedAt: Date;
 }
 
@@ -129,6 +132,30 @@ export interface StatusContext {
   usesOff?: UseSource[];
   // D-67: the codes of the antibiotic products (master data).
   antibiotics?: Set<string>;
+  // D-73: per sterile barrier item (isolator, RABS, BFS: master data sets its decontamination, glove test or SIP validity),
+  // the newest approved media fill of the item or its room (null: none), and the line in words ("EQS-ISO-01 or RM-207").
+  // Items not in the map: not a barrier, or Qualification not linked or down.
+  mediaFill?: Map<number, { fill: MediaFill | null; line: string }>;
+}
+/** D-73: an isolator, RABS or BFS machine used as the aseptic barrier (D-51, D-66): its media fill is shown. */
+export const isBarrier = (c: Pick<Care, 'decontaminationValidDays' | 'gloveTestEveryDays' | 'sipValidDays'>) =>
+  Boolean(c.decontaminationValidDays || c.gloveTestEveryDays || c.sipValidDays);
+/** D-73: the newest approved media fill of each barrier item or of the room it stands in. */
+async function mediaFills(sql: Sql | Tx, master: Master, qualification: Qualification, care: StatusContext['care']): Promise<StatusContext['mediaFill']> {
+  const barriers = [...care].filter(([, c]) => isBarrier(c)).map(([id]) => id);
+  if (!barriers.length || !qualification.mediaFills) return new Map();
+  const fills = await qualification.mediaFills();
+  const items = await master.items();
+  const byId = new Map(items.map((i) => [i.itemId, i]));
+  const ids = await sql<{ id: number; item_id: string }[]>`select id::int, item_id::text from equipment where id = any(${barriers}::bigint[]) and item_id is not null`;
+  return new Map(ids.flatMap((r) => {
+    const item = byId.get(r.item_id);
+    if (!item) return [];
+    const room = item.room ? items.find((i) => i.kind === 'area' && i.code === item.room) : undefined;
+    const found = [fills.get(item.itemId), room ? fills.get(room.itemId) : undefined].filter((f): f is MediaFill => Boolean(f))
+      .sort((a, b) => b.approvedAt.localeCompare(a.approvedAt));
+    return [[r.id, { fill: found[0] ?? null, line: [item.code, room?.code].filter(Boolean).join(' or ') }] as const];
+  }));
 }
 /** D-46, D-47: the uses of every item recorded in each linked product, read live; a cut link leaves its uses out and says so. */
 async function trueBatchUses(sql: Sql | Tx, sources: TrueBatchUses[]): Promise<Pick<StatusContext, 'trueBatch' | 'usesOff'>> {
@@ -159,8 +186,13 @@ export async function statusContext(sql: Sql | Tx, master: Master, qualification
     if (e instanceof QualificationOff) return { care, qual: null, qualDown: true, ...tb };
     throw e;
   }
+  let mediaFill: StatusContext['mediaFill'];
+  try { mediaFill = await mediaFills(sql, master, qualification, care); } catch (e) {
+    if (e instanceof QualificationOff) return { care, qual: null, qualDown: true, ...tb };
+    throw e;
+  }
   const ids = await sql<{ id: number; item_id: string }[]>`select id::int, item_id::text from equipment where item_id is not null`;
-  return { care, qual: new Map(ids.flatMap((r) => (byMaster.has(r.item_id) ? [[r.id, byMaster.get(r.item_id)!] as const] : []))), ...tb };
+  return { care, qual: new Map(ids.flatMap((r) => (byMaster.has(r.item_id) ? [[r.id, byMaster.get(r.item_id)!] as const] : []))), mediaFill, ...tb };
 }
 /** D-67 (owner, 17 Nov 2026): a product change to or from an antibiotic needs a verified product-changeover (or major)
  * cleaning after the last use; a batch-to-batch cleaning is enough only for the same product. Null when the use may go on. */
@@ -189,6 +221,7 @@ interface Facts {
   antibiotics: Set<string>;
   usesOff: UseSource[];
   qualDown: boolean;
+  mediaFill: { fill: MediaFill | null; line: string } | null;
   last_pm_end: Date | null;
   last_cal_pass_at: Date | null;
   open_change_over_since: Date | null;
@@ -248,7 +281,7 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
   const scope = ids === null ? q`true` : q`e.equipment_id = any(${ids}::bigint[])`;
   // D-46: the end of the last TrueBatch (or TrueBatch Packing) use counts as a use end (a cleaning must follow it).
   const tbEnds = [...(ctx.trueBatch ?? [])].filter(([id, u]) => u.last?.endedAt && (ids === null || ids.includes(id)));
-  const rows = await q<Omit<Facts, 'care' | 'qual' | 'hasQual' | 'tb' | 'usesOff' | 'qualDown' | 'antibiotics'>[]>`
+  const rows = await q<Omit<Facts, 'care' | 'qual' | 'hasQual' | 'tb' | 'usesOff' | 'qualDown' | 'antibiotics' | 'mediaFill'>[]>`
     with latest as (
       select e.*,
         exists (select 1 from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'verified') as verified
@@ -375,7 +408,8 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
   const none = { cleanHoldHours: null, dirtyHoldHours: null, cleaningBasis: null, cleaningFrequencyHours: null, pmFrequencyDays: null,
     calibrationFrequencyDays: null, requalificationFrequencyMonths: null, needsCalibration: false, addedAt: new Date(0) };
   return rows.map((r) => ({ ...r, care: ctx.care.get(r.id) ?? none, qual: ctx.qual?.get(r.id) ?? null, hasQual: ctx.qual !== null,
-    tb: ctx.trueBatch?.get(r.id) ?? null, usesOff: ctx.usesOff ?? [], qualDown: ctx.qualDown ?? false, antibiotics: ctx.antibiotics ?? new Set() }));
+    tb: ctx.trueBatch?.get(r.id) ?? null, usesOff: ctx.usesOff ?? [], qualDown: ctx.qualDown ?? false, antibiotics: ctx.antibiotics ?? new Set(),
+    mediaFill: ctx.mediaFill?.get(r.id) ?? null }));
 }
 
 export function deriveStatus(f: Facts): EquipmentStatus {
@@ -568,6 +602,21 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     }
   }
 
+  // D-73 (suite finding S8): a sterile barrier's media fill, from Qualification. A warning only: TrueBatch Injectables refuses
+  // aseptic work itself when it failed or is overdue.
+  let mediaFill: EquipmentStatus['mediaFill'] = null;
+  if (f.mediaFill) {
+    const m = f.mediaFill.fill;
+    if (!m) warnings.push(`No approved media fill of ${f.mediaFill.line} in Qualification: no aseptic filling on this line until one has passed.`);
+    else {
+      const overdue = m.nextDue !== null && m.nextDue < f.today;
+      mediaFill = { number: m.number, itemCode: m.itemCode, outcome: m.outcome, approvedAt: m.approvedAt, nextDue: m.nextDue, overdue };
+      if (m.outcome === 'fail') warnings.push(`The last media fill of ${f.mediaFill.line} failed (Qualification ${m.number}): no aseptic filling on this line until one has passed.`);
+      else if (!m.nextDue) warnings.push(`The media fill ${m.number} of ${f.mediaFill.line} has no next date in Qualification.`);
+      else if (overdue) warnings.push(`Media fill overdue since ${plantDay(m.nextDue)} (Qualification ${m.number}): no aseptic filling on this line until it is repeated.`);
+    }
+  }
+
   // Owner 2026-11-12: one activity at a time; a change over in progress occupies the item like a use.
   if (f.open_change_over_since) blockers.push(`Change over in progress since ${plantTime(f.open_change_over_since)}: end it first.`);
   // LB-08: the item in use shows what is in it.
@@ -607,6 +656,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     lastCleanEnd: f.last_clean_end,
     lastUseProductCode,
     onlyProduct,
+    mediaFill,
     changeoverCleaned: f.last_changeover_clean_end !== null,
     checkedAt: f.now,
   };

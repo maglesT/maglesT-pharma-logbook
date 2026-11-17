@@ -232,7 +232,16 @@ export interface EquipmentStatus {
   deadline: CleaningDeadline | null;
   dues: Due[];
   qualification: string | null;
+  // D-73: a sterile barrier's newest approved media fill (of it or its room), from Qualification.
+  mediaFill?: { number: string; itemCode: string; outcome: string | null; approvedAt: string; nextDue: string | null; overdue: boolean } | null;
 }
+// D-73: "Media fill: passed 17 Nov 2026, due 17 May 2027" (the overdue or failed case is in the warnings).
+const MEDIA_FILL_OUTCOME: Record<string, string> = { pass: 'passed', pass_conditions: 'passed with conditions', fail: 'failed' };
+export const mediaFillLine = (status: Pick<EquipmentStatus, 'mediaFill'>) => {
+  const m = status.mediaFill;
+  if (!m) return null;
+  return `Media fill: ${MEDIA_FILL_OUTCOME[m.outcome ?? ''] ?? m.outcome ?? 'no outcome'} ${plantDay(m.approvedAt)}${m.nextDue ? `, due ${plantDay(m.nextDue)}` : ''} (${m.number}${m.itemCode ? `, ${m.itemCode}` : ''})`;
+};
 export interface SterileDue { kind: 'steriliser_test' | 'decontamination' | 'glove_test' | 'sip'; until: string; overdue: boolean }
 // D-64: the plain line on the item page for a sterile check that is still valid.
 export const STERILE_DUE_LABEL: Record<SterileDue['kind'], string> = { steriliser_test: 'Steriliser test valid until', decontamination: 'Decontamination valid until', glove_test: 'Glove test due by', sip: 'SIP valid until' };
