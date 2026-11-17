@@ -198,7 +198,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
       { heading: 'Per failure category', columns: ['Category', 'Failures'], widths: ['*', 60], rows: stats.categories.map((c) => ({ cells: [c.category, String(c.failures)] })) },
     ];
     return sendCopy(reply, 'pdf', name, await tablesPdf(sql, 'Breakdown register',
-      `Breakdowns that occurred ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time)${filters ? ` · ${filters}` : ''}. Downtime runs from occurrence to QA release. MTTR: mean downtime of released breakdowns. MTBF: operating time in the period per failure.`,
+      `Breakdowns that occurred ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time)${filters ? ` · ${filters}` : ''}. Downtime runs from occurrence to QA release; for a past breakdown recorded after its repair, to the repair end. MTTR: mean downtime of released breakdowns. MTBF: operating time in the period per failure.`,
       tables, req.user!.fullName));
   });
 

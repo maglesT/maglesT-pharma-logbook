@@ -101,7 +101,7 @@ export function Breakdowns({ onOpen }: { onOpen: (equipmentId: number) => void }
           </div>
 
           <h2>Per machine</h2>
-          <p className="muted">Downtime runs from the breakdown to the QA release. MTTR: mean downtime of released breakdowns. MTBF: operating time in the period (from installation, if later) per failure.</p>
+          <p className="muted">Downtime runs from the breakdown to the QA release; for a past breakdown recorded after its repair, to the repair end. MTTR: mean downtime of released breakdowns. MTBF: operating time in the period (from installation, if later) per failure.</p>
           <table>
             <thead><tr><th>Machine</th><th>Failures</th><th>Downtime</th><th>MTTR</th><th>MTBF</th></tr></thead>
             <tbody>

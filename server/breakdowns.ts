@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { Sql, Tx } from './db.js';
 import type { LogbookItem } from './master.js';
-import { FAILURE_CATEGORIES } from './entries.js';
+import { FAILURE_CATEGORIES, LATE_MINUTES } from './entries.js';
 import { PLANT_TZ } from './status.js';
 
 // S9 breakdown register and equipment details (D-25). Everything here is computed from the log and
@@ -90,7 +90,9 @@ export interface Breakdown {
   repairEnd: Date | null;
   verifiedAt: Date | null;
   releasedAt: Date | null;
-  // Occurred to QA release, or to now while not yet released (then `downtimeFinal` is false).
+  // Occurred to QA release, or to now while not yet released (then `downtimeFinal` is false). D-58: a breakdown
+  // first recorded after its repair had ended (a past breakdown) is down from occurrence to its own repair end.
+  downtimeEnd: Date;
   downtimeMinutes: number;
   downtimeFinal: boolean;
   failureCategory: string | null;
@@ -132,11 +134,13 @@ export type RegisterQuery = z.infer<typeof registerQuery>;
 // Names and locations are master data, read live (D-29): `items` from logbookItems().
 export async function breakdowns(q: Sql | Tx, items: LogbookItem[], from: Date, to: Date, f: Partial<RegisterQuery> & { entryIds?: number[] } = {}, now = new Date()): Promise<Breakdown[]> {
   const byId = new Map(items.map((i) => [i.id, i]));
-  const rows = await q<{ id: number; entry_id: number; equipment_id: number; code: string; activity_start: Date; activity_end: Date | null; data: Record<string, unknown>; occurred_at: Date; verified_at: Date | null; released_at: Date | null }[]>`
+  const rows = await q<{ id: number; entry_id: number; equipment_id: number; code: string; activity_start: Date; activity_end: Date | null; data: Record<string, unknown>; occurred_at: Date; verified_at: Date | null; released_at: Date | null; past: boolean }[]>`
     select e.id::int, e.entry_id::int, e.equipment_id::int, q.code, e.activity_start, e.activity_end, e.data,
       coalesce((e.data->>'occurredAt')::timestamptz, e.activity_start) as occurred_at,
       (select g.signed_at from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'verified') as verified_at,
-      (select g.signed_at from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'released') as released_at
+      (select g.signed_at from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'released') as released_at,
+      coalesce((select x.entered_at > x.activity_end + make_interval(mins => ${LATE_MINUTES}) from entries x
+        where x.entry_id = e.entry_id and x.version = 1), false) as past
     from entries e join equipment q on q.id = e.equipment_id
     where e.logbook_type = 'maintenance' and e.data->>'kind' = 'breakdown'
       and not exists (select 1 from entries x where x.supersedes = e.id)
@@ -149,7 +153,8 @@ export async function breakdowns(q: Sql | Tx, items: LogbookItem[], from: Date, 
   const located = f.location ? rows.filter((r) => (byId.get(r.equipment_id)?.room ?? '').toLowerCase() === f.location!.toLowerCase()) : rows;
   const list = located.map((r): Breakdown => {
     const status: BreakdownStatus = !r.activity_end ? 'open' : !r.verified_at ? 'awaiting_verification' : !r.released_at ? 'awaiting_release' : 'released';
-    const end = r.released_at ?? now;
+    // D-58: first recorded more than the late-entry time after its repair had ended: a past breakdown, down until its repair end.
+    const end = r.past && r.activity_end ? r.activity_end : r.released_at ?? now;
     return {
       versionId: r.id,
       entryId: r.entry_id,
@@ -162,6 +167,7 @@ export async function breakdowns(q: Sql | Tx, items: LogbookItem[], from: Date, 
       repairEnd: r.activity_end,
       verifiedAt: r.verified_at,
       releasedAt: r.released_at,
+      downtimeEnd: end,
       downtimeMinutes: Math.max(0, Math.round((end.getTime() - r.occurred_at.getTime()) / 60_000)),
       downtimeFinal: Boolean(r.released_at),
       failureCategory: (r.data.failureCategory as string | undefined) ?? null,
@@ -211,7 +217,7 @@ export function breakdownStats(list: Breakdown[], from: Date, to: Date, now: Dat
     const window = Math.max(0, windowEnd - start);
     // Overlapping breakdowns are down only once (review S9).
     const spans = items
-      .map((b) => [Math.max(b.occurredAt.getTime(), start), Math.min((b.releasedAt ?? now).getTime(), windowEnd)] as const)
+      .map((b) => [Math.max(b.occurredAt.getTime(), start), Math.min(b.downtimeEnd.getTime(), windowEnd)] as const)
       .filter(([s, e]) => e > s)
       .sort((x, y) => x[0] - y[0]);
     let down = 0;
