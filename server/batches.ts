@@ -131,7 +131,7 @@ export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'Bat
  * when there is one, else by its key (`step`, "stage/step"). Read through the row as JSON, so a view without the column
  * (a product not yet updated) still answers.
  */
-export type UseSource = 'TrueBatch' | 'TrueBatch Packing' | 'TrueBatch Injectables';
+export type UseSource = 'TrueBatch' | 'TrueBatch Packing' | 'TrueBatch Injectables' | 'TrueBatch Injectables Packing';
 export interface TrueBatchUse { code: string; batchNumber: string; step: string; startedAt: Date; endedAt: Date | null; source: UseSource }
 export interface TrueBatchUses {
   /** The product that records the uses (for messages). */

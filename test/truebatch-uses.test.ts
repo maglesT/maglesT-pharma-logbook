@@ -11,6 +11,7 @@ import { addItem, addProduct, asReport, call, freshApp, login, proofFor, seedUse
 // Logbook: nothing typed twice, nothing copied. The published status (equipment_status_v1) follows.
 // D-47: TrueBatch Tablets Packing's equipment_use_v1 (same columns, its own link) counts the same way, merged with
 // TrueBatch's; its batches are not read.
+// D-54: TrueBatch Injectables Packing's equipment_use_v1 counts as TrueBatch Packing's (its batches are not read either).
 
 let t: TestApp;
 let reader: Sql;
@@ -18,6 +19,7 @@ const c: Record<string, string> = {};
 const TB = `tbu_${process.pid}`;
 const TBP = `tbp_${process.pid}`;
 const TBI = `tbi_${process.pid}`;
+const TBIP = `tbip_${process.pid}`;
 const PACKING_OFF = usesOffWarning('TrueBatch Packing');
 const sig = (u: string) => ({ proof: proofFor(u) });
 const now = () => new Date().toISOString();
@@ -56,10 +58,12 @@ const tick = () => recordOverdue(t.sql, t.master, null, t.app.trueBatchUses);
 beforeAll(async () => {
   // The reader logs in as the Logbook's link does; the views are stood in for by tables of the same names and columns.
   reader = connect(TEST_DATABASE_URL, { role: 'logbook_app' });
-  t = await freshApp({ trueBatchUses: [sqlTrueBatchUses(reader, TB), sqlTrueBatchUses(reader, TBP, 'TrueBatch Packing', null), sqlTrueBatchUses(reader, TBI, 'TrueBatch Injectables')] });
+  t = await freshApp({ trueBatchUses: [sqlTrueBatchUses(reader, TB), sqlTrueBatchUses(reader, TBP, 'TrueBatch Packing', null), sqlTrueBatchUses(reader, TBI, 'TrueBatch Injectables'),
+    sqlTrueBatchUses(reader, TBIP, 'TrueBatch Injectables Packing', null)] });
   await t.owner.unsafe(`create schema ${TB}`);
   await t.owner.unsafe(`create schema ${TBP}`);
   await t.owner.unsafe(`create schema ${TBI}`);
+  await t.owner.unsafe(`create schema ${TBIP}`);
   await t.owner.unsafe(`create table ${TB}.batch_fact_v1 (batch_id uuid, batch_number text, product_code text, strength text, status text, issued_at timestamptz,
       completed_at timestamptz, released boolean, read_at timestamptz default now(), data_as_of timestamptz);
     create table ${TB}.equipment_use_v1 (batch_number text, equipment_code text, equipment_type text, room_code text, step text, started_at timestamptz,
@@ -81,7 +85,11 @@ beforeAll(async () => {
     insert into ${TBI}.batch_fact_v1 (batch_number, product_code, status, issued_at, completed_at, released) values
       ('TI260001', 'FG-TI', 'IN_PRODUCTION', now() - interval '1 day', null, false),
       ('TI250099', 'FG-TI', 'REJECTED', now() - interval '9 days', now() - interval '8 days', false);
-    grant usage on schema ${TBI} to logbook_app; grant select on all tables in schema ${TBI} to logbook_app;`);
+    grant usage on schema ${TBI} to logbook_app; grant select on all tables in schema ${TBI} to logbook_app;
+    -- D-54: TrueBatch Injectables Packing publishes equipment_use_v1 with Packing's columns; its batches are not read.
+    create table ${TBIP}.equipment_use_v1 (batch_number text, equipment_code text, equipment_type text, room_code text, step text, started_at timestamptz,
+      ended_at timestamptz, read_at timestamptz default now(), data_as_of timestamptz, step_name text);
+    grant usage on schema ${TBIP} to logbook_app; grant select on all tables in schema ${TBIP} to logbook_app;`);
   for (const [u, roles] of [['admin', ['admin']], ['qa1', ['qa']], ['op1', ['operator']], ['sup1', ['supervisor']]] as const) await seedUser(t.owner, u, [...roles]);
   for (const [k, u] of [['admin', 'admin'], ['qa', 'qa1'], ['op1', 'op1'], ['sup1', 'sup1']] as const) c[k] = (await login(t.app, u)).cookie;
   product = await addProduct(t, 'FG-TB', 'Product TB');
@@ -93,6 +101,7 @@ afterAll(async () => {
   await t.owner.unsafe(`drop schema if exists ${TB} cascade`).catch(() => {});
   await t.owner.unsafe(`drop schema if exists ${TBP} cascade`).catch(() => {});
   await t.owner.unsafe(`drop schema if exists ${TBI} cascade`).catch(() => {});
+  await t.owner.unsafe(`drop schema if exists ${TBIP} cascade`).catch(() => {});
 });
 
 describe('uses recorded in TrueBatch count in the status (D-46)', () => {
@@ -309,5 +318,31 @@ describe('uses recorded in TrueBatch Injectables count too, merged with the othe
     await verify((await cleaning(b.id)).json().id);
     await tbUse('TI250099', b.code, { schema: TBI });
     expect((await status(b.id)).state).not.toBe('in_use');
+  });
+});
+
+describe('uses recorded in TrueBatch Injectables Packing count too, as Packing\'s (D-54)', () => {
+  it('LB-08: a labeller is in use while its Injectables packing step is open (no batch read); the messages name TrueBatch Injectables Packing; published with the batch', async () => {
+    const a = await item();
+    await verify((await cleaning(a.id)).json().id);
+    await tbUse('IP260001', a.code, { schema: TBIP });
+    const s = await status(a.id);
+    expect(s).toMatchObject({ state: 'in_use', inUse: { batch: 'IP260001', source: 'TrueBatch Injectables Packing', entryId: null } });
+    expect((await cleaning(a.id)).json().problems).toEqual(['In use by batch IP260001 in TrueBatch Injectables Packing: record the cleaning once the batch is done with it in TrueBatch Injectables Packing.']);
+    await tick();
+    expect(await published(a.code)).toMatchObject({ state: 'in_use', in_use_batch: 'IP260001' });
+  });
+
+  it('LB-07: after the Injectables packing use ends the item is dirty until a verified cleaning; its link off is named in its own warning', async () => {
+    const a = await item();
+    await verify((await cleaning(a.id)).json().id);
+    await tbUse('IP260002', a.code, { schema: TBIP, startedMinutesAgo: 0, endedMinutesAgo: 0 });
+    expect(await status(a.id)).toMatchObject({ inUse: null, lastTrueBatchUse: { batch: 'IP260002', source: 'TrueBatch Injectables Packing' } });
+    await t.owner.unsafe(`revoke select on all tables in schema ${TBIP} from logbook_app`);
+    try {
+      expect((await status(a.id)).warnings).toContain(usesOffWarning('TrueBatch Injectables Packing'));
+    } finally {
+      await t.owner.unsafe(`grant select on all tables in schema ${TBIP} to logbook_app`);
+    }
   });
 });

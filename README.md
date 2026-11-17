@@ -58,7 +58,7 @@ glove port tested within the days its qualification set in master data (platform
 (`equipment_use_v1`, read live) count in the status as Logbook uses do (D-46): in use until the batch is done with the item in TrueBatch (its last
 stage using it closes, or the batch is approved or terminated; D-49), dirty after.
 TrueBatch Tablets Packing's uses (its `equipment_use_v1`, `TRUEBATCH_PACKING_DATABASE_URL`) count the same way, merged with
-TrueBatch's (D-47), and TrueBatch Injectables' with its batches (D-52); each link off is named in its own warning. Steps are named by the view's `step_name` ("Stage › Step")
+TrueBatch's (D-47), TrueBatch Injectables' with its batches (D-52) and TrueBatch Injectables Packing's (D-54); each link off is named in its own warning. Steps are named by the view's `step_name` ("Stage › Step")
 when it has one, else by the step key (D-48). A use ends with *Why the use ends* (D-49), required when its batch is from linked batch
 records. Days and times are shown as "30 Jan 2027, 3:05 pm IST" in plant time, never ISO (D-49).
 
