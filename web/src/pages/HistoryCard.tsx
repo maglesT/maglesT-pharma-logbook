@@ -19,7 +19,7 @@ export function HistoryCard({ me, equipment }: { me: Me; equipment: Equipment })
   const [fromDay, setFromDay] = useState(day(-365));
   const [toDay, setToDay] = useState(day(0));
   const [type, setType] = useState('');
-  const [data, setData] = useState<(EquipmentCard & { events: HistoryEvent[] }) | null>(null);
+  const [data, setData] = useState<(EquipmentCard & { events: HistoryEvent[]; notes?: string[] }) | null>(null);
   const [editing, setEditing] = useState(false);
   const [listening, setListening] = useState<number | null>(null);
   const [error, setError] = useState('');
@@ -92,6 +92,7 @@ export function HistoryCard({ me, equipment }: { me: Me; equipment: Equipment })
         <a className="button" href={`/api/export/history.csv?equipmentId=${equipment.id}&${query()}`}>CSV</a>
       </div>
       {error && <p className="error">{error}</p>}
+      {data?.notes?.map((n) => <p key={n} className="muted">{n}</p>)}
 
       {data && (
         <table className="history">
@@ -147,6 +148,18 @@ function EventRow({ ev, onVoice }: { ev: HistoryEvent; onVoice: (id: number) => 
         <td>Period {plantTime(r.periodFrom)} – {plantTime(r.periodTo)}{r.superseded && ' · superseded: entries changed after the review'}</td>
         <td>{r.reviewedBy}</td>
         <td>Reviewed: {r.reviewedBy}, {plantTime(r.reviewedAt)}{!r.valid && ' (INVALID)'}</td>
+      </tr>
+    );
+  }
+  if (ev.kind === 'truebatch') {
+    const u = ev.use;
+    return (
+      <tr className="truebatch">
+        <td>{plantTime(u.startedAt)}<br />to {u.endedAt ? plantTime(u.endedAt) : 'not ended yet'}</td>
+        <td>{TYPE_LABEL.equipment_use}<br /><span className="muted">from {u.source} (read only)</span></td>
+        <td><div>Batch {u.batch}{u.productCode && ` · ${u.productCode}`}</div>{u.step && <div>{u.step}</div>}</td>
+        <td>{u.source}</td>
+        <td className="muted">Signed in {u.source}</td>
       </tr>
     );
   }

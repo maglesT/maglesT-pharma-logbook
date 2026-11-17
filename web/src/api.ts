@@ -357,7 +357,9 @@ export interface EquipmentCard {
 export type HistoryEvent =
   | { kind: 'entry'; at: string; entry: Entry & { latest: boolean }; breakdown?: { downtime: string; parts: string; status: string } }
   | { kind: 'review'; at: string; review: { id: number; periodFrom: string; periodTo: string; reviewedBy: string | null; reviewedAt: string | null; superseded: boolean; valid: boolean } }
-  | { kind: 'masterdata'; at: string; actor: string | null; action: string; old: unknown; new: unknown; reason: string | null; lines: string[] };
+  | { kind: 'masterdata'; at: string; actor: string | null; action: string; old: unknown; new: unknown; reason: string | null; lines: string[] }
+  // D-72: a use recorded in a TrueBatch product, read only.
+  | { kind: 'truebatch'; at: string; use: { batch: string; productCode: string | null; step: string; startedAt: string; endedAt: string | null; source: string } };
 
 // S10 voice notes (D-26).
 export const VOICE_LANGUAGE_LABEL: Record<string, string> = {
