@@ -44,7 +44,13 @@ describe('the check before use and the entry details read in words', () => {
   });
 
   it('LB-07: a late cleaning shows why it is late', () => {
-    expect(text(renderToStaticMarkup(createElement(Fields, { data: { cleaningType: 'major', delayReason: 'Crew on line clearance' } })))).toBe('Cleaning major Why late Crew on line clearance');
+    expect(text(renderToStaticMarkup(createElement(Fields, { data: { cleaningType: 'major', delayReason: 'Crew on line clearance' } })))).toBe('Cleaning Major Why late Crew on line clearance');
+  });
+
+  it('LB-19: picked values read as the entry form names them, the same as the printed copies (D-60)', () => {
+    expect(text(renderToStaticMarkup(createElement(Fields, { data: { kind: 'breakdown', failureCategory: 'instrumentation', doneBy: 'in_house', cleaningType: 'product_change' } }))))
+      .toBe('Type Breakdown Failure category Instrumentation Done by In-house Cleaning Product changeover');
+    expect(text(renderToStaticMarkup(createElement(Fields, { data: { toBatch: 'B2', remarks: 'ok', fromProduct: 'P1' } })))).toBe('From product P1 To batch B2 Remarks ok');
   });
 
   it('LB-19: dates read "30 Jan 2027" in plant time, never ISO, with September as "Sep" (D-49)', () => {

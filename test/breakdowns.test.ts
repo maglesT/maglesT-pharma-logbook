@@ -257,6 +257,10 @@ describe('breakdown register (LB-02, LB-22)', () => {
     // Installed on day 5: the window is 144 h.
     const late = breakdownStats([bd(100, 108)], from, to, new Date('2027-01-01'), new Map([[1, new Date(from.getTime() + 96 * h)]]));
     expect(late.machines[0]).toMatchObject({ failures: 1, mtbfHours: 136 });
+    // D-59: "in service since" after a counted breakdown (no installation date, created later): the window starts
+    // at that breakdown, so its downtime counts in full. Window 230 h (from hour 10), 12 h down.
+    const created = breakdownStats([bd(10, 14), bd(100, 108)], from, to, new Date('2027-01-01'), new Map([[1, new Date(from.getTime() + 96 * h)]]));
+    expect(created.machines[0]).toMatchObject({ failures: 2, downtimeHours: 12, mttrHours: 6, mtbfHours: 109 });
     // Overlapping breakdowns count their downtime once: 10–20 h and 15–30 h are 20 h down.
     const overlap = breakdownStats([bd(10, 20), bd(15, 30)], from, to, new Date('2027-01-01'), new Map());
     expect(overlap.machines[0]).toMatchObject({ downtimeHours: 20, mtbfHours: 110 });
@@ -405,6 +409,20 @@ describe('printed records (S13)', () => {
   it('LB-22: stored values print as labelled lines, identifiers exactly as stored, no JSON', async () => {
     const { recordLines } = await import('../server/changes.js');
     const lines = recordLines({ contentHash: 'ab_cd', requestIds: { transcribe: '20261030_1b0c' }, data: { workDone: 'Seal replaced', partsNone: true }, cleaningType: 'product_change' });
-    expect(lines).toEqual(['Content fingerprint (SHA-256): ab_cd', 'Service request IDs:', '  Transcription: 20261030_1b0c', 'Entry data:', '  Work done: Seal replaced', '  No parts used: yes', 'Cleaning: product change']);
+    expect(lines).toEqual(['Content fingerprint (SHA-256): ab_cd', 'Service request IDs:', '  Transcription: 20261030_1b0c', 'Entry data:', '  Work done: Seal replaced', '  No parts used', 'Cleaning: Product changeover']);
+  });
+
+  it('LB-22: the history card prints entry data in the screen\'s order and the entry form\'s words (D-60)', async () => {
+    const { entryLines } = await import('../server/changes.js');
+    // Stored jsonb puts short keys first ("toBatch" before "fromProduct"): the card reads From, then To.
+    expect(entryLines({ toBatch: 'B2', remarks: 'ok', toProduct: 'P2', fromBatch: 'B1', fromProduct: 'P1', checklist: { 'Line clear': true, Other: false } }))
+      .toEqual(['From product: P1', 'From batch: B1', 'To product: P2', 'To batch: B2', 'Remarks: ok', 'Checklist confirmed: Line clear']);
+    expect(entryLines({ kind: 'breakdown', failureCategory: 'instrumentation', doneBy: 'in_house', cleaningType: 'major',
+      parts: [{ name: 'Bush', partNumber: 'B-1', quantity: 2, lotSerial: '' }, { name: 'Seal', partNumber: '', quantity: 1, lotSerial: 'L9' }] }))
+      .toEqual(['Type: Breakdown', 'Failure category: Instrumentation', 'Parts used: 2 × Bush (P/N B-1); 1 × Seal, lot/SN L9', 'Done by: In-house', 'Cleaning: Major']);
+    expect(entryLines({ partsNone: true, cleaningType: 'batch_to_batch' })).toEqual(['No parts used', 'Cleaning: Batch to batch']);
+    // An overdue record in words, no record number or stored time.
+    expect(changeLines(null, { event: 22, kind: 'clean_hold', dueAt: '2026-11-15T20:08:00.000Z' }, 'overdue.recorded'))
+      .toEqual(['Clean hold expired, due 16 Nov 2026, 1:38 am IST']);
   });
 });

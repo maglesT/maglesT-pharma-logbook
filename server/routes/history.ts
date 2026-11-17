@@ -5,6 +5,7 @@ import { audit } from '../audit.js';
 import { needsCalibrationOf, logbookItem, logbookItems, type Master } from '../master.js';
 import { parseId, requirePermission } from '../auth.js';
 import { changeLines, entryLines } from '../changes.js';
+import { FAILURE_CATEGORY_LABEL, ITEM_ACTION_LABEL, STATE_NAME, TYPE_LABEL } from '../labels.js';
 import { canonical } from '../signatures.js';
 import { PLANT_TZ, plantDay, statusOf, type StatusContext } from '../status.js';
 import {
@@ -82,7 +83,7 @@ async function history(sql: Sql, master: Master, id: number, fromDay: string, to
       where a.object_type = 'equipment' and a.object_id = ${String(id)} and a.at >= ${from} and a.at < ${to}
       order by a.at, a.id`;
     for (const r of rows) {
-      events.push({ kind: 'masterdata', at: r.at, actor: r.actor, action: r.action, old: r.old_value, new: r.new_value, reason: r.reason, lines: changeLines(r.old_value, r.new_value) });
+      events.push({ kind: 'masterdata', at: r.at, actor: r.actor, action: r.action, old: r.old_value, new: r.new_value, reason: r.reason, lines: changeLines(r.old_value, r.new_value, r.action) });
     }
   }
   events.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
@@ -105,12 +106,13 @@ async function card(sql: Sql, master: Master, id: number, ctx: StatusContext) {
 const sigText = (e: { signatures: { meaning: string; printedName: string; signedAt: Date | string; valid: boolean }[] }) =>
   e.signatures.map((s) => `${s.meaning}: ${s.printedName}, ${plant(s.signedAt)}${s.valid ? '' : ' [INVALID]'}`).join('; ');
 
-function eventRow(ev: Event): { at: Date; kind: string; what: string; detail: string; who: string; signatures: string; breakdown: string; highlight: boolean; grey: boolean } {
+function eventRow(ev: Event): { at: Date; kind: string; type: string; what: string; detail: string; who: string; signatures: string; breakdown: string; highlight: boolean; grey: boolean } {
   if (ev.kind === 'entry') {
     const e = ev.entry;
     return {
       at: ev.at,
       kind: e.logbookType,
+      type: TYPE_LABEL[e.logbookType] ?? e.logbookType,
       what: `#${e.entryId} v${e.version} · ${e.change}${e.latest ? '' : ' (superseded)'}${e.correctionReason ? ` · reason: ${e.correctionReason}` : ''}`,
       detail: [e.batch ? `Batch ${e.batch}` : '', ...entryLines(e.data), e.activityEnd ? `Until ${plant(e.activityEnd)}` : '', voiceNoteText(e)].filter(Boolean).join('\n'),
       who: `${e.enteredBy ?? ''}, ${plant(e.enteredAt)}`,
@@ -122,9 +124,9 @@ function eventRow(ev: Event): { at: Date; kind: string; what: string; detail: st
   }
   if (ev.kind === 'review') {
     const r = ev.review;
-    return { at: ev.at, kind: 'review', what: `QA review ${plant(r.periodFrom)} to ${plant(r.periodTo)}${r.superseded ? ' (superseded)' : ''}`, detail: '', who: r.reviewedBy ?? '', signatures: `reviewed: ${r.reviewedBy ?? ''}, ${plant(r.reviewedAt)}${r.valid ? '' : ' [INVALID]'}`, breakdown: '', highlight: false, grey: false };
+    return { at: ev.at, kind: 'review', type: 'QA review', what: `QA review ${plant(r.periodFrom)} to ${plant(r.periodTo)}${r.superseded ? ' (superseded)' : ''}`, detail: '', who: r.reviewedBy ?? '', signatures: `reviewed: ${r.reviewedBy ?? ''}, ${plant(r.reviewedAt)}${r.valid ? '' : ' [INVALID]'}`, breakdown: '', highlight: false, grey: false };
   }
-  return { at: ev.at, kind: 'master data', what: ev.action, detail: [ev.reason ? `Reason: ${ev.reason}` : '', ...ev.lines].filter(Boolean).join('\n'), who: ev.actor ?? 'system', signatures: '', breakdown: '', highlight: false, grey: false };
+  return { at: ev.at, kind: 'master data', type: 'Master data', what: ITEM_ACTION_LABEL[ev.action] ?? ev.action, detail: [ev.reason ? `Reason: ${ev.reason}` : '', ...ev.lines].filter(Boolean).join('\n'), who: ev.actor ?? 'system', signatures: '', breakdown: '', highlight: false, grey: false };
 }
 
 export function historyRoutes(app: FastifyInstance, sql: Sql) {
@@ -187,15 +189,16 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
       ));
     }
     const filters = [q.data.equipmentId && `machine ${items[0]?.code ?? q.data.equipmentId}`, q.data.location && `location ${q.data.location}`,
-      q.data.category && `category ${q.data.category}`, q.data.status && `status ${STATUS_LABEL[q.data.status]}`].filter(Boolean).join(', ');
+      q.data.category && `category ${FAILURE_CATEGORY_LABEL[q.data.category]}`, q.data.status && `status ${STATUS_LABEL[q.data.status]}`].filter(Boolean).join(', ');
     const tables: PdfTable[] = [
       { heading: `Breakdowns (${items.length})`, columns: ['Machine', 'Occurred', 'Repair end', 'QA released', 'Downtime', 'Failure type', 'What happened', 'Root cause', 'Work done', 'Parts used', 'Done by / WO', 'Status'],
-        widths: [55, 48, 48, 48, 42, 48, '*', '*', '*', 70, 60, 48],
+        widths: [55, 48, 48, 48, 42, 64, '*', '*', '*', 70, 60, 48],
         rows: items.map((b) => ({ cells: [`${b.code}\n${b.name}\n${b.location}`, plant(b.occurredAt), plant(b.repairEnd), plant(b.releasedAt), downtimeText(b),
-          b.failureCategory ?? '', b.description, b.rootCause, b.workDone, b.partsText, `${b.doneBy}${b.workOrderRef ? `\nWO ${b.workOrderRef}` : ''}`, STATUS_LABEL[b.status]!] })) },
+          b.failureCategory ? FAILURE_CATEGORY_LABEL[b.failureCategory] ?? b.failureCategory : '', b.description, b.rootCause, b.workDone, b.partsText,
+          [b.doneBy, b.workOrderRef].filter(Boolean).join(' · '), STATUS_LABEL[b.status]!] })) },
       { heading: 'Per machine', columns: ['Machine', 'Failures', 'Downtime (h)', 'MTTR (h)', 'MTBF (h)'], widths: ['*', 60, 70, 60, 60],
         rows: stats.machines.map((m) => ({ cells: [`${m.code} · ${m.name}`, String(m.failures), String(m.downtimeHours), m.mttrHours === null ? '—' : String(m.mttrHours), m.mtbfHours === null ? '—' : String(m.mtbfHours)] })) },
-      { heading: 'Per failure category', columns: ['Category', 'Failures'], widths: ['*', 60], rows: stats.categories.map((c) => ({ cells: [c.category, String(c.failures)] })) },
+      { heading: 'Per failure category', columns: ['Category', 'Failures'], widths: ['*', 60], rows: stats.categories.map((c) => ({ cells: [FAILURE_CATEGORY_LABEL[c.category] ?? c.category, String(c.failures)] })) },
     ];
     return sendCopy(reply, 'pdf', name, await tablesPdf(sql, 'Breakdown register',
       `Breakdowns that occurred ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time)${filters ? ` · ${filters}` : ''}. Downtime runs from occurrence to QA release; for a past breakdown recorded after its repair, to the repair end. MTTR: mean downtime of released breakdowns. MTBF: operating time in the period per failure.`,
@@ -231,7 +234,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     }
     const d = head.details?.details;
     const detailRows: [string, string][] = [
-      ['Equipment', `${eq.code} · ${eq.name} (${eq.kind})`], ['Location', eq.location], ['Make / model', `${eq.make ?? ''} ${eq.model ?? ''}`.trim()], ['Serial number', eq.serial ?? ''], ['Status', head.status?.state.replaceAll('_', ' ') ?? ''],
+      ['Equipment', `${eq.code} · ${eq.name}`], ['Location', eq.location], ['Make / model', `${eq.make ?? ''} ${eq.model ?? ''}`.trim()], ['Serial number', eq.serial ?? ''], ['Status', head.status ? STATE_NAME[head.status.state] ?? head.status.state.replaceAll('_', ' ') : ''],
       ...(d ? ([
         ['Asset number', d.assetNumber], ['Capacity / size', d.capacity],
         ['Installed / supplier', `${d.installationDate ? plantDay(d.installationDate) : ''} ${d.supplier}`.trim()], ['Qualification', `${d.qualificationStatus.replaceAll('_', ' ')} · IQ ${plantDay(d.iq.date)} ${d.iq.ref} · OQ ${plantDay(d.oq.date)} ${d.oq.ref} · PQ ${plantDay(d.pq.date)} ${d.pq.ref} · last requalification ${plantDay(d.lastRequalification)}`],
@@ -243,7 +246,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
       { heading: 'Location history', columns: ['When', 'By', 'From', 'To', 'Reason'], widths: [90, 90, 120, 120, '*'],
         rows: head.locationHistory.map((l) => ({ cells: [plant(l.at), l.by ?? '', l.from ?? '(created)', l.to, l.reason ?? ''] })) },
       { heading: `History (${rows.length})`, columns: ['When', 'Type', 'Record', 'Details', 'By', 'Signatures'], widths: [70, 70, 90, '*', 80, 130],
-        rows: rows.map((r) => ({ cells: [plant(r.at), r.kind.replaceAll('_', ' '), r.what, `${r.breakdown ? `${r.breakdown}\n` : ''}${r.detail}`, r.who, r.signatures], highlight: r.highlight, grey: r.grey })) },
+        rows: rows.map((r) => ({ cells: [plant(r.at), r.type, r.what, `${r.breakdown ? `${r.breakdown}\n` : ''}${r.detail}`, r.who, r.signatures], highlight: r.highlight, grey: r.grey })) },
     ], req.user!.fullName));
   });
 }

@@ -1,22 +1,8 @@
 import { plantDay, plantTime, VOICE_LANGUAGE_LABEL, type Part } from './api.js';
+import { ENTRY_FIELD_LABEL, OUTCOME_LABEL, partsLine as sharedPartsLine, STAGE_LABEL, valueLabel } from '../../server/labels.js';
 
-// Field labels in the order they are shown; a breakdown reads top to bottom from failure to repair.
-export const LABELS: Record<string, string> = {
-  kind: 'Type', occurredAt: 'Occurred', reportedBy: 'Reported by', failureCategory: 'Failure category', description: 'What happened',
-  impactAssessment: 'Impact assessment', rootCause: 'Root cause', workDone: 'Work done', parts: 'Parts used', partsNone: 'Parts used',
-  toolsUsed: 'Tools / consumables', doneBy: 'Done by', vendorName: 'Vendor', serviceReportRef: 'Service report', workOrderRef: 'Work order',
-  postRepairChecks: 'Post-repair checks', recalibrationNeeded: 'Re-calibration needed',
-  source: 'Recorded from', protocolNumber: 'Protocol', stage: 'Stage', outcome: 'Result', reportRef: 'Report', cleaningType: 'Cleaning', agent: 'Agent', sporicidal: 'Sporicidal', disinfectantLot: 'Disinfectant lot',
-  cycleType: 'Cycle', cycleId: 'Cycle no.', programme: 'Programme', load: 'Load', controllerRecordRef: 'Controller record', indicators: 'Indicators',
-  test: 'Test', port: 'Port', method: 'Method', point: 'Point', value: 'Reading', outOfLimit: 'OUT OF LIMITS',
-  result: 'Result', certificateRef: 'Certificate', nextDue: 'Next due', notes: 'Notes', remarks: 'Remarks', comment: 'Comment', deviationRef: 'Deviation',
-  // D-46: why a cleaning ended after its dirty hold ran out.
-  delayReason: 'Why late',
-  // D-49: why a use ended ("End use").
-  endReason: 'Why ended',
-  // Change over (D-55): from which product and batch to which.
-  fromProduct: 'From product', fromBatch: 'From batch', toProduct: 'To product', toBatch: 'To batch',
-};
+// Field labels in the order they are shown (shared with the printed copies, D-60).
+export const LABELS: Record<string, string> = { ...ENTRY_FIELD_LABEL };
 // Master data, users and settings, as named in the audit trail.
 Object.assign(LABELS, {
   code: 'ID', name: 'Name', location: 'Location', sterile: 'Sterile', classified: 'Classified room', cleanHoldHours: 'Clean-hold (hours)',
@@ -33,12 +19,10 @@ Object.assign(LABELS, {
 });
 const ORDER = Object.keys(LABELS);
 // Requalification values in words (the Qualification product's stage keys and report outcomes).
-export const STAGE_LABEL: Record<string, string> = { iq: 'IQ', oq: 'OQ', pq: 'PQ', iq_oq: 'IQ/OQ', dq: 'DQ', urs: 'URS', periodic_review: 'Periodic review', csv: 'CSV' };
-export const OUTCOME_LABEL: Record<string, string> = { pass: 'Pass', pass_conditions: 'Pass with conditions', fail: 'Fail' };
-const SOURCE_LABEL: Record<string, string> = { protocol: 'Qualification protocol', manual: 'Written by hand' };
+export { OUTCOME_LABEL, STAGE_LABEL };
 const rank = (k: string) => (ORDER.includes(k) ? ORDER.indexOf(k) : ORDER.length);
 
-export const partsLine = (parts: Part[]) => parts.map((p) => `${p.quantity} × ${p.name}${p.partNumber ? ` (P/N ${p.partNumber})` : ''}${p.lotSerial ? `, lot/SN ${p.lotSerial}` : ''}`).join('; ');
+export const partsLine = (parts: Part[]) => sharedPartsLine(parts);
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 // Anything else the audit trail or a record may hold, shown in words.
 const text = (v: unknown): string =>
@@ -57,11 +41,8 @@ export const fieldValue = (k: string, v: unknown): string =>
   : k === 'occurredAt' ? plantTime(String(v))
   : k === 'parts' ? partsLine(v as Part[])
   : k === 'partsNone' ? 'none'
-  : k === 'doneBy' ? (v === 'vendor' ? 'external vendor' : 'in-house')
-  : k === 'stage' && typeof v === 'string' && STAGE_LABEL[v] ? STAGE_LABEL[v]
-  : k === 'outcome' && typeof v === 'string' ? OUTCOME_LABEL[v] ?? text(v)
-  : k === 'source' && typeof v === 'string' ? SOURCE_LABEL[v] ?? text(v)
-  : text(v);
+  // D-60: a picked value in the entry form's words ("Product changeover", "In-house").
+  : valueLabel(k, v) ?? text(v);
 
 
 // Data fields one per line, in reading order, empty ones left out.

@@ -1,6 +1,7 @@
 // D-49: one date format for the server and the pages (no Node APIs in it).
 import { dayText, timeText } from '../../server/dates.js';
-export { timeText };
+import { FAILURE_CATEGORY_LABEL, TYPE_LABEL } from '../../server/labels.js';
+export { timeText, FAILURE_CATEGORY_LABEL };
 
 export class ApiError extends Error {
   constructor(
@@ -195,20 +196,7 @@ export interface Entry {
   voiceNotes?: { id: number; field: string; language: string | null; edited: boolean; carried: boolean }[];
 }
 
-export const TYPE_LABEL: Record<string, string> = {
-  equipment_use: 'Equipment use',
-  equipment_cleaning: 'Equipment cleaning',
-  maintenance: 'Maintenance / breakdown',
-  calibration: 'Calibration / check',
-  area_cleaning: 'Area cleaning',
-  general_log: 'General equipment log',
-  change_over: 'Change over',
-  requalification: 'Requalification',
-  steriliser_cycle: 'Sterilisation cycle',
-  steriliser_test: 'Steriliser test',
-  glove_integrity: 'Glove integrity',
-  pressure_reading: 'Pressure reading',
-};
+export { TYPE_LABEL };
 
 // Mirrors the server (D-16): these types are signed by the performer.
 export const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test', 'change_over', 'requalification']);

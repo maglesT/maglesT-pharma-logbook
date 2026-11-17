@@ -4,6 +4,7 @@ import {
   type Details, type Equipment, type EquipmentCard, type HistoryEvent, type Me,
 } from '../api.js';
 import { StatusChip } from '../components/StatusChip.js';
+import { ITEM_ACTION_LABEL } from '../../../server/labels.js';
 import { Summary, VoiceLinks } from './EquipmentPage.js';
 import { VoiceNoteDialog } from '../components/VoiceNote.js';
 
@@ -11,9 +12,6 @@ const day = (offset: number) => {
   const d = new Date();
   d.setDate(d.getDate() + offset);
   return d.toLocaleDateString('en-CA');
-};
-const ACTION_LABEL: Record<string, string> = {
-  'equipment.created': 'Item created', 'equipment.updated': 'Master data changed', 'equipment.details_updated': 'Equipment details changed',
 };
 
 // Equipment history card (S9, D-25): the details, current status and the full life history of one item.
@@ -155,7 +153,7 @@ function EventRow({ ev, onVoice }: { ev: HistoryEvent; onVoice: (id: number) => 
   return (
     <tr className="masterdata">
       <td>{plantTime(ev.at)}</td>
-      <td>{ACTION_LABEL[ev.action] ?? ev.action}</td>
+      <td>{ITEM_ACTION_LABEL[ev.action] ?? ev.action}</td>
       <td>
         {ev.reason && <div><strong>Reason:</strong> {ev.reason}</div>}
         {ev.lines.map((l) => <div key={l}>{l}</div>)}

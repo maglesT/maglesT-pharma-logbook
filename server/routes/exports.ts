@@ -9,7 +9,8 @@ import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { logbookItem, type Master } from '../master.js';
 import { parseId, requirePermission } from '../auth.js';
-import { recordLines } from '../changes.js';
+import { entryLines, recordLines } from '../changes.js';
+import { TYPE_LABEL } from '../labels.js';
 import { plantDay, plantTime } from '../status.js';
 import { present, type EntryRow } from './entries.js';
 import { auditFor, batchVersions, periodQuery, periodVersions, plantRange, reviewsFor, type AuditRow } from './review.js';
@@ -169,9 +170,9 @@ async function pdf(r: Report, site: { name: string; code: string } | undefined, 
     const grey = superseded ? { color: '#888888' } : {};
     return [
       cellText(`${r.codes.get(e.equipmentId) ?? ''}\n#${e.entryId} v${e.version}`, grey),
-      cellText(`${e.logbookType.replaceAll('_', ' ')}\n${versionNote(e, r.versions)}`, grey),
+      cellText(`${TYPE_LABEL[e.logbookType] ?? e.logbookType}\n${versionNote(e, r.versions)}`, grey),
       cellText(`${plant(e.activityStart)}${e.activityEnd ? `\nto ${plant(e.activityEnd)}` : ''}${e.late ? `\nLATE: ${e.lateReason}` : ''}`, grey),
-      cellText(`${e.batch ? `Batch ${e.batch}\n` : ''}${recordLines(e.data).join('\n')}`, grey),
+      cellText(`${e.batch ? `Batch ${e.batch}\n` : ''}${entryLines(e.data).join('\n')}`, grey),
       cellText(`${e.enteredBy}\n${plant(e.enteredAt)}`, grey),
       cellText(signatureText(e), grey),
     ];

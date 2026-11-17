@@ -8,6 +8,8 @@ import { ConnectionOff } from './master.js';
 // D-45 (owner 15 Nov 2026): TrueBatch Tablets publishes views of the same names and columns (batch_fact_v1,
 // equipment_use_v1), read the same way through its own link (TRUEBATCH_DATABASE_URL). Either or both may be linked; the
 // batch lists are merged. The abnormal records (Home, D-41) are Batchwright's only.
+// D-61: TrueBatch Injectables' batches (its batch_fact_v1) and the packing products' batches (report.packing_batch_v1:
+// the same columns without a strength) are in the list too, so a packing line's use or change over picks its TP batch.
 
 export interface Batch {
   batchNumber: string;
@@ -21,7 +23,7 @@ export interface Batch {
   /** The product that keeps the batch record (Batchwright or TrueBatch). */
   source: BatchSource;
 }
-export type BatchSource = 'Batchwright' | 'TrueBatch';
+export type BatchSource = 'Batchwright' | 'TrueBatch' | 'TrueBatch Packing' | 'TrueBatch Injectables' | 'TrueBatch Injectables Packing';
 export interface Batches {
   /** The linked batch-record products, in words (for messages). */
   source: string;
@@ -49,7 +51,7 @@ export class BatchwrightOff extends ConnectionOff {
 }
 export const TRUEBATCH_OFF = 'Connection to TrueBatch (batch records) is off. Ask your administrator.';
 export class TrueBatchOff extends ConnectionOff {
-  constructor() { super(); this.message = TRUEBATCH_OFF; }
+  constructor(source = 'TrueBatch') { super(); this.message = `Connection to ${source} (batch records) is off. Ask your administrator.`; }
 }
 const isCut = (e: unknown) => {
   const code = (e as { code?: string }).code ?? '';
@@ -60,27 +62,30 @@ const isCut = (e: unknown) => {
 // A batch is in production until Batchwright records it complete, reviewed, released, rejected or cancelled.
 const IN_PRODUCTION = `(completed_at is null and not coalesce(released, false)
   and status !~* '(complete|review|releas|reject|cancel|clos|destroy|abort)')`;
-const COLS = `batch_number, product_code, strength, status, issued_at::text, completed_at::text, coalesce(released, false) as released,
+const COLS = `batch_number, product_code, strength as strength, status, issued_at::text, completed_at::text, coalesce(released, false) as released,
   ${IN_PRODUCTION} as in_production`;
 type Row = { batch_number: string; product_code: string; strength: string | null; status: string; issued_at: string | null; completed_at: string | null; released: boolean; in_production: boolean };
 const toBatch = (source: BatchSource) => (r: Row): Batch => ({ batchNumber: r.batch_number, productCode: r.product_code, strength: r.strength,
   status: r.status, issuedAt: r.issued_at, completedAt: r.completed_at, released: r.released, inProduction: r.in_production, source });
 
-/** Batchwright's batch records (with its abnormal records), or TrueBatch's (`source` 'TrueBatch': the same two views). */
-export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'Batchwright'): Batches {
+/** Batchwright's batch records (with its abnormal records), or a TrueBatch product's (the same two views; a packing
+ * product's batches are its `packing_batch_v1`, D-61). */
+export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'Batchwright', batchView = 'batch_fact_v1'): Batches {
   const read = async <T>(f: () => Promise<T>) => {
-    try { return await f(); } catch (e) { if (isCut(e)) throw source === 'TrueBatch' ? new TrueBatchOff() : new BatchwrightOff(); throw e; }
+    try { return await f(); } catch (e) { if (isCut(e)) throw source === 'Batchwright' ? new BatchwrightOff() : new TrueBatchOff(source); throw e; }
   };
   const v = (name: string) => q(`${schema}.${name}`);
   const batch = toBatch(source);
+  // A packing batch has no strength of its own.
+  const cols = batchView === 'packing_batch_v1' ? COLS.replace('strength as strength', 'null::text as strength') : COLS;
   const common: Batches = {
     source,
     list: (recentDays) => read(async () => (await q<Row[]>`
-      select ${q.unsafe(COLS)} from ${v('batch_fact_v1')}
+      select ${q.unsafe(cols)} from ${v(batchView)}
       where ${q.unsafe(IN_PRODUCTION)} or completed_at > now() - make_interval(days => ${recentDays})
       order by issued_at desc nulls last, batch_number limit 500`).map(batch)),
     get: (batchNumber) => read(async () => {
-      const [r] = await q<Row[]>`select ${q.unsafe(COLS)} from ${v('batch_fact_v1')} where batch_number = ${batchNumber} limit 1`;
+      const [r] = await q<Row[]>`select ${q.unsafe(cols)} from ${v(batchView)} where batch_number = ${batchNumber} limit 1`;
       return r ? batch(r) : null;
     }),
     usedOn: (codes) => read(async () => new Set((await q<{ batch_number: string }[]>`
@@ -88,7 +93,7 @@ export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'Bat
       where upper(equipment_code) = any(${codes.map((c) => c.toUpperCase())}) or upper(room_code) = any(${codes.map((c) => c.toUpperCase())})`)
       .map((r) => r.batch_number))),
   };
-  if (source === 'TrueBatch') return common;
+  if (source !== 'Batchwright') return common;
   return {
     ...common,
     abnormal: (days) => read(() => q.begin('read only', async (tx) => {
