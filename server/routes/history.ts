@@ -4,7 +4,7 @@ import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
 import { needsCalibrationOf, logbookItem, logbookItems, type Master } from '../master.js';
 import { parseId, requirePermission } from '../auth.js';
-import { changeLines } from '../changes.js';
+import { changeLines, entryLines } from '../changes.js';
 import { canonical } from '../signatures.js';
 import { PLANT_TZ, plantDay, statusOf, type StatusContext } from '../status.js';
 import {
@@ -102,7 +102,6 @@ async function card(sql: Sql, master: Master, id: number, ctx: StatusContext) {
   return { equipment, details: versions.at(-1) ?? null, detailsVersions: versions, locationHistory: await locationHistory(sql, id), status: await statusOf(sql, id, ctx) };
 }
 
-const flat = (v: unknown) => (v === null || v === undefined ? '' : typeof v === 'object' ? canonical(v) : String(v));
 const sigText = (e: { signatures: { meaning: string; printedName: string; signedAt: Date | string; valid: boolean }[] }) =>
   e.signatures.map((s) => `${s.meaning}: ${s.printedName}, ${plant(s.signedAt)}${s.valid ? '' : ' [INVALID]'}`).join('; ');
 
@@ -113,7 +112,7 @@ function eventRow(ev: Event): { at: Date; kind: string; what: string; detail: st
       at: ev.at,
       kind: e.logbookType,
       what: `#${e.entryId} v${e.version} · ${e.change}${e.latest ? '' : ' (superseded)'}${e.correctionReason ? ` · reason: ${e.correctionReason}` : ''}`,
-      detail: `${e.batch ? `Batch ${e.batch} · ` : ''}${flat(e.data)}${e.activityEnd ? ` · until ${plant(e.activityEnd)}` : ''}${e.voiceNotes.length ? ` · ${voiceNoteText(e).replaceAll('\n', ' · ')}` : ''}`,
+      detail: [e.batch ? `Batch ${e.batch}` : '', ...entryLines(e.data), e.activityEnd ? `Until ${plant(e.activityEnd)}` : '', voiceNoteText(e)].filter(Boolean).join('\n'),
       who: `${e.enteredBy ?? ''}, ${plant(e.enteredAt)}`,
       signatures: sigText(e),
       breakdown: ev.breakdown ? `Downtime ${ev.breakdown.downtime} · parts: ${ev.breakdown.parts || '—'} · ${ev.breakdown.status}` : '',
@@ -125,7 +124,7 @@ function eventRow(ev: Event): { at: Date; kind: string; what: string; detail: st
     const r = ev.review;
     return { at: ev.at, kind: 'review', what: `QA review ${plant(r.periodFrom)} to ${plant(r.periodTo)}${r.superseded ? ' (superseded)' : ''}`, detail: '', who: r.reviewedBy ?? '', signatures: `reviewed: ${r.reviewedBy ?? ''}, ${plant(r.reviewedAt)}${r.valid ? '' : ' [INVALID]'}`, breakdown: '', highlight: false, grey: false };
   }
-  return { at: ev.at, kind: 'master data', what: ev.action, detail: [ev.reason ? `Reason: ${ev.reason}` : '', ...ev.lines].filter(Boolean).join(' · '), who: ev.actor ?? 'system', signatures: '', breakdown: '', highlight: false, grey: false };
+  return { at: ev.at, kind: 'master data', what: ev.action, detail: [ev.reason ? `Reason: ${ev.reason}` : '', ...ev.lines].filter(Boolean).join('\n'), who: ev.actor ?? 'system', signatures: '', breakdown: '', highlight: false, grey: false };
 }
 
 export function historyRoutes(app: FastifyInstance, sql: Sql) {
@@ -228,7 +227,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     const name = `history-${eq.code}-${q.data.fromDay}`;
     if (format.data === 'csv') {
       return sendCopy(reply, 'csv', name, csvText(['equipment', 'at_utc', 'kind', 'record', 'details', 'by', 'signatures', 'breakdown'],
-        rows.map((r) => [eq.code, r.at, r.kind, r.what, r.detail, r.who, r.signatures, r.breakdown])));
+        rows.map((r) => [eq.code, r.at, r.kind, r.what, r.detail.replaceAll('\n', ' · '), r.who, r.signatures, r.breakdown])));
     }
     const d = head.details?.details;
     const detailRows: [string, string][] = [

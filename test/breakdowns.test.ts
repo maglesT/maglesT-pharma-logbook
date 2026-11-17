@@ -356,6 +356,11 @@ describe('history card (LB-01, LB-22)', () => {
     expect(csv.statusCode).toBe(200);
     expect(csv.body).toContain('"maintenance"');
     expect(csv.body).toContain('Downtime 0 h');
+    // D-56: entry data in labelled words, not the stored JSON.
+    expect(csv.body).toContain('Root cause: Worn contactor');
+    expect(csv.body).toContain('Batch B-HC-1 · Stage: Mixing');
+    expect(csv.body).not.toContain('{"');
+    expect(csv.body).not.toContain('rootCause');
     const pdf = await call(t.app, c.op1!, 'GET', `/api/export/history.pdf?equipmentId=${id}&${period()}`);
     expect(pdf.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
   });

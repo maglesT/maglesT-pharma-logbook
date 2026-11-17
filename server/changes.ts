@@ -73,3 +73,8 @@ export function recordLines(v: unknown, indent = ''): string[] {
   }
   return out;
 }
+
+// D-56: an entry's data for the history card, as labelled lines like the screen shows them (empty fields left out).
+export const entryLines = (data: Record<string, unknown>): string[] =>
+  recordLines(Object.fromEntries(Object.entries(data).filter(([, v]) => v !== '' && v !== false && v !== null && v !== undefined
+    && !(Array.isArray(v) && v.length === 0) && !(isObj(v) && Object.keys(v).length === 0))));
