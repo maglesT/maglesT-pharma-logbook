@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { QualificationOff, type Qualification, type QualStatus } from '../server/qualification.js';
+import { QualificationOff, type MediaFill, type Qualification, type QualStatus } from '../server/qualification.js';
 import { NO_CARE, type MasterItem } from '../server/master.js';
 import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem, addProduct } from './helpers.js';
 import { randomUUID } from 'node:crypto';
@@ -18,7 +18,9 @@ let qualDown = false;   // D-70: the link is on but does not answer
 const fakeQualification: Qualification = {
   statuses: async () => { if (qualDown) throw new QualificationOff(); return new Map(qual); },
   protocols: async (masterId) => { if (qualDown) throw new QualificationOff(); return protocols.filter((p) => p.masterId === masterId) as never; },
+  mediaFills: async () => { if (qualDown) throw new QualificationOff(); return new Map(mediaFills); },
 };
+const mediaFills = new Map<string, MediaFill>();   // D-73: newest approved media fill by master item id
 
 const sig = (username: string) => ({ proof: proofFor(username) });
 const now = () => new Date().toISOString();
@@ -276,5 +278,56 @@ describe('Qualification link down (D-70, owner 17 Nov 2026, G15)', () => {
     }
     // Back up: no warning, no mark.
     expect((await status(id)).warnings).not.toContain('Qualification not reachable: qualification not checked.');
+  });
+});
+
+describe('media fill of a sterile barrier, from Qualification (D-73, suite S8)', () => {
+  const fill = (m: MasterItem, number: string, outcome: string, approvedDaysAgo: number, nextDue: string | null) =>
+    mediaFills.set(m.itemId, { number, masterId: m.itemId, itemCode: m.code, outcome, approvedAt: new Date(Date.now() - approvedDaysAgo * 86_400_000).toISOString(), nextDue });
+  const mfWarnings = (s: { warnings: string[] }) => s.warnings.filter((w: string) => /media fill/i.test(w));
+
+  it('a barrier shows its or its room\'s newest approved media fill; none, failed or overdue is a warning only', async () => {
+    const room = masterItem('RM-MF', 'area');
+    const id = await item({ decontaminationValidDays: 7, gloveTestEveryDays: 7, location: 'RM-MF' });
+    const code = `RD-${n}`;
+    const machine = t.master.items_.get(code)!;
+    // None approved: a warning naming the machine and its room.
+    let s = await status(id);
+    expect(s.mediaFill).toBeNull();
+    expect(mfWarnings(s)).toEqual([`No approved media fill of ${code} or RM-MF in Qualification: no aseptic filling on this line until one has passed.`]);
+    // Passed on the room, due later: shown, no warning, nothing blocked by it.
+    fill(room, 'PRT-MF-1', 'pass', 2, day(180));
+    s = await status(id);
+    expect(s.mediaFill).toMatchObject({ number: 'PRT-MF-1', itemCode: 'RM-MF', outcome: 'pass', nextDue: day(180), overdue: false });
+    expect(mfWarnings(s)).toEqual([]);
+    expect(s.blockers.filter((b: string) => /media fill/i.test(b))).toEqual([]);
+    // A newer one on the machine itself wins; overdue: a warning, still not a blocker.
+    fill(machine, 'PRT-MF-2', 'pass', 1, day(-1));
+    s = await status(id);
+    expect(s.mediaFill).toMatchObject({ number: 'PRT-MF-2', overdue: true });
+    expect(mfWarnings(s)).toEqual([expect.stringMatching(/^Media fill overdue since .* \(Qualification PRT-MF-2\): no aseptic filling on this line until it is repeated\.$/)]);
+    expect(s.blockers.filter((b: string) => /media fill/i.test(b))).toEqual([]);
+    // Failed.
+    fill(machine, 'PRT-MF-3', 'fail', 0, day(30));
+    expect(mfWarnings(await status(id))).toEqual([`The last media fill of ${code} or RM-MF failed (Qualification PRT-MF-3): no aseptic filling on this line until one has passed.`]);
+    // Qualification down: not shown, the usual warning only.
+    qualDown = true;
+    try {
+      s = await status(id);
+      expect(s.mediaFill).toBeNull();
+      expect(mfWarnings(s)).toEqual([]);
+      expect(s.warnings).toContain('Qualification not reachable: qualification not checked.');
+    } finally {
+      qualDown = false;
+    }
+  });
+
+  it('an item that is not a barrier shows no media fill, even with one on its room', async () => {
+    const room = masterItem('RM-MF2', 'area');
+    fill(room, 'PRT-MF-9', 'pass', 1, day(-5));
+    const id = await item({ location: 'RM-MF2' });
+    const s = await status(id);
+    expect(s.mediaFill).toBeNull();
+    expect(mfWarnings(s)).toEqual([]);
   });
 });

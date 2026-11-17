@@ -98,6 +98,8 @@ export interface TrueBatchUses {
   source: UseSource;
   /** Per item code (upper case): the newest open use and the newest ended use, at most one of each. */
   latest(codes: string[]): Promise<TrueBatchUse[]>;
+  /** D-72: every use of one item (its code) that overlaps the period [from, to), oldest first, for the history card. */
+  inPeriod(code: string, from: Date, to: Date): Promise<TrueBatchUse[]>;
 }
 /** The uses of one product could not be read: its link is off. */
 export class UsesOff extends ConnectionOff {
@@ -120,6 +122,20 @@ export function sqlTrueBatchUses(q: Sql, schema = 'report', source: UseSource = 
           where upper(u.equipment_code) = any(${codes.map((c) => c.toUpperCase())})
             and (u.ended_at is not null or ${inProduction})
           order by upper(u.equipment_code), u.ended_at is null, coalesce(u.ended_at, u.started_at) desc nulls last`)
+          .map((r) => ({ code: r.code, batchNumber: r.batch_number, step: r.step ?? '', startedAt: r.started_at, endedAt: r.ended_at, source,
+            productCode: r.product_code }));
+      } catch (e) { if (isCut(e)) throw new UsesOff(source); throw e; }
+    },
+    inPeriod: async (code, from, to) => {
+      try {
+        const product = batchView ? q`(select b.product_code from ${v(batchView)} b where b.batch_number = u.batch_number limit 1)` : q`null::text`;
+        return (await q<{ code: string; batch_number: string; step: string | null; started_at: Date; ended_at: Date | null; product_code: string | null }[]>`
+          select upper(u.equipment_code) as code, u.batch_number, coalesce(nullif(to_jsonb(u)->>'step_name', ''), u.step) as step,
+            coalesce(u.started_at, u.data_as_of) as started_at, u.ended_at, ${product} as product_code
+          from ${v('equipment_use_v1')} u
+          where upper(u.equipment_code) = ${code.toUpperCase()}
+            and coalesce(u.started_at, u.data_as_of) < ${to} and (u.ended_at is null or u.ended_at >= ${from})
+          order by 4, u.batch_number limit 5000`)
           .map((r) => ({ code: r.code, batchNumber: r.batch_number, step: r.step ?? '', startedAt: r.started_at, endedAt: r.ended_at, source,
             productCode: r.product_code }));
       } catch (e) { if (isCut(e)) throw new UsesOff(source); throw e; }

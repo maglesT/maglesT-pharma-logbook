@@ -25,9 +25,21 @@ export interface QualProtocol {
   nextReviewDueDecided: string | null;
   reportApprovedAt: string | null;
 }
+// D-73: a media fill (aseptic process simulation) is a protocol of stage media_fill on the item it was run on (a barrier
+// machine or its room); once QA approved its report: the outcome (pass, pass_conditions, fail) and the next media fill date.
+export interface MediaFill {
+  number: string;
+  masterId: string;
+  itemCode: string;
+  outcome: string | null;
+  approvedAt: string;                 // ISO time QA approved the report
+  nextDue: string | null;             // plant date YYYY-MM-DD
+}
 export interface Qualification {
   statuses(): Promise<Map<string, QualStatus>>;          // by master item id
   protocols(masterId: string): Promise<QualProtocol[]>;
+  /** D-73: the newest approved media fill of each item (by master item id). Optional: a reader without it shows none. */
+  mediaFills?(): Promise<Map<string, MediaFill>>;
 }
 
 const isCut = (e: unknown) => {
@@ -53,5 +65,12 @@ export function sqlQualification(q: Sql): Qualification {
       number: r.number!, masterId: r.master_id!, itemCode: r.item_code!, stage: r.stage!, step: r.step!, approvedAt: r.approved_at ?? null,
       reportOutcome: r.report_outcome ?? null, reportRelease: r.report_release ?? null, statusDecided: r.status_decided ?? null,
       nextReviewDueDecided: r.next_review_due_decided ?? null, reportApprovedAt: r.report_approved_at ?? null }))),
+    mediaFills: () => read(async () => new Map((await q<{ number: string; master_id: string; item_code: string | null; outcome: string | null; approved: Date; due: string | null }[]>`
+      select distinct on (master_id) number, master_id::text, item_code, report_outcome as outcome, report_approved_at as approved,
+        next_review_due_decided::text as due
+      from report.protocol_v1 where stage = 'media_fill' and report_approved_at is not null and master_id is not null
+      order by master_id, report_approved_at desc`)
+      .map((r) => [r.master_id, { number: r.number, masterId: r.master_id, itemCode: r.item_code ?? '', outcome: r.outcome ?? null,
+        approvedAt: new Date(r.approved).toISOString(), nextDue: r.due ?? null }]))),
   };
 }

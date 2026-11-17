@@ -366,3 +366,50 @@ describe('antibiotic last used in TrueBatch (D-67)', () => {
     await expect.poll(async () => (await published(a.code))?.only_product).toBeNull();
   });
 });
+
+describe('TrueBatch uses in the item\'s history card (D-72, suite S30)', () => {
+  const day = (offset = 0) => new Date(Date.now() + offset * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+  const period = () => `fromDay=${day(-1)}&toDay=${day()}`;
+  it('LB-01: each use recorded in a TrueBatch product is a read-only row, merged in time order with the Logbook entries, and in the CSV and PDF', async () => {
+    const a = await item();
+    await tbUse('TB260001', a.code, { startedMinutesAgo: 50, endedMinutesAgo: 40 });
+    await verify((await cleaning(a.id)).json().id);
+    await t.owner.unsafe(`update ${TB}.equipment_use_v1 set step_name = 'Granulation › Charge API' where equipment_code = $1`, [a.code]);
+    await tbUse('TP26001', a.code, { schema: TBP, startedMinutesAgo: 120, endedMinutesAgo: 100 });
+    await tbUse('TI260001', a.code, { schema: TBI, startedMinutesAgo: 1, endedMinutesAgo: null });
+    // Another item's use and a use outside the period are not shown.
+    await tbUse('TB260002', `${a.code}-X`, { startedMinutesAgo: 30, endedMinutesAgo: 20 });
+    const h = (await call(t.app, c.qa!, 'GET', `/api/equipment/${a.id}/history?${period()}`)).json();
+    expect(h.notes).toEqual([]);
+    const kinds = h.events.map((e: { kind: string; use?: { batch: string }; entry?: { logbookType: string } }) => e.use?.batch ?? e.entry?.logbookType);
+    expect(kinds).toEqual(['TP26001', 'TB260001', 'TI260001', 'equipment_cleaning']);
+    expect(h.events[1]).toMatchObject({ kind: 'truebatch', use: { batch: 'TB260001', productCode: 'FG-TB', step: 'Granulation › Charge API', source: 'TrueBatch' } });
+    expect(h.events[0].use).toMatchObject({ source: 'TrueBatch Packing', productCode: null, step: 'granulation/charge-api' });
+    expect(h.events[2].use).toMatchObject({ source: 'TrueBatch Injectables', productCode: 'FG-TI', endedAt: null });
+    // The "Equipment use" filter keeps them; another type leaves them out.
+    expect((await call(t.app, c.qa!, 'GET', `/api/equipment/${a.id}/history?${period()}&types=equipment_use`)).json().events).toHaveLength(3);
+    expect((await call(t.app, c.qa!, 'GET', `/api/equipment/${a.id}/history?${period()}&types=equipment_cleaning`)).json().events).toHaveLength(1);
+    const csv = await call(t.app, c.qa!, 'GET', `/api/export/history.csv?equipmentId=${a.id}&${period()}`);
+    expect(csv.body).toContain('Batch TB260001 · FG-TB');
+    expect(csv.body).toContain('Step: Granulation › Charge API');
+    expect(csv.body).toContain('From TrueBatch: read only, recorded there');
+    expect(csv.body).toContain('Not ended yet');
+    const pdf = await call(t.app, c.qa!, 'GET', `/api/export/history.pdf?equipmentId=${a.id}&${period()}`);
+    expect(pdf.rawPayload.subarray(0, 5).toString()).toBe('%PDF-');
+  });
+
+  it('PL-08: a TrueBatch product that does not answer is left out with a note; the rest of the history still shows', async () => {
+    const a = await item();
+    await tbUse('TB260001', a.code, { startedMinutesAgo: 50, endedMinutesAgo: 40 });
+    await tbUse('TI260001', a.code, { schema: TBI, startedMinutesAgo: 30, endedMinutesAgo: 20 });
+    await t.owner.unsafe(`revoke select on all tables in schema ${TB} from logbook_app`);
+    try {
+      const h = (await call(t.app, c.qa!, 'GET', `/api/equipment/${a.id}/history?${period()}`)).json();
+      expect(h.notes).toEqual(['Connection to TrueBatch is off: its uses of this item are not shown.']);
+      expect(h.events.map((e: { use?: { batch: string } }) => e.use?.batch)).toEqual(['TI260001']);
+      expect((await call(t.app, c.qa!, 'GET', `/api/export/history.pdf?equipmentId=${a.id}&${period()}`)).statusCode).toBe(200);
+    } finally {
+      await t.owner.unsafe(`grant select on all tables in schema ${TB} to logbook_app`);
+    }
+  });
+});

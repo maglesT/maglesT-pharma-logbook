@@ -113,7 +113,7 @@ function PendingBanner({ onOpen }: { onOpen: (id: number) => void }) {
   if (hidden || rows.length === 0) return null;
   const overdue = rows.filter((r) => r.overdue).length;
   return (
-    <div className={overdue ? 'pending-banner' : 'pending-banner soon'} role="alert">
+    <section className={overdue ? 'pending-banner' : 'pending-banner soon'} aria-label="Pending activities">
       <div className="pb-head">
         <strong>⚠ Pending activities: {overdue > 0 && `${overdue} overdue`}{overdue > 0 && rows.length > overdue && ', '}{rows.length > overdue && `${rows.length - overdue} due`}</strong>
         <button className="link dark" onClick={() => setOpen(!open)}>{open ? 'Hide the list' : 'Show the list'}</button>
@@ -124,6 +124,6 @@ function PendingBanner({ onOpen }: { onOpen: (id: number) => void }) {
           {rows.map((r, i) => <li key={i} className={r.overdue ? 'overdue' : ''}><button className="link dark" onClick={() => onOpen(r.id)}>{r.text}</button></li>)}
         </ul>
       )}
-    </div>
+    </section>
   );
 }
