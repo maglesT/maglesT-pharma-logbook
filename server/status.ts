@@ -411,14 +411,17 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   // through the last plant day.
   const sterile: [SterileDue['kind'], number | null | undefined, Date | null, string, string, string][] = [];
   if (f.has_steriliser_tests) sterile.push(['steriliser_test', 1, f.last_steriliser_pass_at, 'Steriliser test', 'pass a leak or air-removal test', '']);
-  if (f.has_vhp_cycles) sterile.push(['decontamination', f.care.decontaminationValidDays, f.last_vhp_pass_at, 'Decontamination (VHP)', 'decontaminate', 'Decontamination valid for (days)']);
-  if (f.oldest_glove_test_at) sterile.push(['glove_test', f.care.gloveTestEveryDays, f.oldest_glove_test_at, 'Glove test', 'test every glove port', 'Glove test every (days)']);
+  // D-65 (owner, 17 Nov 2026): a barrier whose master data sets a decontamination validity or glove test interval is not fit
+  // until its first verified pass, not only once a first one was recorded.
+  if (f.has_vhp_cycles || f.care.decontaminationValidDays) sterile.push(['decontamination', f.care.decontaminationValidDays, f.last_vhp_pass_at, 'Decontamination (VHP)', 'decontaminate', 'Decontamination valid for (days)']);
+  if (f.oldest_glove_test_at || f.care.gloveTestEveryDays) sterile.push(['glove_test', f.care.gloveTestEveryDays, f.oldest_glove_test_at, 'Glove test', 'test every glove port', 'Glove test every (days)']);
   let sterileValidUntil: string | null = null;
   let sterileState: StatusCode | null = null;
   const sterileDues: SterileDue[] = [];
   for (const [kind, days, at, what, todo, field] of sterile) {
     if (!days) { blockers.push(`${what}: its validity is not set in master data ("${field}", from the qualification): not fit for use until it is.`); sterileState = 'sterile_expired'; continue; }
-    if (!at) { blockers.push(`${what}: no verified pass on record: ${todo} before use.`); sterileState = 'sterile_expired'; continue; }
+    // Never passed: not fit before its first use (D-65). Glove tests need no verification (D-63), so any glove test counts.
+    if (!at) { blockers.push(`${what}: no ${kind === 'glove_test' ? 'glove test' : 'verified pass'} on record: ${todo} before first use.`); sterileState = 'sterile_expired'; continue; }
     const until = addDays(plantDate(at), days - 1);
     if (!sterileValidUntil || until < sterileValidUntil) sterileValidUntil = until;
     sterileDues.push({ kind, until, overdue: until < f.today });

@@ -180,6 +180,26 @@ describe('sterile status for TrueBatch Injectables (D-50)', () => {
     expect(new Date(s.lastDecontamination).getTime()).toBeGreaterThan(Date.now() - 3_600_000);
   });
 
+  it('D-65: an isolator with timings in master data and no decontamination or glove test ever recorded is not fit until its first verified pass', async () => {
+    const iso = await addItem(t, { code: `IS-${++n}`, name: 'Isolator, never decontaminated', kind: 'equipment', sterile: true, decontaminationValidDays: 7, gloveTestEveryDays: 7 });
+    const s = await status(iso);
+    expect(s.state).toBe('sterile_expired');
+    expect(s.blockers).toEqual([
+      'Decontamination (VHP): no verified pass on record: decontaminate before first use.',
+      'Glove test: no glove test on record: test every glove port before first use.']);
+    // An unverified decontamination does not count; a verified one and a passed glove test make it fit.
+    const vhp = await entry('op1', iso, { logbookType: 'steriliser_cycle', activityStart: now(), activityEnd: now(),
+      data: { cycleType: 'vhp', cycleId: 'V-65', programme: 'VHP-2', load: 'Empty chamber', result: 'pass', controllerRecordRef: 'ISO-V-65' }, signature: sig('op1') });
+    expect(vhp.statusCode, vhp.body).toBe(201);
+    expect((await status(iso)).blockers).toContain('Decontamination (VHP): no verified pass on record: decontaminate before first use.');
+    await verify(vhp.json().id);
+    expect((await entry('op1', iso, { logbookType: 'glove_integrity', activityStart: now(), signature: sig('op1'), data: { port: 'G1', result: 'pass' } })).statusCode).toBe(201);
+    expect((await status(iso)).blockers).toEqual([]);
+    // An item without those timings is unchanged: fit with no sterile record.
+    const plain = await addItem(t, { code: `IS-${++n}`, name: 'Sterile item, no timings', kind: 'equipment', sterile: true });
+    expect((await status(plain)).blockers.filter((b: string) => /Decontamination|Glove/.test(b))).toEqual([]);
+  });
+
   it('LB-15: an isolator whose timings are not set in master data is not fit; nothing is assumed (D-51)', async () => {
     const iso = await addItem(t, { code: `IS-${++n}`, name: 'Isolator, timings not set', kind: 'equipment', sterile: true });
     expect((await entry('op1', iso, { logbookType: 'glove_integrity', activityStart: now(), signature: sig('op1'), data: { port: 'G1', result: 'pass' } })).statusCode).toBe(201);
