@@ -3,7 +3,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { Fields } from '../web/src/fields.js';
 import { EndUseDialog, UseCheck } from '../web/src/pages/EquipmentPage.js';
-import { joinParts, plantTime, type Entry, type EquipmentStatus } from '../web/src/api.js';
+import { joinParts, plantTime, sterileLines, type Entry, type EquipmentStatus } from '../web/src/api.js';
 import { dayText, timeText } from '../server/dates.js';
 
 // What the screens show, rendered as the browser gets it (owner 15 Nov 2026, end-to-end run findings).
@@ -93,5 +93,16 @@ describe('the check before use and the entry details read in words', () => {
   it('a line of parts leaves the empty ones out: no "· ·" (D-55)', () => {
     expect(joinParts(['PCM-500', null, '', ' ', 'in production'])).toBe('PCM-500 · in production');
     expect(joinParts(['', null])).toBe('');
+  });
+});
+
+describe('sterile validity on the item page (D-64)', () => {
+  it('shows each sterile check while it is valid, as a plain line; an expired one only as its blocker', () => {
+    expect(sterileLines(status())).toEqual([]);
+    expect(sterileLines(status({ sterileDues: [
+      { kind: 'decontamination', until: '2026-11-23', overdue: false },
+      { kind: 'glove_test', until: '2026-11-20', overdue: false },
+      { kind: 'steriliser_test', until: '2026-11-16', overdue: true },
+    ] }))).toEqual(['Decontamination valid until 23 Nov 2026', 'Glove test due by 20 Nov 2026']);
   });
 });

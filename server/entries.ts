@@ -142,7 +142,8 @@ export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
 };
 
 // D-16: types whose performer signs with an e-signature (a clause requires the signature).
-const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test', 'change_over', 'requalification']);
+// D-63: glove integrity tests and pressure readings too, like the other sterile records.
+const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading', 'change_over', 'requalification']);
 export const performerSigns = (type: string) => PERFORMER_SIGNS.has(type);
 
 // LB-03 / LB-11: second-person verification needed for this type under these settings.

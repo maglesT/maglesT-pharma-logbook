@@ -34,6 +34,8 @@ export interface EquipmentStatus {
   lastDecontamination: Date | null;
   lastGloveTest: Date | null;
   sterileValidUntil: string | null;
+  // D-64: each sterile check with its last valid plant day (YYYY-MM-DD), shown on the item page; overdue once passed.
+  sterileDues: SterileDue[];
   cleanUntil: Date | null;
   // Plant-local date (YYYY-MM-DD).
   calibrationDue: string | null;
@@ -47,6 +49,12 @@ export interface EquipmentStatus {
   // D-45: the end of the verified cleaning in force (after the last use), and when this status was worked out.
   lastCleanEnd: Date | null;
   checkedAt: Date;
+}
+
+export interface SterileDue {
+  kind: 'steriliser_test' | 'decontamination' | 'glove_test';
+  until: string;
+  overdue: boolean;
 }
 
 // The next time by which the item must be cleaned. soon: in the last quarter of the hold or frequency (at least 1 hour).
@@ -401,17 +409,22 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   // within the days its qualification set in master data (D-51, platform D-38: decontaminationValidDays,
   // gloveTestEveryDays; not set: not fit, never a default). Each applies to an item that keeps that record. Valid
   // through the last plant day.
-  const sterile: [number | null | undefined, Date | null, string, string, string][] = [];
-  if (f.has_steriliser_tests) sterile.push([1, f.last_steriliser_pass_at, 'Steriliser test', 'pass a leak or air-removal test', '']);
-  if (f.has_vhp_cycles) sterile.push([f.care.decontaminationValidDays, f.last_vhp_pass_at, 'Decontamination (VHP)', 'decontaminate', 'Decontamination valid for (days)']);
-  if (f.oldest_glove_test_at) sterile.push([f.care.gloveTestEveryDays, f.oldest_glove_test_at, 'Glove test', 'test every glove port', 'Glove test every (days)']);
+  const sterile: [SterileDue['kind'], number | null | undefined, Date | null, string, string, string][] = [];
+  if (f.has_steriliser_tests) sterile.push(['steriliser_test', 1, f.last_steriliser_pass_at, 'Steriliser test', 'pass a leak or air-removal test', '']);
+  // D-65 (owner, 17 Nov 2026): a barrier whose master data sets a decontamination validity or glove test interval is not fit
+  // until its first verified pass, not only once a first one was recorded.
+  if (f.has_vhp_cycles || f.care.decontaminationValidDays) sterile.push(['decontamination', f.care.decontaminationValidDays, f.last_vhp_pass_at, 'Decontamination (VHP)', 'decontaminate', 'Decontamination valid for (days)']);
+  if (f.oldest_glove_test_at || f.care.gloveTestEveryDays) sterile.push(['glove_test', f.care.gloveTestEveryDays, f.oldest_glove_test_at, 'Glove test', 'test every glove port', 'Glove test every (days)']);
   let sterileValidUntil: string | null = null;
   let sterileState: StatusCode | null = null;
-  for (const [days, at, what, todo, field] of sterile) {
+  const sterileDues: SterileDue[] = [];
+  for (const [kind, days, at, what, todo, field] of sterile) {
     if (!days) { blockers.push(`${what}: its validity is not set in master data ("${field}", from the qualification): not fit for use until it is.`); sterileState = 'sterile_expired'; continue; }
-    if (!at) { blockers.push(`${what}: no verified pass on record: ${todo} before use.`); sterileState = 'sterile_expired'; continue; }
+    // Never passed: not fit before its first use (D-65). Glove tests need no verification (D-63), so any glove test counts.
+    if (!at) { blockers.push(`${what}: no ${kind === 'glove_test' ? 'glove test' : 'verified pass'} on record: ${todo} before first use.`); sterileState = 'sterile_expired'; continue; }
     const until = addDays(plantDate(at), days - 1);
     if (!sterileValidUntil || until < sterileValidUntil) sterileValidUntil = until;
+    sterileDues.push({ kind, until, overdue: until < f.today });
     if (until < f.today) { blockers.push(`${what} overdue since ${plantDay(addDays(until, 1))}: ${todo} before use.`); sterileState = 'sterile_expired'; }
   }
   for (const point of f.pressure_out_of_limit ?? []) warnings.push(`Last pressure reading out of limits: ${point}.`);
@@ -527,6 +540,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     lastDecontamination: f.last_vhp_pass_at,
     lastGloveTest: f.oldest_glove_test_at,
     sterileValidUntil,
+    sterileDues,
     cleanUntil,
     calibrationDue,
     schedule,
