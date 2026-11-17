@@ -154,8 +154,22 @@ describe('calibration status (LB-05)', () => {
     const cal = (await calibrate(id, 'pass', '2099-01-01')).json().id;
     expect((await status(id)).state).toBe('not_calibrated'); // not yet verified
     await signEntry('qa', 'verify', cal);
-    expect((await status(id)).state).toBe('clean');
+    expect((await status(id)).state).toBe('available');
     expect((await status(id)).calibrationDue).toMatch(/^2099-01-01/);
+  });
+
+  it('D-62: an instrument is not made dirty by a use and needs no cleaning: calibration decides', async () => {
+    const id = await newItem({ kind: 'instrument' });
+    const cal = (await calibrate(id, 'pass', '2099-01-01')).json().id;
+    await signEntry('qa', 'verify', cal);
+    expect((await status(id)).state).toBe('available');
+    const use = (await startUse(id)).json().id;
+    expect((await status(id)).state).toBe('in_use');
+    await call(t.app, c.op1!, 'POST', `/api/entries/${use}/complete`, { activityEnd: now() });
+    const s = await status(id);
+    expect(s.state).toBe('available');
+    expect(s.blockers).toEqual([]);
+    expect((await startUse(id)).statusCode).toBe(201);
   });
 
   it('LB-05: a failed calibration blocks use (211.160(b)(4))', async () => {
@@ -174,7 +188,7 @@ describe('calibration status (LB-05)', () => {
     const cal = (await calibrate(id, 'pass', soon)).json().id;
     await signEntry('qa', 'verify', cal);
     const s = await status(id);
-    expect(s.state).toBe('clean');
+    expect(s.state).toBe('available');
     expect(s.warnings[0]).toMatch(/Calibration due/);
     await t.owner`alter table entries disable trigger entries_version_chain`;
     await t.owner`update entries set data = jsonb_set(data, '{nextDue}', '"2020-01-01T00:00:00.000Z"') where id = ${cal}`;
@@ -205,7 +219,7 @@ describe('review fixes (S4)', () => {
     const id = await newItem({ kind: 'instrument' });
     await cleanAndVerify(id);
     await signEntry('qa', 'verify', (await calibrate(id, 'pass', '2099-01-01')).json().id);
-    expect((await status(id)).state).toBe('clean');
+    expect((await status(id)).state).toBe('available');
     await calibrate(id, 'fail', '2099-01-01');
     expect((await status(id)).state).toBe('calibration_failed');
   });
@@ -229,7 +243,7 @@ describe('review fixes (S4)', () => {
     await signEntry('qa', 'verify', (await calibrate(id, 'pass', '2099-01-01')).json().id);
     await calibrate(id, 'pass', '2099-06-01');
     const s = await status(id);
-    expect(s.state).toBe('clean');
+    expect(s.state).toBe('available');
     expect(s.warnings).toContain('A newer calibration is awaiting verification.');
   });
 
@@ -243,7 +257,7 @@ describe('review fixes (S4)', () => {
     await t.owner`alter table entries disable trigger entries_version_chain`;
     await t.owner`update entries set data = jsonb_set(data, '{nextDue}', to_jsonb(${today}::text)) where id = ${cal}`;
     await t.owner`alter table entries enable trigger entries_version_chain`;
-    expect((await status(id)).state).toBe('clean');
+    expect((await status(id)).state).toBe('available');
   });
 
   it('LB-07: a cleaning entered in the minute the use ended makes the equipment clean once verified', async () => {

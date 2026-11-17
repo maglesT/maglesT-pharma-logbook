@@ -235,7 +235,8 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
          and l.logbook_type = 'calibration' and l.data->>'result' = 'pass') as last_cal_pass_at,
       (select max(l.activity_start) from latest l where l.equipment_id = q.id and l.logbook_type = 'change_over' and l.activity_end is null) as open_change_over_since,
       rq.at as last_requal_at, rq.due as last_requal_due,
-      coalesce((select en.on from enabled en
+      -- D-62 (owner, 17 Nov 2026): an instrument (balance, filter integrity tester) is not made dirty by a use: calibration decides.
+      q.kind <> 'instrument' and coalesce((select en.on from enabled en
                 where en.logbook_type = case when q.kind = 'area' then 'area_cleaning' else 'equipment_cleaning' end), false) as tracks_cleaning,
       coalesce((select en.on from enabled en where en.logbook_type = 'calibration'), false) as calibrations_enabled,
       u.id::int as open_use_id, u.product_id::int as open_use_product, u.batch as open_use_batch,
