@@ -50,8 +50,11 @@ export interface EquipmentStatus {
   lastCleanEnd: Date | null;
   // D-67: the product of the last use (Logbook uses only; null for a TrueBatch use) and whether a verified product-changeover
   // (or major) cleaning followed it.
-  lastUseProductId: number | null;
+  lastUseProductCode: string | null;
   changeoverCleaned: boolean;
+  // D-67: the product code that alone may follow (the last use's antibiotic product, until a verified product-changeover
+  // or major cleaning); published as equipment_status_v1.only_product for TrueBatch. Null otherwise.
+  onlyProduct: string | null;
   checkedAt: Date;
 }
 
@@ -122,8 +125,8 @@ export interface StatusContext {
   trueBatch?: Map<number, { open: TrueBatchUse | null; last: TrueBatchUse | null }> | null;
   // D-46: the linked products that do not answer: the status says so for each, and is not published.
   usesOff?: UseSource[];
-  // D-67: the antibiotic products (master data), local product id to code.
-  antibiotics?: Map<number, string>;
+  // D-67: the codes of the antibiotic products (master data).
+  antibiotics?: Set<string>;
 }
 /** D-46, D-47: the uses of every item recorded in each linked product, read live; a cut link leaves its uses out and says so. */
 async function trueBatchUses(sql: Sql | Tx, sources: TrueBatchUses[]): Promise<Pick<StatusContext, 'trueBatch' | 'usesOff'>> {
@@ -145,24 +148,17 @@ async function trueBatchUses(sql: Sql | Tx, sources: TrueBatchUses[]): Promise<P
 }
 export async function statusContext(sql: Sql | Tx, master: Master, qualification: Qualification | null, uses: TrueBatchUses[] = []): Promise<StatusContext> {
   const care = await careByLocalId(sql, master);
-  const tb = { ...(uses.length ? await trueBatchUses(sql, uses) : { trueBatch: null }), antibiotics: await antibioticProducts(sql, master) };
+  const tb = { ...(uses.length ? await trueBatchUses(sql, uses) : { trueBatch: null }), antibiotics: new Set((await master.products()).filter((p) => p.antibiotic).map((p) => p.code)) };
   if (!qualification) return { care, qual: null, ...tb };
   const byMaster = await qualification.statuses();
   const ids = await sql<{ id: number; item_id: string }[]>`select id::int, item_id::text from equipment where item_id is not null`;
   return { care, qual: new Map(ids.flatMap((r) => (byMaster.has(r.item_id) ? [[r.id, byMaster.get(r.item_id)!] as const] : []))), ...tb };
 }
-/** D-67: the antibiotic products by local id (read only: a product never used here has no local id and no last use). */
-async function antibioticProducts(sql: Sql | Tx, master: Master): Promise<Map<number, string>> {
-  const ab = (await master.products()).filter((p) => p.antibiotic);
-  if (!ab.length) return new Map();
-  return new Map((await sql<{ id: number; code: string }[]>`
-    select id::int, code from products where item_id = any(${ab.map((p) => p.itemId)}::uuid[])`).map((r) => [r.id, r.code]));
-}
 /** D-67 (owner, 17 Nov 2026): a product change to or from an antibiotic needs a verified product-changeover (or major)
  * cleaning after the last use; a batch-to-batch cleaning is enough only for the same product. Null when the use may go on. */
-export function antibioticBlocker(last: { id: number; code: string; antibiotic?: boolean } | undefined,
-  next: { id: number; code: string; antibiotic?: boolean }, changeoverCleaned: boolean): string | null {
-  if (!last || last.id === next.id || changeoverCleaned) return null;
+export function antibioticBlocker(last: { code: string; antibiotic?: boolean } | undefined,
+  next: { code: string; antibiotic?: boolean }, changeoverCleaned: boolean): string | null {
+  if (!last || last.code === next.code || changeoverCleaned) return null;
   if (last.antibiotic) return `Last used for an antibiotic (${last.code}): a product-changeover cleaning is needed before another product.`;
   if (next.antibiotic) return `${next.code} is an antibiotic and the last use was ${last.code}: a product-changeover cleaning is needed first.`;
   return null;
@@ -180,7 +176,7 @@ interface Facts {
   qual: QualStatus | null;
   hasQual: boolean;
   tb: { open: TrueBatchUse | null; last: TrueBatchUse | null } | null;
-  antibiotics: Map<number, string>;
+  antibiotics: Set<string>;
   usesOff: UseSource[];
   last_pm_end: Date | null;
   last_cal_pass_at: Date | null;
@@ -218,7 +214,7 @@ interface Facts {
   has_vhp_cycles: boolean;
   last_vhp_pass_at: Date | null;
   last_sip_pass_at: Date | null;
-  last_use_product: number | null;
+  last_use_product: string | null;
   last_changeover_clean_end: Date | null;
   oldest_glove_test_at: Date | null;
   pressure_out_of_limit: string[] | null;
@@ -257,7 +253,8 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
     ),
     uses as (
       -- When the end of use was first recorded; a later correction of the use does not move it (S8 review).
-      select distinct on (equipment_id) equipment_id, activity_end as last_use_end, product_id::int as last_use_product,
+      select distinct on (equipment_id) equipment_id, activity_end as last_use_end,
+        (select p.code from products p where p.id = latest.product_id) as last_use_product,
         (select min(x.entered_at) from entries x where x.entry_id = latest.entry_id and x.activity_end is not null) as last_use_entered_at
       from latest where logbook_type = 'equipment_use' and activity_end is not null
       order by equipment_id, activity_end desc
@@ -367,7 +364,7 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
   const none = { cleanHoldHours: null, dirtyHoldHours: null, cleaningBasis: null, cleaningFrequencyHours: null, pmFrequencyDays: null,
     calibrationFrequencyDays: null, requalificationFrequencyMonths: null, needsCalibration: false, addedAt: new Date(0) };
   return rows.map((r) => ({ ...r, care: ctx.care.get(r.id) ?? none, qual: ctx.qual?.get(r.id) ?? null, hasQual: ctx.qual !== null,
-    tb: ctx.trueBatch?.get(r.id) ?? null, usesOff: ctx.usesOff ?? [], antibiotics: ctx.antibiotics ?? new Map() }));
+    tb: ctx.trueBatch?.get(r.id) ?? null, usesOff: ctx.usesOff ?? [], antibiotics: ctx.antibiotics ?? new Set() }));
 }
 
 export function deriveStatus(f: Facts): EquipmentStatus {
@@ -474,6 +471,9 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   let dirtyUntil: Date | null = null;
   let due: CleaningDeadline | null = null;
   let cleanState: StatusCode | null = null;
+  // D-67: the last use's product: the Logbook use's, or the product of the TrueBatch batch that used it last.
+  const lastUseProductCode = f.last_use_product ?? (lastTrueBatchUse ? tbLast?.productCode ?? null : null);
+  let onlyProduct: string | null = null;
   const c = f.care;
   const schedule: EquipmentStatus['schedule'] = !f.tracks_cleaning ? null
     : f.kind === 'area' && c.cleaningBasis === 'frequency' && c.cleaningFrequencyHours ? 'frequency' : 'hold';
@@ -511,9 +511,12 @@ export function deriveStatus(f: Facts): EquipmentStatus {
         if (due.soon) warnings.push(`Clean hold ends at ${plantTime(cleanUntil)}: use or clean again before then.`);
       }
     } else cleanState = 'clean';
-    // D-67: after an antibiotic, only the same product may follow until a product-changeover cleaning (checked at the next use).
-    const ab = f.last_use_product !== null ? f.antibiotics.get(f.last_use_product) : undefined;
-    if (ab && !f.last_changeover_clean_end) warnings.push(`Last used for an antibiotic (${ab}): only ${ab} may follow until a product-changeover cleaning.`);
+    // D-67: after an antibiotic, only the same product may follow until a product-changeover cleaning (checked at the next use
+    // here; TrueBatch reads only_product).
+    if (lastUseProductCode && f.antibiotics.has(lastUseProductCode) && !f.last_changeover_clean_end) {
+      onlyProduct = lastUseProductCode;
+      warnings.push(`Last used for an antibiotic (${onlyProduct}): only ${onlyProduct} may follow until a product-changeover cleaning.`);
+    }
   }
 
   // Owner 2026-11-12 (slide 4, point 8): preventive maintenance, calibration and requalification dues, from master data's
@@ -590,7 +593,8 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     dues,
     qualification: f.qual?.status ?? null,
     lastCleanEnd: f.last_clean_end,
-    lastUseProductId: f.last_use_product,
+    lastUseProductCode,
+    onlyProduct,
     changeoverCleaned: f.last_changeover_clean_end !== null,
     checkedAt: f.now,
   };

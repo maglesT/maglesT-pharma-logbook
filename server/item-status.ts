@@ -37,21 +37,23 @@ export async function saveStatuses(q: Sql | Tx, statuses: EquipmentStatus[], ctx
       cleaned_by: s.lastCleanEnd && c?.at?.getTime() === s.lastCleanEnd.getTime() ? c.by : null,
       clean_until: s.cleanUntil, calibration_due: s.calibrationDue, qualification: s.qualification, checked_at: s.checkedAt,
       last_decontamination: s.lastDecontamination, sterile_valid_until: s.sterileValidUntil, last_glove_test: s.lastGloveTest,
+      only_product: s.onlyProduct,
     };
   });
   await q`
     insert into item_status (equipment_id, state, fit_for_use, blockers, warnings, in_use_batch, cleaned_at, cleaned_by, clean_until,
-      calibration_due, qualification, checked_at, last_decontamination, sterile_valid_until, last_glove_test)
+      calibration_due, qualification, checked_at, last_decontamination, sterile_valid_until, last_glove_test, only_product)
     select r.equipment_id, r.state, r.fit_for_use, r.blockers, r.warnings, r.in_use_batch, r.cleaned_at, r.cleaned_by, r.clean_until,
-      r.calibration_due, r.qualification, r.checked_at, r.last_decontamination, r.sterile_valid_until, r.last_glove_test
+      r.calibration_due, r.qualification, r.checked_at, r.last_decontamination, r.sterile_valid_until, r.last_glove_test, r.only_product
     from jsonb_to_recordset(${q.json(rows as never)}) as r(equipment_id bigint, state text, fit_for_use boolean, blockers text[], warnings text[],
       in_use_batch text, cleaned_at timestamptz, cleaned_by text, clean_until timestamptz, calibration_due date, qualification text, checked_at timestamptz,
-      last_decontamination timestamptz, sterile_valid_until date, last_glove_test timestamptz)
+      last_decontamination timestamptz, sterile_valid_until date, last_glove_test timestamptz, only_product text)
     on conflict (equipment_id) do update set state = excluded.state, fit_for_use = excluded.fit_for_use, blockers = excluded.blockers,
       warnings = excluded.warnings, in_use_batch = excluded.in_use_batch, cleaned_at = excluded.cleaned_at, cleaned_by = excluded.cleaned_by,
       clean_until = excluded.clean_until, calibration_due = excluded.calibration_due, qualification = excluded.qualification,
       checked_at = excluded.checked_at, last_decontamination = excluded.last_decontamination,
-      sterile_valid_until = excluded.sterile_valid_until, last_glove_test = excluded.last_glove_test
+      sterile_valid_until = excluded.sterile_valid_until, last_glove_test = excluded.last_glove_test,
+      only_product = excluded.only_product
     where item_status.checked_at <= excluded.checked_at`;
 }
 

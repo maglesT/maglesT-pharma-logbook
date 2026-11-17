@@ -16,7 +16,7 @@ const sig = (u: string) => ({ proof: proofFor(u) });
 const now = () => new Date().toISOString();
 const COLUMNS = ['master_id', 'code', 'kind', 'state', 'fit_for_use', 'blockers', 'warnings', 'in_use_batch', 'cleaned_at', 'cleaned_by',
   'clean_until', 'calibration_due', 'qualification', 'checked_at', 'read_at', 'data_as_of', 'last_decontamination', 'sterile_valid_until',
-  'last_glove_test'];
+  'last_glove_test', 'only_product'];
 
 async function approve(type: string) {
   const id = (await call(t.app, c.admin!, 'POST', '/api/settings', { logbookType: type, settings: { enabled: true, sopRef: '', checklist: [], verificationRequired: false }, effectiveFrom: now() })).json().id;
@@ -93,6 +93,29 @@ describe('the Logbook publishes each item\'s status for TrueBatch (D-45)', () =>
     changeItem(t, a.code, { active: false });
     await tick();
     expect(await published(a.code)).toMatchObject({ fit_for_use: false, blockers: [RETIRED] });
+  });
+
+  it('D-67: only_product names the antibiotic last used until a verified product-changeover cleaning; null otherwise', async () => {
+    const ab = await addProduct(t, 'FG-AB-IS', 'Antibiotic IS');
+    t.master.products_.set('FG-AB-IS', { ...t.master.products_.get('FG-AB-IS')!, antibiotic: true });
+    const a = await item();
+    await cleanAndVerify(a.id);
+    await tick();
+    expect((await published(a.code))!.only_product).toBeNull();
+    const use = (await call(t.app, c.op1!, 'POST', `/api/equipment/${a.id}/entries`, { logbookType: 'equipment_use', activityStart: now(), productId: ab,
+      batch: 'AB-1', data: {} })).json().id;
+    expect((await call(t.app, c.op1!, 'POST', `/api/entries/${use}/complete`, { activityEnd: now() })).statusCode).toBe(200);
+    const clean = async (cleaningType: string) => {
+      const e = (await call(t.app, c.op1!, 'POST', `/api/equipment/${a.id}/entries`, { logbookType: 'equipment_cleaning', activityStart: now(),
+        data: { cleaningType, checklist: {} }, signature: sig('op1') })).json();
+      const v = (await call(t.app, c.qa!, 'GET', `/api/entries/${e.id}/versions`)).json().find((x: { id: number }) => x.id === e.id);
+      expect((await call(t.app, c.sup1!, 'POST', `/api/entries/${e.id}/verify`, { ...sig('sup1'), contentHash: v.contentHash })).statusCode).toBe(200);
+    };
+    await clean('batch_to_batch');
+    await expect.poll(async () => (await published(a.code))?.fit_for_use).toBe(true);
+    expect((await published(a.code))!.only_product).toBe('FG-AB-IS');
+    await clean('product_change');
+    await expect.poll(async () => (await published(a.code))?.only_product).toBeNull();
   });
 
   it('PL-08: while Qualification is linked but not answering, the status is not rewritten: it grows old and is never wrong', async () => {
