@@ -50,6 +50,8 @@ export interface Alert {
 export function plantTime(iso: string | null): string {
   return timeText(iso);
 }
+// A line of parts joined with " · "; empty parts are left out, so no "· ·".
+export const joinParts = (parts: (string | null | undefined)[]) => parts.map((p) => (p ?? '').trim()).filter(Boolean).join(' · ');
 export function plantDay(day: string | null | undefined): string {
   return dayText(day);
 }

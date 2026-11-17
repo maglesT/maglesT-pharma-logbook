@@ -14,6 +14,8 @@ export const LABELS: Record<string, string> = {
   delayReason: 'Why late',
   // D-49: why a use ended ("End use").
   endReason: 'Why ended',
+  // Change over (D-55): from which product and batch to which.
+  fromProduct: 'From product', fromBatch: 'From batch', toProduct: 'To product', toBatch: 'To batch',
 };
 // Master data, users and settings, as named in the audit trail.
 Object.assign(LABELS, {
