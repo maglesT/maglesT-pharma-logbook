@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { api, ApiError, getSignProof, joinParts, plantDay, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type BatchChoice, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
+import { TrainingLine } from '../components/TrainingLine.js';
 import { VoiceButton } from '../components/VoiceNote.js';
 import { OUTCOME_LABEL, STAGE_LABEL } from '../fields.js';
 import { choices, FAILURE_CATEGORY_LABEL } from '../../../server/labels.js';
@@ -138,6 +139,8 @@ export function EntryForm({
   const [needLateReason, setNeedLateReason] = useState(false);
 
   const signs = Boolean(correcting) || PERFORMER_SIGNS.has(type);
+  // D-71: Recruitment not linked or not reachable: the performer states the training the settings ask for.
+  const [trainedTyped, setTrainedTyped] = useState(false);
   const voiceDrafts = Object.entries(drafts);
   // The voice-note button, or the draft notice once a voice note filled the field.
   const voiceSlot = (k: string): ReactNode => {
@@ -201,13 +204,14 @@ export function EntryForm({
         ? await getSignProof([...(signs ? [correcting ? 'corrected' : 'performed'] : []), ...(voiceDrafts.length ? ['voice_confirmed'] : [])])
         : '';
       if (signs) body.signature = { proof };
+      if (signs && !correcting && trainedTyped) body.trainedTyped = true;
       if (voiceDrafts.length) {
         body.voiceNotes = voiceDrafts.map(([field, d]) => ({ id: d.id, field, finalText: String(data[field] ?? ''), shownHash: d.shownHash }));
         body.voiceSignature = { proof };
       }
       if (completing) {
         await api('POST', `/api/entries/${completing.id}/complete`, { activityEnd: body.activityEnd, data: body.data, signature: body.signature,
-          voiceNotes: body.voiceNotes, voiceSignature: body.voiceSignature, lateReason: lateReason || undefined });
+          voiceNotes: body.voiceNotes, voiceSignature: body.voiceSignature, lateReason: lateReason || undefined, trainedTyped: body.trainedTyped });
       } else if (correcting) {
         await api('POST', `/api/entries/${correcting.id}/correct`, { ...body, reason });
       } else {
@@ -374,6 +378,7 @@ export function EntryForm({
           </div>
         )}
 
+        {signs && !correcting && <TrainingLine logbookType={type} typed={trainedTyped} onTyped={setTrainedTyped} />}
         {problems.length > 0 && <ul className="error">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
         <div className="actions">
           <button type="button" onClick={onCancel}>Cancel</button>

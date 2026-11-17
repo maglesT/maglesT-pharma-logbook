@@ -20,6 +20,8 @@ const schema = z.object({
   TRUEBATCH_INJECTABLES_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   // D-54: TrueBatch Injectables Packing's database through the platform link (equipment_use_v1, as TrueBatch Packing's).
   TRUEBATCH_INJECTABLES_PACKING_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
+  // D-71: the Recruitment product's database through the platform link (training_v1: who is trained in what, until when).
+  RECRUITMENT_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   // Sign-on through Medhanta core (D-29), written by the platform's apply.
   OIDC_ISSUER: z.string().url(),
   OIDC_CLIENT_ID: z.string().default('logbook'),

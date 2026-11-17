@@ -194,7 +194,7 @@ function EntryTable({ entries, showEquipment = false }: { entries: PeriodEntry[]
               <br /><span className="muted">{e.enteredBy}, {plantTime(e.enteredAt)}</span>
             </td>
             <td>{e.batch && <div>Batch {e.batch}</div>}<Fields data={e.data} /></td>
-            <td>{e.signatures.map((s) => <div key={s.meaning}>{MEANING_LABEL[s.meaning]}: {s.printedName}, {plantTime(s.signedAt)}{!s.valid && ' (INVALID)'}</div>)}</td>
+            <td>{e.signatures.map((s) => <div key={s.meaning}>{MEANING_LABEL[s.meaning]}: {s.printedName}, {plantTime(s.signedAt)}{!s.valid && ' (INVALID)'}{s.training && ` (${s.training})`}</div>)}</td>
           </tr>
         ))}
       </tbody>

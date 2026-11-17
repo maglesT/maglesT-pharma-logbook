@@ -13,6 +13,7 @@ import { SignError, authenticateSigner, contentHash, proofOnly, sign, signBody }
 import { settingsInForce } from './settings.js';
 import { allStatuses, antibioticBlocker, plantTime, statusOf, type EquipmentStatus } from '../status.js';
 import { VoiceError, confirmVoiceNotes, unsignedDrafts, voiceNotesFor, type VoiceUse } from '../voice.js';
+import { recordTraining, skillName, trainingNeeded, trainingState, type TrainingResult } from '../training.js';
 
 import { LATE_MINUTES } from '../entries.js';
 export { LATE_MINUTES };
@@ -24,6 +25,9 @@ const voiceFields = {
   voiceNotes: z.array(z.object({ id: z.number().int().positive(), field: z.string().max(40), finalText: z.string().max(2000), shownHash: z.string().regex(/^[0-9a-f]{64}$/) })).max(10).default([]),
   voiceSignature: credentials.optional(),
 };
+// D-71: Recruitment not linked or not reachable: the signer states "I am trained in <skill>" (typed by hand).
+const trainedTyped = z.boolean().default(false);
+const verifyBody = signBody.extend({ trainedTyped });
 
 const createBody = z.object({
   logbookType: z.string(),
@@ -37,6 +41,7 @@ const createBody = z.object({
   lateReason: z.string().trim().max(500).optional(),
   // Required for types whose performer signs (D-16).
   signature: credentials.optional(),
+  trainedTyped,
   ...voiceFields,
 });
 // Ends a use, or completes the repair of a breakdown (D-25): then with the repair data and the
@@ -48,6 +53,7 @@ const completeBody = z.object({
   endReason: z.string().trim().max(500).optional(),
   data: z.record(z.unknown()).optional(),
   signature: credentials.optional(),
+  trainedTyped,
   ...voiceFields,
 });
 const correctBody = z.object({
@@ -209,6 +215,23 @@ async function linkedBatch(tx: Tx, app: FastifyInstance, n: string, o: { typed: 
   const p = products.find((x) => (o.product.id ? x.id === o.product.id : `${x.code} · ${x.name}` === o.product.label));
   if (!p) throw new EntryError(400, 'check_failed', [`Pick the product of batch ${n} from master data.`]);
   return { productId: p.id, productLabel: `${p.code} · ${p.name}`, typed: down.length ? `${down.join(', ')} not reachable` : 'not in the linked batch records' };
+}
+
+/**
+ * D-71 (owner 17 Nov 2026): only trained people sign. When the settings in force name a training, the person signing
+ * "performed" or "verified" must be qualified in it in Recruitment (training_v1); else refused, and another trained person
+ * signs. Recruitment not linked or not reachable: the signer states it ("I am trained in ..."), and the signature is
+ * marked "Training typed by hand". Returns what to keep with the signature, or null when no training is named.
+ */
+async function trainedSigner(tx: Tx, app: FastifyInstance, user: SessionUser, type: string, fallback: LogbookSettings | undefined, typed: boolean): Promise<TrainingResult | null> {
+  const inForce = await settingsInForce(tx, type);
+  const st = await trainingState(app.training, user, trainingNeeded((inForce?.settings as LogbookSettings | undefined) ?? fallback));
+  if (!st.needed) return null;
+  if (st.state === 'trained') return { skill: st.needed, typed: false, validUntil: st.validUntil, note: st.note };
+  if (st.state === 'not_trained') throw new EntryError(403, 'not_trained', [st.message]);
+  if (!typed) throw new EntryError(400, 'training_confirmation_required', [st.message]);
+  return { skill: st.needed, typed: true, validUntil: null,
+    note: `Training typed by hand (Recruitment ${st.why}): ${user.fullName} stated being trained in ${skillName(st.needed)}` };
 }
 
 // A1 8.45: a cycle identifier is unique per steriliser. Checked under the equipment lock.
@@ -379,6 +402,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (!type.appliesTo.includes(eq.kind)) throw new EntryError(400, 'type_not_for_equipment');
         if (type.sterile && !eq.sterile) throw new EntryError(400, 'type_not_for_equipment');
         const { id: settingsId, settings } = await settingsFor(tx, b.logbookType);
+        const trained = signer ? await trainedSigner(tx, app, user, b.logbookType, settings, b.trainedTyped) : null;
         const isUse = b.logbookType === 'equipment_use';
         // LB-05–07: a new use is refused unless the item is fit; the reasons are shown to the user.
         // The equipment row is locked, so the status cannot change before this entry commits.
@@ -464,7 +488,10 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           batch: b.batch ?? null, data, late, late_reason: late ? b.lateReason!.trim() : null, correction_reason: null, entered_by: user.id,
         });
         await audit(tx, { actorId: user.id, action: 'entry.created', objectType: 'entry', objectId: row.id, new: entryContent(row) });
-        if (signer) await sign(tx, { signer, objectType: 'entry', objectId: row.id, meaning: 'performed', content: entryContent(row), shownHash: hashOf(row) });
+        if (signer) {
+          const s = await sign(tx, { signer, objectType: 'entry', objectId: row.id, meaning: 'performed', content: entryContent(row), shownHash: hashOf(row) });
+          if (trained) await recordTraining(tx, s.id, trained);
+        }
         if (voice) await confirmVoiceNotes(tx, voice, row.id, equipmentId, b.logbookType, data, b.voiceNotes);
         return row;
       });
@@ -503,6 +530,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (b.activityEnd < prev.activity_start) throw new EntryError(400, 'check_failed', ['The end cannot be before the start.']);
         const late = timing(await dbNow(tx), [b.activityEnd], b.lateReason);
         let data = prev.data;
+        let trained: TrainingResult | null = null;
         const from = endReasonFrom(app, prev.logbook_type, prev.batch, prev.data);
         if (from && !b.endReason) {
           throw new EntryError(400, 'end_reason_required', [`Batch ${prev.batch} is from the batch records of ${from}: give the reason the use ends.`]);
@@ -511,6 +539,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (repair) {
           const eq = await loadEquipment(tx, prev.equipment_id);
           const [s] = await tx<{ settings: LogbookSettings }[]>`select settings from logbook_settings where id = ${prev.settings_id}`;
+          trained = await trainedSigner(tx, app, user, prev.logbook_type, s!.settings, b.trainedTyped);
           data = validate('maintenance', b.data!, s!.settings, eq, prev.activity_start, { end: b.activityEnd, legacy: await isLegacyBreakdown(tx, prev.entry_id) });
           // What was reported stays as reported; changing it is a correction with a reason (LB-17).
           const changed = REPORTED_FIELDS.filter((k) => prev.data[k] !== undefined && JSON.stringify(prev.data[k]) !== JSON.stringify(data[k]));
@@ -523,7 +552,10 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           late_reason: late ? b.lateReason!.trim() : prev.late_reason, correction_reason: null, entered_by: user.id,
         });
         await audit(tx, { actorId: user.id, action: 'entry.completed', objectType: 'entry', objectId: next.id, old: entryContent(prev), new: entryContent(next) });
-        if (signer) await sign(tx, { signer, objectType: 'entry', objectId: next.id, meaning: 'performed', content: entryContent(next), shownHash: hashOf(next) });
+        if (signer) {
+          const s = await sign(tx, { signer, objectType: 'entry', objectId: next.id, meaning: 'performed', content: entryContent(next), shownHash: hashOf(next) });
+          if (trained) await recordTraining(tx, s.id, trained);
+        }
         if (voice) await confirmVoiceNotes(tx, voice, next.id, prev.equipment_id, prev.logbook_type, data, b.voiceNotes);
         return next;
       });
@@ -624,7 +656,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
   // LB-03: second-person verification of the latest version, signed against the content shown.
   app.post<{ Params: { id: string } }>('/api/entries/:id/verify', { preHandler: requirePermission('logbook.entry.verify') }, async (req, reply) => {
     const id = parseId(req.params.id);
-    const body = signBody.safeParse(req.body);
+    const body = verifyBody.safeParse(req.body);
     if (id === null || !body.success) return invalid(reply, body.error?.issues);
     const user = req.user!;
     try {
@@ -642,7 +674,9 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
             and object_id in (select id from entries where entry_id = ${row.entry_id})`;
           if (!performed) throw new EntryError(409, 'not_performed');
         }
-        await sign(tx, { signer, objectType: 'entry', objectId: row.id, meaning: 'verified', content: entryContent(row), shownHash: body.data.contentHash });
+        const trained = await trainedSigner(tx, app, user, row.logbook_type, s!.settings, body.data.trainedTyped);
+        const g = await sign(tx, { signer, objectType: 'entry', objectId: row.id, meaning: 'verified', content: entryContent(row), shownHash: body.data.contentHash });
+        if (trained) await recordTraining(tx, g.id, trained);
       });
       return { ok: true };
     } catch (e) {
@@ -713,15 +747,16 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
   });
 }
 
-interface SigRow { object_id: number; printed_name: string; meaning: string; signed_at: Date; content_hash: string }
+interface SigRow { object_id: number; printed_name: string; meaning: string; signed_at: Date; content_hash: string; training: string | null; training_typed: boolean | null }
 
 // Presents entry versions with their signatures and the name of who entered them, in two queries.
 export async function present(sql: Sql, rows: EntryRow[], needsVerification?: (r: EntryRow) => boolean) {
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
   const sigs = await sql<SigRow[]>`
-    select object_id::int, printed_name, meaning, signed_at, content_hash from signatures
-    where object_type = 'entry' and object_id = any(${ids}::bigint[]) order by signed_at`;
+    select g.object_id::int, g.printed_name, g.meaning, g.signed_at, g.content_hash, t.note as training, t.typed as training_typed
+    from signatures g left join signature_training t on t.signature_id = g.id
+    where g.object_type = 'entry' and g.object_id = any(${ids}::bigint[]) order by g.signed_at`;
   const voices = await voiceNotesFor(sql, rows);
   const names = new Map(
     (await sql<{ id: number; full_name: string }[]>`
@@ -748,7 +783,9 @@ export async function present(sql: Sql, rows: EntryRow[], needsVerification?: (r
       enteredBy: names.get(r.entered_by),
       enteredAt: r.entered_at,
       contentHash: hash,
-      signatures: mine.map((g) => ({ printedName: g.printed_name, meaning: g.meaning, signedAt: g.signed_at, valid: g.content_hash === hash })),
+      // D-71: what the signer's training check found, when the settings named a training.
+      signatures: mine.map((g) => ({ printedName: g.printed_name, meaning: g.meaning, signedAt: g.signed_at, valid: g.content_hash === hash,
+        ...(g.training ? { training: g.training, trainingTyped: Boolean(g.training_typed) } : {}) })),
       // D-26: voice notes whose signed English text is in this version.
       voiceNotes: voices.get(r.id) ?? [],
       ...(needsVerification

@@ -35,6 +35,9 @@ export const settingsSchema = z.object({
     .default([]),
   // Voice notes site setting only: the languages a speaker may use (D-26).
   voiceLanguages: z.array(z.enum(VOICE_LANGUAGES)).max(VOICE_LANGUAGES.length).default([]),
+  // D-71: the training a person needs to sign "performed" or "verified" (a skill of the Recruitment product). Left out:
+  // none, as before.
+  training: z.object({ code: z.string().trim().min(1).max(60), title: z.string().trim().max(200).default('') }).optional(),
 });
 export type LogbookSettings = z.infer<typeof settingsSchema>;
 

@@ -212,6 +212,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
                   <div key={s.meaning}>
                     {MEANING_LABEL[s.meaning]}: {s.printedName}, {plantTime(s.signedAt)}
                     {!s.valid && <span className="chip chip-bad"> invalid</span>}
+                    {s.training && <div className={s.trainingTyped ? 'reason' : 'muted'}>{s.training}</div>}
                   </div>
                 ))}
                 {e.awaitingVerification && <span className="chip chip-warn">Awaiting verification</span>}
@@ -265,6 +266,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
       {verifying && (
         <SignDialog
           meaning="verified"
+          trainingFor={verifying.logbookType}
           what={`${TYPE_LABEL[verifying.logbookType]} on ${equipment.code}, ${plantTime(verifying.activityStart)}, entered by ${verifying.enteredBy}`}
           onCancel={() => setVerifying(null)}
           onSign={async (c) => {
@@ -301,7 +303,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
                 <strong>Version {v.version}</strong> · {v.change} by {v.enteredBy}, entered {plantTime(v.enteredAt)}
                 {v.correctionReason && <> · reason: {v.correctionReason}</>}
                 <div><Summary e={v} full /> <VoiceLinks e={v} onOpen={setListening} /></div>
-                <div className="muted">{v.signatures.map((s) => `${MEANING_LABEL[s.meaning]}: ${s.printedName}, ${plantTime(s.signedAt)}`).join(' · ')}</div>
+                <div className="muted">{v.signatures.map((s) => `${MEANING_LABEL[s.meaning]}: ${s.printedName}, ${plantTime(s.signedAt)}${s.training ? ` (${s.training})` : ''}`).join(' · ')}</div>
               </div>
             ))}
             <div className="actions"><button onClick={() => setHistory(null)}>Close</button></div>
