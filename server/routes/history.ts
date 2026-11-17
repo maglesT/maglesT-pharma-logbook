@@ -103,8 +103,9 @@ async function card(sql: Sql, master: Master, id: number, ctx: StatusContext) {
   return { equipment, details: versions.at(-1) ?? null, detailsVersions: versions, locationHistory: await locationHistory(sql, id), status: await statusOf(sql, id, ctx) };
 }
 
-const sigText = (e: { signatures: { meaning: string; printedName: string; signedAt: Date | string; valid: boolean }[] }) =>
-  e.signatures.map((s) => `${s.meaning}: ${s.printedName}, ${plant(s.signedAt)}${s.valid ? '' : ' [INVALID]'}`).join('; ');
+// D-71: with the signer's training check, when the settings named a training.
+const sigText = (e: { signatures: { meaning: string; printedName: string; signedAt: Date | string; valid: boolean; training?: string }[] }) =>
+  e.signatures.map((s) => `${s.meaning}: ${s.printedName}, ${plant(s.signedAt)}${s.valid ? '' : ' [INVALID]'}${s.training ? ` (${s.training})` : ''}`).join('; ');
 
 function eventRow(ev: Event): { at: Date; kind: string; type: string; what: string; detail: string; who: string; signatures: string; breakdown: string; highlight: boolean; grey: boolean } {
   if (ev.kind === 'entry') {

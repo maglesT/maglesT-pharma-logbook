@@ -119,7 +119,18 @@ export interface Settings {
   limits: Record<string, { min?: number; max?: number; unit: string }>;
   pressurePoints: { name: string; critical: false; ccsRef: string; min: number; max: number; unit: string }[];
   voiceLanguages?: string[];
+  // D-71: the training a signer needs (a Recruitment skill); none when left out.
+  training?: Skill;
 }
+
+// D-71: Recruitment's skills, and what signing asks of the signed-in person.
+export interface Skill { code: string; title: string }
+export interface TrainingSkills { linked: boolean; skills: Skill[]; note: string }
+export type TrainingCheck =
+  | { needed: null }
+  | { needed: Skill; state: 'trained'; note: string }
+  | { needed: Skill; state: 'not_trained'; message: string }
+  | { needed: Skill; state: 'typed'; why: string; message: string };
 
 export interface SettingsVersion {
   id: number;
@@ -165,6 +176,9 @@ export interface EntrySignature {
   meaning: string;
   signedAt: string;
   valid: boolean;
+  // D-71: the signer's training check ("Trained: ... valid until ...", or typed by hand).
+  training?: string;
+  trainingTyped?: boolean;
 }
 
 export interface Entry {

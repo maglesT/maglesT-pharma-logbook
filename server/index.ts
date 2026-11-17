@@ -10,6 +10,7 @@ import { sqlMaster } from './master.js';
 import { sqlQualification } from './qualification.js';
 import { scheduleOverdue, sqlDeviations } from './overdue.js';
 import { mergeBatches, sqlBatches, sqlTrueBatchUses } from './batches.js';
+import { sqlTraining } from './training.js';
 
 const config = loadConfig();
 const sql = connect(config.DATABASE_URL, { role: config.DB_APP_ROLE });
@@ -35,6 +36,8 @@ const tb = config.TRUEBATCH_DATABASE_URL ? connect(config.TRUEBATCH_DATABASE_URL
 const tbp = config.TRUEBATCH_PACKING_DATABASE_URL ? connect(config.TRUEBATCH_PACKING_DATABASE_URL) : null;
 const tbi = config.TRUEBATCH_INJECTABLES_DATABASE_URL ? connect(config.TRUEBATCH_INJECTABLES_DATABASE_URL) : null;
 const tbip = config.TRUEBATCH_INJECTABLES_PACKING_DATABASE_URL ? connect(config.TRUEBATCH_INJECTABLES_PACKING_DATABASE_URL) : null;
+// D-71: Recruitment's training records; without the link a signer states their training (typed by hand).
+const rec = config.RECRUITMENT_DATABASE_URL ? connect(config.RECRUITMENT_DATABASE_URL) : null;
 // D-45: batches from TrueBatch; D-61: and from every linked TrueBatch product (packing: packing_batch_v1).
 const batches = mergeBatches([tb ? sqlBatches(tb, 'report', 'TrueBatch') : null,
   tbi ? sqlBatches(tbi, 'report', 'TrueBatch Injectables') : null,
@@ -48,7 +51,7 @@ const trueBatchUses = [...(tb ? [sqlTrueBatchUses(tb)] : []), ...(tbp ? [sqlTrue
   ...(tbip ? [sqlTrueBatchUses(tbip, 'report', 'TrueBatch Injectables Packing', null)] : [])];
 const master = sqlMaster(md);
 const qualification = qual ? sqlQualification(qual) : null;
-const app = await buildApp({ sql, signOn, proofKey, master, qualification, deviations: dv ? sqlDeviations(dv) : null, batches, trueBatchUses, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
+const app = await buildApp({ sql, signOn, proofKey, master, qualification, deviations: dv ? sqlDeviations(dv) : null, batches, trueBatchUses, training: rec ? sqlTraining(rec) : null, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
 
 await app.listen({ port: config.PORT, host: config.HOST });
 const stopIntegrity = scheduleIntegrityCheck(sql, (msg) => app.log.info(msg));
@@ -68,6 +71,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     await tbp?.end();
     await tbi?.end();
     await tbip?.end();
+    await rec?.end();
     process.exit(0);
   });
 }

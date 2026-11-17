@@ -1,5 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, can, localInputValue, plantTime, type LogbookTypeInfo, type Me, type Settings, type SettingsVersion, VOICE_LANGUAGE_LABEL } from '../api.js';
+import { api, ApiError, can, localInputValue, plantTime, type LogbookTypeInfo, type Me, type Settings, type SettingsVersion, type TrainingSkills, VOICE_LANGUAGE_LABEL } from '../api.js';
+
+// D-71: the site settings that are not a logbook take no training.
+const SITE_SETTINGS = ['voice_notes', 'breakdown_advice'];
+const skillName = (s: { code: string; title: string }) => (s.title && s.title !== s.code ? `${s.title} (${s.code})` : s.code);
 import { SignDialog } from '../components/SignDialog.js';
 
 const blank: Settings = { enabled: true, sopRef: '', checklist: [], verificationRequired: false, limits: {}, pressurePoints: [] };
@@ -103,6 +107,11 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
   const draft = type.versions.find((v) => v.id === draftId);
   const [effective, setEffective] = useState(localInputValue(draft?.effectiveFrom ?? new Date()));
   const [error, setError] = useState('');
+  // D-71: the training signers need, picked from Recruitment's skills (typed while Recruitment is not linked or not reachable).
+  const [skills, setSkills] = useState<TrainingSkills | null>(null);
+  useEffect(() => {
+    if (!SITE_SETTINGS.includes(type.key)) void api<TrainingSkills>('GET', '/api/training/skills').then(setSkills).catch(() => setSkills(null));
+  }, [type.key]);
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
@@ -110,8 +119,10 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
     if (pressurePoints.some((p) => !p.ccsRef || !Number.isFinite(p.min) || !Number.isFinite(p.max) || p.min > p.max)) {
       return setError('Each pressure point needs: name; CCS reference; min; max (min not above max).');
     }
+    const { training, ...rest } = s;
     const settings = {
-      ...s,
+      ...rest,
+      ...(training?.code.trim() ? { training: { code: training.code.trim(), title: training.title.trim() } } : {}),
       checklist: checklist.split('\n').map((l) => l.trim()).filter(Boolean),
       pressurePoints,
     };
@@ -125,8 +136,8 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
         await api('POST', '/api/settings', { logbookType: type.key, settings, effectiveFrom });
       }
       onClose();
-    } catch {
-      setError('Check the fields. Pressure points need: name; CCS reference; min; max.');
+    } catch (err) {
+      setError(err instanceof ApiError && err.problems.length ? err.problems.join(' ') : 'Check the fields. Pressure points need: name; CCS reference; min; max.');
     }
   };
 
@@ -161,6 +172,25 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
         {type.key === 'pressure_reading' && (
           <label>Non-critical pressure points (one per line: name; CCS reference; min Pa; max Pa)<textarea value={points} onChange={(e) => setPoints(e.target.value)} /></label>
         )}
+        {skills && (skills.linked ? (
+          <label>Training needed to sign (Recruitment)
+            <select value={s.training?.code ?? ''} onChange={(e) => {
+              const k = skills.skills.find((x) => x.code === e.target.value);
+              setS({ ...s, training: k ? { code: k.code, title: k.title } : undefined });
+            }}>
+              <option value="">None</option>
+              {s.training && !skills.skills.some((x) => x.code === s.training!.code) && <option value={s.training.code}>{skillName(s.training)} (not in Recruitment)</option>}
+              {skills.skills.map((k) => <option key={k.code} value={k.code}>{skillName(k)}</option>)}
+            </select>
+          </label>
+        ) : (
+          <fieldset>
+            <legend>Training needed to sign</legend>
+            <p className="muted">{skills.note}</p>
+            <label>Skill code<input value={s.training?.code ?? ''} onChange={(e) => setS({ ...s, training: { code: e.target.value, title: s.training?.title ?? '' } })} /></label>
+            <label>Skill title<input value={s.training?.title ?? ''} onChange={(e) => setS({ ...s, training: { code: s.training?.code ?? '', title: e.target.value } })} /></label>
+          </fieldset>
+        ))}
         <label>Effective from<input type="datetime-local" value={effective} onChange={(e) => setEffective(e.target.value)} /></label>
         {error && <p className="error">{error}</p>}
         <div className="actions">
@@ -180,6 +210,7 @@ function SettingsSummary({ v }: { v: SettingsVersion }) {
       <dt>SOP</dt><dd>{s.sopRef || '—'}</dd>
       <dt>Effective from</dt><dd>{plantTime(v.effectiveFrom)} (or the approval time, if later)</dd>
       <dt>Second-person verification</dt><dd>{s.verificationRequired ? 'Required' : 'As the rules require'}</dd>
+      {s.training && (<><dt>Training needed to sign</dt><dd>{skillName(s.training)}</dd></>)}
       {s.checklist.length > 0 && (<><dt>Checklist</dt><dd><ul>{s.checklist.map((c) => <li key={c}>{c}</li>)}</ul></dd></>)}
       {(s.voiceLanguages ?? []).length > 0 && (
         <><dt>Voice-note languages</dt><dd>{s.voiceLanguages!.map((l) => VOICE_LANGUAGE_LABEL[l] ?? l).join(', ')}</dd></>

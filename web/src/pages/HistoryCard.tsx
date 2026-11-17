@@ -134,7 +134,7 @@ function EventRow({ ev, onVoice }: { ev: HistoryEvent; onVoice: (id: number) => 
           {e.batch && <div>Batch {e.batch}</div>}<Summary e={e} /> <VoiceLinks e={e} onOpen={onVoice} />
         </td>
         <td>{e.enteredBy}<br /><span className="muted">{plantTime(e.enteredAt)}</span></td>
-        <td>{e.signatures.map((s) => <div key={s.meaning}>{MEANING_LABEL[s.meaning]}: {s.printedName}, {plantTime(s.signedAt)}{!s.valid && ' (INVALID)'}</div>)}</td>
+        <td>{e.signatures.map((s) => <div key={s.meaning}>{MEANING_LABEL[s.meaning]}: {s.printedName}, {plantTime(s.signedAt)}{!s.valid && ' (INVALID)'}{s.training && ` (${s.training})`}</div>)}</td>
       </tr>
     );
   }

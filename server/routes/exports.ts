@@ -77,7 +77,7 @@ function versionNote(e: Presented, all: EntryRow[]) {
 }
 
 const signatureText = (e: Presented) =>
-  e.signatures.map((s) => `${s.meaning}: ${s.printedName}, ${plant(s.signedAt)}${s.valid ? '' : ' [INVALID: content changed]'}`).join('\n');
+  e.signatures.map((s) => `${s.meaning}: ${s.printedName}, ${plant(s.signedAt)}${s.valid ? '' : ' [INVALID: content changed]'}${s.training ? ` · ${s.training}` : ''}`).join('\n');
 const reviewText = (r: Review) =>
   `Reviewed by ${r.reviewedBy ?? '—'}, ${plant(r.reviewedAt)} · period ${plant(r.periodFrom)} to ${plant(r.periodTo)}` +
   `${r.superseded ? ' · SUPERSEDED: entries changed after the review' : ''}${r.valid ? '' : ' · INVALID: review content changed'}`;

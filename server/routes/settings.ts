@@ -6,6 +6,21 @@ import { parseId, requirePermission } from '../auth.js';
 import { mayRecord } from '../entries.js';
 import { LOGBOOK_TYPES, settingsSchema, typeByKey } from '../logbook-types.js';
 import { SignError, authenticateSigner, contentHash, sign, signBody } from '../signatures.js';
+import { TrainingOff } from '../training.js';
+
+/**
+ * D-71: the training a settings version asks of signers is picked from the skills Recruitment publishes; its title is
+ * Recruitment's. Typed only while Recruitment is not linked or not reachable. Returns a problem in words, or null.
+ */
+async function pullTraining(app: FastifyInstance, settings: { training?: { code: string; title: string } }): Promise<string | null> {
+  if (!settings.training || !app.training) return null;
+  let skills;
+  try { skills = await app.training.skills(); } catch (e) { if (e instanceof TrainingOff) return null; throw e; }
+  const s = skills.find((x) => x.code === settings.training!.code);
+  if (!s) return `Training ${settings.training.code} is not a skill in Recruitment: pick it from the list.`;
+  settings.training = { code: s.code, title: s.title };
+  return null;
+}
 
 const draftBody = z.object({
   logbookType: z.string(),
@@ -84,6 +99,8 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
     const body = draftBody.safeParse(req.body);
     if (!body.success || !typeByKey(body.data.logbookType)) return reply.code(400).send({ error: 'invalid_request' });
     const { logbookType, settings, effectiveFrom } = body.data;
+    const problem = await pullTraining(app, settings);
+    if (problem) return reply.code(400).send({ error: 'invalid_request', problems: [problem] });
     const row = await sql.begin(async (tx) => {
       // Serialise version numbering per type.
       await tx`select pg_advisory_xact_lock(hashtext(${'settings:' + logbookType}))`;
@@ -105,6 +122,8 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
     const id = parseId(req.params.id);
     const body = editBody.safeParse(req.body);
     if (id === null || !body.success) return reply.code(400).send({ error: 'invalid_request' });
+    const problem = await pullTraining(app, body.data.settings);
+    if (problem) return reply.code(400).send({ error: 'invalid_request', problems: [problem] });
     const result = await sql.begin(async (tx) => {
       const [before] = await tx<SettingsRow[]>`
         select id::int, logbook_type, version, settings, effective_from, created_by::int, created_at

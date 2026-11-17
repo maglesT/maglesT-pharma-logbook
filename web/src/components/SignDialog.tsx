@@ -1,5 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react';
 import { ApiError, MEANING_LABEL, getSignProof } from '../api.js';
+import { TrainingLine } from './TrainingLine.js';
 
 // LB-19/LB-20, PL-05: every signing asks for the password again (at Medhanta core) and shows the meaning being signed.
 export function SignDialog({
@@ -8,23 +9,28 @@ export function SignDialog({
   children,
   onSign,
   onCancel,
+  trainingFor,
 }: {
   meaning: string;
+  // D-71: the logbook type whose settings may ask the signer for a training (entry verification).
+  trainingFor?: string;
   what: string;
   // The content being signed, shown in full so the signer sees what the signature covers.
   children?: ReactNode;
-  onSign: (credentials: { proof: string }) => Promise<void>;
+  onSign: (credentials: { proof: string; trainedTyped?: boolean }) => Promise<void>;
   onCancel: () => void;
 }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [trainedTyped, setTrainedTyped] = useState(false);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
     setError('');
     try {
-      await onSign({ proof: await getSignProof([meaning]) });
+      const proof = await getSignProof([meaning]);
+      await onSign(trainingFor ? { proof, trainedTyped } : { proof });
     } catch (err) {
       setError(
         err instanceof ApiError && err.code === 'wrong_credentials'
@@ -49,6 +55,7 @@ export function SignDialog({
         <h2>Sign: {MEANING_LABEL[meaning] ?? meaning}</h2>
         <p>{what}</p>
         {children}
+        {trainingFor && <TrainingLine logbookType={trainingFor} typed={trainedTyped} onTyped={setTrainedTyped} />}
         <p className="muted">
           Your electronic signature is the legally binding equivalent of your handwritten signature. It records your
           name, the date and time, and the meaning “{MEANING_LABEL[meaning] ?? meaning}”.

@@ -135,6 +135,8 @@ export function reviewRoutes(app: FastifyInstance, sql: Sql) {
               and not exists (select 1 from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'verified')))`;
     const openIds = new Set(open.map((o) => o.id));
     const presented = await present(sql, versions);
+    // D-71: entries with a signature whose training was typed by hand (Recruitment not linked or not reachable).
+    const typedTraining = new Set(presented.filter((p) => p.signatures.some((s) => s.trainingTyped)).map((p) => p.entryId));
     const content = reviewContent(id, from, to, versions);
     const reviews = await reviewsFor(sql, id, from, to);
     return {
@@ -151,8 +153,9 @@ export function reviewRoutes(app: FastifyInstance, sql: Sql) {
         late: latest.filter((v) => v.late).length,
         corrected: versions.filter((v) => v.change === 'corrected').length,
         failedCalibrations: latest.filter((v) => v.logbook_type === 'calibration' && v.data.result === 'fail').length,
-        // D-69, D-70: entries made without a link: a batch typed by hand, a use with the qualification not checked.
-        typedByHand: latest.filter((v) => v.data.batchTyped || v.data.qualNotChecked).length,
+        // D-69, D-70: entries made without a link: a batch typed by hand, a use with the qualification not checked;
+        // D-71: a signer's training typed by hand.
+        typedByHand: latest.filter((v) => v.data.batchTyped || v.data.qualNotChecked || typedTraining.has(v.entry_id)).length,
       },
       audit: await auditFor(sql, app.master, versions, reviews.map((r) => r.id)),
       contentHash: contentHash('review', 0, content),
