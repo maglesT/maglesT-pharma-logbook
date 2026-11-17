@@ -193,3 +193,47 @@ describe('batches from TrueBatch as well (D-45)', () => {
     }
   });
 });
+
+describe('batches from the packing products as well (D-61)', () => {
+  const PK = `pk_${process.pid}`;
+  let blister: number;
+  beforeAll(async () => {
+    await t.owner.unsafe(`create schema ${PK}`);
+    await t.owner.unsafe(`create table ${PK}.packing_batch_v1 (batch_id uuid, batch_number text, coded_batch_number text, product_code text, bulk_product_code text,
+        pack_type text, status text, issued_at timestamptz, completed_at timestamptz, released boolean, read_at timestamptz default now(), data_as_of timestamptz);
+      create table ${PK}.equipment_use_v1 (batch_number text, equipment_code text, equipment_type text, room_code text, step text, started_at timestamptz,
+        ended_at timestamptz, read_at timestamptz default now(), data_as_of timestamptz);
+      insert into ${PK}.packing_batch_v1 (batch_number, coded_batch_number, product_code, bulk_product_code, pack_type, status, issued_at, completed_at, released) values
+        ('TP26001', 'TBM26001', 'PK-MET500-B10', 'FG-MET500', 'blister', 'IN_PACKING', now() - interval '1 hour', null, false),
+        ('TP26002', 'TBM26001', 'PK-MET500-B10', 'FG-MET500', 'blister', 'RELEASED', now() - interval '3 days', now() - interval '2 days', true);
+      insert into ${PK}.equipment_use_v1 (batch_number, equipment_code, equipment_type, room_code, step) values ('TP26001', 'BLS-PK1', 'machine', 'PACK-T', 'blister/run');
+      grant usage on schema ${PK} to logbook_app; grant select on all tables in schema ${PK} to logbook_app;`);
+    await addProduct(t, 'PK-MET500-B10', 'Metformin 500 mg blister pack of 10');
+    blister = await addItem(t, { code: 'BLS-PK1', location: 'PACK-T' });
+    t.app.batches = mergeBatches([sqlBatches(reader, TB, 'TrueBatch'), sqlBatches(reader, PK, 'TrueBatch Packing', 'packing_batch_v1')]);
+  });
+  afterAll(async () => {
+    t.app.batches = sqlBatches(reader, S);
+    await t.owner.unsafe(`drop schema if exists ${PK} cascade`);
+  });
+
+  it('LB-02: a packing line is offered its packing batch on top, and a use takes it with the pack product', async () => {
+    const r = (await call(t.app, c.op1!, 'GET', `/api/equipment/${blister}/batches`)).json();
+    expect(r.batches[0]).toMatchObject({ batchNumber: 'TP26001', source: 'TrueBatch Packing', strength: null, onThisItem: true, inProduction: true,
+      productName: 'Metformin 500 mg blister pack of 10' });
+    expect(r.batches.map((b: { batchNumber: string }) => b.batchNumber)).toEqual(expect.arrayContaining(['TP26002', 'TBM26001']));
+    expect((await use(blister, { batch: 'TP26002' })).json().problems).toEqual(['Batch TP26002 is not in production in TrueBatch Packing (RELEASED).']);
+    expect((await use(blister, { batch: 'TP26001' })).statusCode).toBe(201);
+  });
+
+  it('PL-08: with the link to the packing product cut, the list names it', async () => {
+    await t.owner.unsafe(`revoke select on all tables in schema ${PK} from logbook_app`);
+    try {
+      const r = await call(t.app, c.op1!, 'GET', `/api/equipment/${blister}/batches`);
+      expect(r.statusCode).toBe(503);
+      expect(r.json().message).toBe('Connection to TrueBatch Packing (batch records) is off. Ask your administrator.');
+    } finally {
+      await t.owner.unsafe(`grant select on all tables in schema ${PK} to logbook_app`);
+    }
+  });
+});

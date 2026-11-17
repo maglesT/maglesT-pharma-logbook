@@ -36,8 +36,11 @@ const tb = config.TRUEBATCH_DATABASE_URL ? connect(config.TRUEBATCH_DATABASE_URL
 const tbp = config.TRUEBATCH_PACKING_DATABASE_URL ? connect(config.TRUEBATCH_PACKING_DATABASE_URL) : null;
 const tbi = config.TRUEBATCH_INJECTABLES_DATABASE_URL ? connect(config.TRUEBATCH_INJECTABLES_DATABASE_URL) : null;
 const tbip = config.TRUEBATCH_INJECTABLES_PACKING_DATABASE_URL ? connect(config.TRUEBATCH_INJECTABLES_PACKING_DATABASE_URL) : null;
-// D-45: batches from Batchwright, TrueBatch or both.
-const batches = mergeBatches([ebmr ? sqlBatches(ebmr) : null, tb ? sqlBatches(tb, 'report', 'TrueBatch') : null]);
+// D-45: batches from Batchwright, TrueBatch or both; D-61: and from every linked TrueBatch product (packing: packing_batch_v1).
+const batches = mergeBatches([ebmr ? sqlBatches(ebmr) : null, tb ? sqlBatches(tb, 'report', 'TrueBatch') : null,
+  tbi ? sqlBatches(tbi, 'report', 'TrueBatch Injectables') : null,
+  tbp ? sqlBatches(tbp, 'report', 'TrueBatch Packing', 'packing_batch_v1') : null,
+  tbip ? sqlBatches(tbip, 'report', 'TrueBatch Injectables Packing', 'packing_batch_v1') : null]);
 // D-46: TrueBatch's machine and room uses count in the status as Logbook uses do; D-47: TrueBatch Packing's too (its
 // batches are not read); D-52: TrueBatch Injectables' too (its batches read as TrueBatch's); D-54: TrueBatch Injectables
 // Packing's too (as Packing's, its batches are not read).
