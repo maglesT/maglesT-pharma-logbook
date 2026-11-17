@@ -199,7 +199,7 @@ export interface Entry {
 export { TYPE_LABEL };
 
 // Mirrors the server (D-16): these types are signed by the performer.
-export const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test', 'change_over', 'requalification']);
+export const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading', 'change_over', 'requalification']);
 
 export interface EquipmentStatus {
   equipmentId: number;
@@ -210,6 +210,8 @@ export interface EquipmentStatus {
   inUse: { entryId: number | null; productId: number | null; batch: string | null; stage: string; since: string; source: 'Logbook' | 'TrueBatch' | 'TrueBatch Packing' } | null;
   lastTrueBatchUse: { batch: string; step: string; endedAt: string; source: 'TrueBatch' | 'TrueBatch Packing' } | null;
   cleanUntil: string | null;
+  // D-64: each sterile check's last valid plant day (YYYY-MM-DD).
+  sterileDues?: SterileDue[];
   calibrationDue: string | null;
   schedule: 'hold' | 'frequency' | null;
   dirtyUntil: string | null;
@@ -217,6 +219,12 @@ export interface EquipmentStatus {
   dues: Due[];
   qualification: string | null;
 }
+export interface SterileDue { kind: 'steriliser_test' | 'decontamination' | 'glove_test'; until: string; overdue: boolean }
+// D-64: the plain line on the item page for a sterile check that is still valid.
+export const STERILE_DUE_LABEL: Record<SterileDue['kind'], string> = { steriliser_test: 'Steriliser test valid until', decontamination: 'Decontamination valid until', glove_test: 'Glove test due by' };
+// Expired ones are not repeated here: the status shows them as blockers ("... overdue since ...").
+export const sterileLines = (status: Pick<EquipmentStatus, 'sterileDues'>) =>
+  (status.sterileDues ?? []).filter((d) => !d.overdue).map((d) => `${STERILE_DUE_LABEL[d.kind]} ${plantDay(d.until)}`);
 export interface CleaningDeadline { kind: 'dirty_hold' | 'clean_hold' | 'frequency'; at: string; hours: number; soon: boolean; overdue: boolean }
 export interface Due { kind: 'pm' | 'calibration' | 'requalification'; due: string; frequency: string; soon: boolean; overdue: boolean; dueFrom?: string }
 export const DEADLINE_LABEL: Record<CleaningDeadline['kind'], string> = { dirty_hold: 'Dirty hold', clean_hold: 'Clean hold', frequency: 'Scheduled cleaning' };

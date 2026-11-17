@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { api, cleaningText, daysLeft, joinParts, type Due, can, ApiError, MEANING_LABEL, plantDay, plantTime, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
+import { api, cleaningText, daysLeft, joinParts, type Due, can, ApiError, MEANING_LABEL, plantDay, plantTime, sterileLines, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
@@ -161,6 +161,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
           {status.inUse && <span>Batch {status.inUse.batch} {status.inUse.stage && `· ${status.inUse.stage}`}{status.inUse.source !== 'Logbook' && ` · in ${status.inUse.source}`} since {plantTime(status.inUse.since)}</span>}
           {!status.inUse && status.lastTrueBatchUse && <span>Last used by batch {status.lastTrueBatchUse.batch} in {status.lastTrueBatchUse.source}{status.lastTrueBatchUse.step && ` (${status.lastTrueBatchUse.step})`}, ended {plantTime(status.lastTrueBatchUse.endedAt)}</span>}
           {status.cleanUntil && !status.blockers.length && <span>Clean until {plantTime(status.cleanUntil)}</span>}
+          {sterileLines(status).map((l) => <span key={l}>{l}</span>)}
           {status.calibrationDue && <span>Calibration due {plantDay(status.calibrationDue)}</span>}
           {[...status.blockers, ...status.warnings].map((b) => <span key={b} className="reason">{b}</span>)}
         </div>

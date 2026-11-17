@@ -113,12 +113,12 @@ describe('steriliser tests (LB-12, A1 8.60–8.61)', () => {
 
 describe('glove integrity (LB-15)', () => {
   it('LB-15: a failed glove test on a port blocks the isolator until that port passes', async () => {
-    const res = await entry('op1', isolator, { logbookType: 'glove_integrity', activityStart: now(), data: { port: 'P3', method: 'pressure decay', result: 'fail', comment: 'Pinhole', deviationRef: 'DV-5' } });
+    const res = await entry('op1', isolator, { logbookType: 'glove_integrity', activityStart: now(), signature: sig('op1'), data: { port: 'P3', method: 'pressure decay', result: 'fail', comment: 'Pinhole', deviationRef: 'DV-5' } });
     expect(res.statusCode).toBe(201);
     expect((await status(isolator)).blockers).toContain('Glove integrity failed on port P3: replace and pass before use.');
-    await entry('op1', isolator, { logbookType: 'glove_integrity', activityStart: now(), data: { port: 'P4', result: 'pass' } });
+    await entry('op1', isolator, { logbookType: 'glove_integrity', activityStart: now(), signature: sig('op1'), data: { port: 'P4', result: 'pass' } });
     expect((await status(isolator)).blockers.some((b: string) => /P3/.test(b))).toBe(true);
-    await entry('op1', isolator, { logbookType: 'glove_integrity', activityStart: now(), data: { port: 'P3', result: 'pass' } });
+    await entry('op1', isolator, { logbookType: 'glove_integrity', activityStart: now(), signature: sig('op1'), data: { port: 'P3', result: 'pass' } });
     expect((await status(isolator)).blockers.some((b: string) => /Glove/.test(b))).toBe(false);
   });
 });
@@ -145,6 +145,7 @@ describe('sterile status for TrueBatch Injectables (D-50)', () => {
     s = await status(ac);
     expect(s.blockers).toEqual([]);
     expect(s.sterileValidUntil).toBe(new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' }));
+    expect(s.sterileDues).toEqual([{ kind: 'steriliser_test', until: s.sterileValidUntil, overdue: false }]);
   });
 
   it('LB-15: an isolator is fit only with a verified passed VHP decontamination and every glove port tested within the days its qualification set in master data (D-51)', async () => {
@@ -155,11 +156,12 @@ describe('sterile status for TrueBatch Injectables (D-50)', () => {
     const old = await vhp(daysAgo(8), 'V-1', late);
     expect(old.statusCode, old.body).toBe(201);
     await verify(old.json().id);
-    expect((await entry('op1', iso, { logbookType: 'glove_integrity', activityStart: daysAgo(8), data: { port: 'G1', result: 'pass' }, ...late })).statusCode).toBe(201);
-    expect((await entry('op1', iso, { logbookType: 'glove_integrity', activityStart: now(), data: { port: 'G2', result: 'pass' } })).statusCode).toBe(201);
+    expect((await entry('op1', iso, { logbookType: 'glove_integrity', activityStart: daysAgo(8), signature: sig('op1'), data: { port: 'G1', result: 'pass' }, ...late })).statusCode).toBe(201);
+    expect((await entry('op1', iso, { logbookType: 'glove_integrity', activityStart: now(), signature: sig('op1'), data: { port: 'G2', result: 'pass' } })).statusCode).toBe(201);
     let s = await status(iso);
     expect(s.state).toBe('sterile_expired');
     expect(s.blockers.filter((b: string) => /^(Decontamination \(VHP\)|Glove test) overdue since/.test(b))).toHaveLength(2);
+    expect(s.sterileDues.map((d: { kind: string; overdue: boolean }) => [d.kind, d.overdue])).toEqual([['decontamination', true], ['glove_test', true]]);
     // A new decontamination counts only once verified.
     const fresh = await vhp(now(), 'V-2');
     expect(fresh.statusCode, fresh.body).toBe(201);
@@ -172,12 +174,15 @@ describe('sterile status for TrueBatch Injectables (D-50)', () => {
     changeItem(t, code, { care: { ...t.master.items_.get(code)!.care, gloveTestEveryDays: 10 } });
     s = await status(iso);
     expect(s.blockers).toEqual([]);
+    // D-64: each check's last valid day, shown on the item page while fit.
+    const day = (d: number) => new Date(Date.now() + d * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    expect(s.sterileDues).toEqual([{ kind: 'decontamination', until: day(6), overdue: false }, { kind: 'glove_test', until: day(1), overdue: false }]);
     expect(new Date(s.lastDecontamination).getTime()).toBeGreaterThan(Date.now() - 3_600_000);
   });
 
   it('LB-15: an isolator whose timings are not set in master data is not fit; nothing is assumed (D-51)', async () => {
     const iso = await addItem(t, { code: `IS-${++n}`, name: 'Isolator, timings not set', kind: 'equipment', sterile: true });
-    expect((await entry('op1', iso, { logbookType: 'glove_integrity', activityStart: now(), data: { port: 'G1', result: 'pass' } })).statusCode).toBe(201);
+    expect((await entry('op1', iso, { logbookType: 'glove_integrity', activityStart: now(), signature: sig('op1'), data: { port: 'G1', result: 'pass' } })).statusCode).toBe(201);
     const s = await status(iso);
     expect(s.state).toBe('sterile_expired');
     expect(s.blockers).toEqual(['Glove test: its validity is not set in master data ("Glove test every (days)", from the qualification): not fit for use until it is.']);
@@ -186,24 +191,24 @@ describe('sterile status for TrueBatch Injectables (D-50)', () => {
 
 describe('pressure readings (LB-16)', () => {
   it('LB-16: readings are taken only at approved non-critical points', async () => {
-    const res = await entry('op1', room, { logbookType: 'pressure_reading', activityStart: now(), data: { point: 'Unknown point', value: 15 } });
+    const res = await entry('op1', room, { logbookType: 'pressure_reading', activityStart: now(), signature: sig('op1'), data: { point: 'Unknown point', value: 15 } });
     expect(res.json().problems[0]).toMatch(/Unknown pressure point/);
   });
 
   it('LB-16: an out-of-limit reading is flagged and needs a comment and deviation reference', async () => {
-    const bad = await entry('op1', room, { logbookType: 'pressure_reading', activityStart: now(), data: { point: 'Filling B / corridor', value: 4 } });
+    const bad = await entry('op1', room, { logbookType: 'pressure_reading', activityStart: now(), signature: sig('op1'), data: { point: 'Filling B / corridor', value: 4 } });
     expect(bad.json().problems[0]).toMatch(/outside 10–30 Pa/);
-    const ok = await entry('op1', room, { logbookType: 'pressure_reading', activityStart: now(), data: { point: 'Filling B / corridor', value: 4, comment: 'Door left open', deviationRef: 'DV-12' } });
+    const ok = await entry('op1', room, { logbookType: 'pressure_reading', activityStart: now(), signature: sig('op1'), data: { point: 'Filling B / corridor', value: 4, comment: 'Door left open', deviationRef: 'DV-12' } });
     expect(ok.statusCode).toBe(201);
     const [v] = (await call(t.app, c.qa!, 'GET', `/api/entries/${ok.json().id}/versions`)).json();
     expect(v.data.outOfLimit).toBe(true);
     expect((await status(room)).warnings).toContain('Last pressure reading out of limits: Filling B / corridor.');
-    await entry('op1', room, { logbookType: 'pressure_reading', activityStart: now(), data: { point: 'Filling B / corridor', value: 15 } });
+    await entry('op1', room, { logbookType: 'pressure_reading', activityStart: now(), signature: sig('op1'), data: { point: 'Filling B / corridor', value: 15 } });
     expect((await status(room)).warnings.some((w: string) => /pressure/.test(w))).toBe(false);
   });
 
   it('LB-16: the client cannot set the out-of-limit flag', async () => {
-    const res = await entry('op1', room, { logbookType: 'pressure_reading', activityStart: now(), data: { point: 'Filling B / corridor', value: 50, outOfLimit: false } });
+    const res = await entry('op1', room, { logbookType: 'pressure_reading', activityStart: now(), signature: sig('op1'), data: { point: 'Filling B / corridor', value: 50, outOfLimit: false } });
     expect(res.statusCode).toBe(400);
   });
 });
