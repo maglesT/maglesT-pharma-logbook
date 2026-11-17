@@ -53,8 +53,8 @@ master_data's own views.
 every minute and after each entry; `checked_at` says when. Sterile items (D-50, D-51, for TrueBatch Injectables): a steriliser is fit only
 with a verified passed steriliser test today, an isolator or RABS only with a verified passed VHP decontamination and every
 glove port tested within the days its qualification set in master data (platform D-38); the view's last columns are
-`last_decontamination`, `sterile_valid_until`, `last_glove_test`. Batches come from Batchwright (`EBMR_DATABASE_URL`), TrueBatch
-(`TRUEBATCH_DATABASE_URL`) or both, through their platform links. With TrueBatch linked, its machine and room uses
+`last_decontamination`, `sterile_valid_until`, `last_glove_test`. Batches come from TrueBatch
+(`TRUEBATCH_DATABASE_URL`) and the other TrueBatch products, through their platform links (Batchwright is retired, D-68). With TrueBatch linked, its machine and room uses
 (`equipment_use_v1`, read live) count in the status as Logbook uses do (D-46): in use until the batch is done with the item in TrueBatch (its last
 stage using it closes, or the batch is approved or terminated; D-49), dirty after.
 TrueBatch Tablets Packing's uses (its `equipment_use_v1`, `TRUEBATCH_PACKING_DATABASE_URL`) count the same way, merged with

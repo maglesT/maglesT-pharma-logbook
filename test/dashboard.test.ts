@@ -1,8 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { analyse } from '../server/routes/dashboard.js';
 import { addItem, call, freshApp, login, proofFor, seedUser, type TestApp } from './helpers.js';
 
-// Owner 2026-11-13 (D-41): the dashboard's three parts: on-time completion, pending review and approval, exceptions.
+// Owner 2026-11-13 (D-41): the dashboard: on-time completion, pending review and approval (D-68: the exceptions part went with Batchwright).
 let t: TestApp;
 const c: Record<string, string> = {};
 const sig = (u: string) => ({ proof: proofFor(u) });
@@ -48,18 +47,5 @@ describe('dashboard (owner 2026-11-13, D-41)', () => {
     const qa = (await call(t.app, c.qa!, 'GET', '/api/dashboard/pending')).json();
     expect(qa.byDepartment.reduce((a: number, d: { late: number }) => a + d.late, 0)).toBeGreaterThanOrEqual(1);
     expect([...qa.forMe, ...qa.others].find((p: { id: number }) => p.id === e)).toMatchObject({ late: true });
-  });
-
-  it('LB-11: the exception analysis flags open severe exceptions, failed checks and repeats, from the abnormal records only', () => {
-    const ex = (n: number, extra = {}) => ({ batchNumber: `B${n % 2}`, exceptionId: String(n), type: 'MANUAL_ENTRY_FALLBACK', category: 'MANUAL_ENTRY', severity: 'ALERT',
-      step: 's1', stepTitle: 'Dispense actives', description: null, status: 'DISPOSITIONED', disposition: 'NO_IMPACT', disposedAt: null, raisedAt: now(), ...extra });
-    const a = analyse({ exceptions: [ex(1), ex(2), ex(3), ex(4, { type: 'IPC_CHECK_FAILED', category: 'OUT_OF_LIMIT', severity: 'ACTION', status: 'OPEN', disposition: null })],
-      ipc: [{ batchNumber: 'B1', step: 'c', stepTitle: 'Hardness', checkKind: 'PHYSICAL_CHECK', item: 'Hardness', instrumentCode: null, value: '3.1', unit: 'kP', lower: '4', upper: '8', result: 'FAIL', recordedAt: now() }],
-      process: [], alarms: [] });
-    expect(a.openExceptions).toBe(1);
-    expect(a.abnormalReadings).toBe(1);
-    expect(a.insights.map((i) => i.level)).toEqual(expect.arrayContaining(['high', 'medium']));
-    expect(a.insights.map((i) => i.text).join(' ')).toMatch(/Repeat: 3 manual weight entries .*Dispense actives/);
-    expect(a.insights.map((i) => i.text).join(' ')).toMatch(/in-process check\(s\) failed: B1 Hardness = 3.1 kP \(limits 4 to 8\)/);
   });
 });

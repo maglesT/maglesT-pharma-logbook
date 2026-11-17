@@ -78,9 +78,9 @@ describe('the check before use and the entry details read in words', () => {
       { entry: { ...use, endReasonFrom: from }, what: 'EQ-BLS-01 · batch RAB26001', onEnd: async () => {}, onCancel: () => {} })));
     expect(dialog(null)).toContain('Why the use ends (optional)');
     expect(dialog(null)).not.toContain('Required');
-    expect(dialog('Batchwright')).toContain('Why the use ends');
-    expect(dialog('Batchwright')).not.toContain('(optional)');
-    expect(dialog('Batchwright')).toContain('Required: batch RAB26001 is from the batch records of Batchwright.');
+    expect(dialog('TrueBatch')).toContain('Why the use ends');
+    expect(dialog('TrueBatch')).not.toContain('(optional)');
+    expect(dialog('TrueBatch')).toContain('Required: batch RAB26001 is from the batch records of TrueBatch.');
     expect(renderToStaticMarkup(createElement(EndUseDialog, { entry: use, what: '', onEnd: async () => {}, onCancel: () => {} })))
       .toContain('<option value="Batch record withdrawn">');
   });

@@ -31,13 +31,12 @@ const proofKey = createHash('sha256').update(`logbook-signing-proof:${config.OID
 const md = connect(config.MASTER_DATA_DATABASE_URL);
 const qual = config.QUAL_DATABASE_URL ? connect(config.QUAL_DATABASE_URL) : null;
 const dv = config.DEVIATIONS_DATABASE_URL ? connect(config.DEVIATIONS_DATABASE_URL) : null;
-const ebmr = config.EBMR_DATABASE_URL ? connect(config.EBMR_DATABASE_URL) : null;
 const tb = config.TRUEBATCH_DATABASE_URL ? connect(config.TRUEBATCH_DATABASE_URL) : null;
 const tbp = config.TRUEBATCH_PACKING_DATABASE_URL ? connect(config.TRUEBATCH_PACKING_DATABASE_URL) : null;
 const tbi = config.TRUEBATCH_INJECTABLES_DATABASE_URL ? connect(config.TRUEBATCH_INJECTABLES_DATABASE_URL) : null;
 const tbip = config.TRUEBATCH_INJECTABLES_PACKING_DATABASE_URL ? connect(config.TRUEBATCH_INJECTABLES_PACKING_DATABASE_URL) : null;
-// D-45: batches from Batchwright, TrueBatch or both; D-61: and from every linked TrueBatch product (packing: packing_batch_v1).
-const batches = mergeBatches([ebmr ? sqlBatches(ebmr) : null, tb ? sqlBatches(tb, 'report', 'TrueBatch') : null,
+// D-45: batches from TrueBatch; D-61: and from every linked TrueBatch product (packing: packing_batch_v1).
+const batches = mergeBatches([tb ? sqlBatches(tb, 'report', 'TrueBatch') : null,
   tbi ? sqlBatches(tbi, 'report', 'TrueBatch Injectables') : null,
   tbp ? sqlBatches(tbp, 'report', 'TrueBatch Packing', 'packing_batch_v1') : null,
   tbip ? sqlBatches(tbip, 'report', 'TrueBatch Injectables Packing', 'packing_batch_v1') : null]);
@@ -65,7 +64,6 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     await md.end();
     await qual?.end();
     await dv?.end();
-    await ebmr?.end();
     await tb?.end();
     await tbp?.end();
     await tbi?.end();

@@ -3,17 +3,14 @@ import type { Sql } from '../db.js';
 import { requirePermission } from '../auth.js';
 import { logbookItems, type LogbookItem } from '../master.js';
 import { LOGBOOK_TYPES } from '../logbook-types.js';
-import type { Abnormal, BatchException } from '../batches.js';
-import { plantDay } from '../status.js';
 
-// Owner 2026-11-13 (D-41): the home dashboard in three parts.
+// Owner 2026-11-13 (D-41): the home dashboard.
 //  1. Compliance: share of scheduled activities (cleaning, PM, calibration, requalification) done before their deadline.
 //  2. Pending review and approval: what waits for me, and (for senior people) what waits with others, by department and age.
-//  3. Open exceptions and abnormalities, pulled from the batch records (Batchwright), with a rule-based analysis.
+// D-68: the third part (exceptions and abnormalities from Batchwright's batch records) went with Batchwright.
 
 export const COMPLIANCE_DAYS = 30;
 export const LATE_AFTER_HOURS = 8;          // one shift: a pending review older than this is "getting late"
-export const ABNORMAL_DAYS = 30;
 type Group = 'cleaning' | 'pm' | 'calibration' | 'requalification';
 const GROUPS: Group[] = ['cleaning', 'pm', 'calibration', 'requalification'];
 const MISSED_GROUP: Record<string, Group> = { dirty_hold: 'cleaning', clean_hold: 'cleaning', frequency: 'cleaning', pm: 'pm', calibration: 'calibration', requalification: 'requalification' };
@@ -109,47 +106,5 @@ export function dashboardRoutes(app: FastifyInstance, sql: Sql) {
     }, {})).map(([department, c]) => ({ department, ...c })).sort((a, b) => (b.normal + b.late) - (a.normal + a.late)) : null;
     return { lateAfterHours: LATE_AFTER_HOURS, total: all.length, forMe, mine, others, byDepartment };
   });
-
-  app.get('/api/dashboard/exceptions', anyUser, async () => {
-    // D-45: abnormal records come from Batchwright only (TrueBatch publishes no such views).
-    if (!app.batches?.abnormal) return { linked: false };
-    const a = await app.batches.abnormal(ABNORMAL_DAYS);
-    return { linked: true, days: ABNORMAL_DAYS, ...a, analysis: analyse(a) };
-  });
 }
 
-const OPEN = (e: BatchException) => e.status !== 'DISPOSITIONED' && e.status !== 'CLOSED';
-const TYPE_WORDS: Record<string, string> = {
-  MANUAL_ENTRY_FALLBACK: 'manual weight entries (balance not read automatically)', PROCESS_MANUAL_FALLBACK: 'manual process values (instrument not read automatically)',
-  IPC_MANUAL_ENTRY: 'manual in-process check values', IPC_CHECK_FAILED: 'failed in-process checks', OPERATOR_RAISED: 'exceptions raised by operators',
-  YIELD_OUT_OF_LIMITS: 'yields out of limits',
-};
-export const typeWords = (t: string) => TYPE_WORDS[t] ?? t.toLowerCase().replaceAll('_', ' ');
-
-/** Fixed, explainable rules over the abnormal records: counts, repeats, ageing, and what to look at. Advice only. */
-export function analyse(a: Abnormal) {
-  const open = a.exceptions.filter(OPEN);
-  const count = <T>(list: T[], key: (x: T) => string) => Object.entries(list.reduce<Record<string, number>>((m, x) => { const k = key(x); m[k] = (m[k] ?? 0) + 1; return m; }, {}))
-    .map(([k, n]) => ({ key: k, n })).sort((x, y) => y.n - x.n);
-  const bySeverity = count(a.exceptions, (e) => e.severity);
-  const byCategory = count(a.exceptions, (e) => e.category);
-  const byType = count(a.exceptions, (e) => e.type);
-  const byBatch = count([...a.exceptions.map((e) => e.batchNumber), ...a.ipc.map((i) => i.batchNumber), ...a.process.map((p) => p.batchNumber)], (b) => b).slice(0, 5);
-  const repeats = count(a.exceptions, (e) => `${e.type}|${e.stepTitle ?? e.step ?? ''}`).filter((r) => r.n >= 3).slice(0, 5)
-    .map((r) => { const [type, step] = r.key.split('|'); return { type: type!, step: step!, n: r.n, batches: [...new Set(a.exceptions.filter((e) => e.type === type && (e.stepTitle ?? e.step ?? '') === step).map((e) => e.batchNumber))] }; });
-  const now = Date.now();
-  const oldOpen = open.filter((e) => now - Date.parse(e.raisedAt) > 3 * 86_400_000).sort((x, y) => x.raisedAt.localeCompare(y.raisedAt));
-  const insights: { level: 'high' | 'medium' | 'info'; text: string }[] = [];
-  const severe = open.filter((e) => /CRITICAL|ACTION|MAJOR/i.test(e.severity));
-  if (severe.length) insights.push({ level: 'high', text: `${severe.length} open exception(s) of severity ${[...new Set(severe.map((e) => e.severity))].join('/')}: ${severe.slice(0, 3).map((e) => `${e.batchNumber} (${typeWords(e.type)}${e.stepTitle ? `, ${e.stepTitle}` : ''})`).join('; ')}. Decide the disposition and whether a deviation is needed before the batch moves on.` });
-  const fails = a.ipc.filter((i) => i.result === 'FAIL');
-  if (fails.length) insights.push({ level: 'high', text: `${fails.length} in-process check(s) failed: ${fails.slice(0, 3).map((i) => `${i.batchNumber} ${i.item ?? i.checkKind}${i.value ? ` = ${i.value}${i.unit ? ` ${i.unit}` : ''}` : ''}${i.lower || i.upper ? ` (limits ${i.lower ?? '–'} to ${i.upper ?? '–'})` : ''}`).join('; ')}. Check the product impact and the equipment settings at those steps.` });
-  if (a.process.length) insights.push({ level: 'medium', text: `${a.process.length} process value(s) outside their limits (e.g. ${a.process[0]!.tag} in ${a.process[0]!.batchNumber}). Check whether the limits or the equipment set-up need attention.` });
-  for (const r of repeats.slice(0, 3)) insights.push({ level: 'medium', text: `Repeat: ${r.n} ${typeWords(r.type)}${r.step ? ` at "${r.step}"` : ''} in ${r.batches.length} batch(es) (${r.batches.slice(0, 4).join(', ')}). A repeat usually has a common cause: check the instrument or interface used at that step, or the instruction.` });
-  const manual = a.exceptions.filter((e) => e.category === 'MANUAL_ENTRY').length;
-  if (a.exceptions.length >= 5 && manual / a.exceptions.length > 0.5) insights.push({ level: 'medium', text: `${Math.round((manual / a.exceptions.length) * 100)} % of the exceptions are manual entries where an instrument should have sent the value. Fixing the instrument connections removes most exceptions and the data-integrity risk of typed values.` });
-  if (oldOpen.length) insights.push({ level: 'medium', text: `${oldOpen.length} exception(s) open for more than 3 days (oldest ${oldOpen[0]!.batchNumber}, raised ${plantDay(oldOpen[0]!.raisedAt)}). Open exceptions hold up batch review and release.` });
-  if (a.alarms.length) insights.push({ level: 'high', text: `${a.alarms.length} GMP-critical alarm(s) not acknowledged.` });
-  if (!insights.length) insights.push({ level: 'info', text: 'Nothing abnormal needs attention in the batch records.' });
-  return { open: open.length + a.alarms.length, openExceptions: open.length, abnormalReadings: a.ipc.length + a.process.length, bySeverity, byCategory, byType, byBatch, repeats, oldOpen: oldOpen.length, insights };
-}

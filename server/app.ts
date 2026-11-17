@@ -48,8 +48,7 @@ export interface AppOptions {
   qualification?: Qualification | null;
   // D-37: the Deviations product's deviation_v1 (numbers of the deviations raised for missed limits); null without the link.
   deviations?: Deviations | null;
-  // Owner 2026-11-12: Batchwright's batch records (batch_fact_v1, equipment_use_v1), and TrueBatch's (D-45), merged;
-  // null without either link (batch typed).
+  // D-45: the TrueBatch products' batch records (batch_fact_v1, equipment_use_v1), merged; null without a link (batch typed).
   batches?: Batches | null;
   // D-46: TrueBatch's machine and room uses (equipment_use_v1), counted in the status, and TrueBatch Packing's (D-47);
   // empty without either link.

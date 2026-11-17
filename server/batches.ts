@@ -2,12 +2,11 @@ import type { Sql } from './db.js';
 import { ConnectionOff } from './master.js';
 
 // Owner 2026-11-12: the batch of a use or change over is chosen from the batch records, never typed. The Logbook reads
-// Batchwright's report views through the platform link (report.batch_fact_v1: batches with product and status;
-// report.equipment_use_v1: which equipment a batch uses), live, with its own login. Nothing is copied or written.
-// Without the link (no Batchwright on the site) the batch is typed as before.
-// D-45 (owner 15 Nov 2026): TrueBatch Tablets publishes views of the same names and columns (batch_fact_v1,
-// equipment_use_v1), read the same way through its own link (TRUEBATCH_DATABASE_URL). Either or both may be linked; the
-// batch lists are merged. The abnormal records (Home, D-41) are Batchwright's only.
+// the batch-record products' report views through the platform links (report.batch_fact_v1: batches with product and
+// status; report.equipment_use_v1: which equipment a batch uses), live, with its own login. Nothing is copied or written.
+// Without a link the batch is typed as before.
+// D-45 (owner 15 Nov 2026): TrueBatch Tablets publishes these views (TRUEBATCH_DATABASE_URL). D-68: Batchwright is
+// retired; its link, its abnormal records (Home, D-41) and their reader are gone.
 // D-61: TrueBatch Injectables' batches (its batch_fact_v1) and the packing products' batches (report.packing_batch_v1:
 // the same columns without a strength) are in the list too, so a packing line's use or change over picks its TP batch.
 
@@ -20,10 +19,10 @@ export interface Batch {
   completedAt: string | null;
   released: boolean;
   inProduction: boolean;
-  /** The product that keeps the batch record (Batchwright or TrueBatch). */
+  /** The TrueBatch product that keeps the batch record. */
   source: BatchSource;
 }
-export type BatchSource = 'Batchwright' | 'TrueBatch' | 'TrueBatch Packing' | 'TrueBatch Injectables' | 'TrueBatch Injectables Packing';
+export type BatchSource = 'TrueBatch' | 'TrueBatch Packing' | 'TrueBatch Injectables' | 'TrueBatch Injectables Packing';
 export interface Batches {
   /** The linked batch-record products, in words (for messages). */
   source: string;
@@ -32,22 +31,6 @@ export interface Batches {
   get(batchNumber: string): Promise<Batch | null>;
   /** Batch numbers the batch records show as using one of these equipment or room codes. */
   usedOn(codes: string[]): Promise<Set<string>>;
-  /** Owner 2026-11-13: only the abnormal records of the batch records, of the last `days` days (and every open one). */
-  abnormal?(days: number): Promise<Abnormal>;
-}
-export interface BatchException {
-  batchNumber: string; exceptionId: string; type: string; category: string; severity: string; step: string | null; stepTitle: string | null;
-  description: string | null; status: string; disposition: string | null; disposedAt: string | null; raisedAt: string;
-}
-export interface IpcAbnormal { batchNumber: string; step: string | null; stepTitle: string | null; checkKind: string; item: string | null; instrumentCode: string | null;
-  value: string | null; unit: string | null; lower: string | null; upper: string | null; result: string; recordedAt: string }
-export interface ProcessAbnormal { batchNumber: string; step: string | null; tag: string; value: string | null; unit: string | null; lower: string | null; upper: string | null; recordedAt: string }
-export interface AlarmAbnormal { code: string; source: string; subject: string | null; batchNumbers: string[]; raisedAt: string }
-export interface Abnormal { exceptions: BatchException[]; ipc: IpcAbnormal[]; process: ProcessAbnormal[]; alarms: AlarmAbnormal[] }
-
-export const BATCHWRIGHT_OFF = 'Connection to Batchwright (batch records) is off. Ask your administrator.';
-export class BatchwrightOff extends ConnectionOff {
-  constructor() { super(); this.message = BATCHWRIGHT_OFF; }
 }
 export const TRUEBATCH_OFF = 'Connection to TrueBatch (batch records) is off. Ask your administrator.';
 export class TrueBatchOff extends ConnectionOff {
@@ -59,7 +42,7 @@ const isCut = (e: unknown) => {
     'CONNECTION_ENDED', 'CONNECTION_DESTROYED'].includes(code) || code.startsWith('08');
 };
 
-// A batch is in production until Batchwright records it complete, reviewed, released, rejected or cancelled.
+// A batch is in production until its batch record shows it complete, reviewed, released, rejected or cancelled.
 const IN_PRODUCTION = `(completed_at is null and not coalesce(released, false)
   and status !~* '(complete|review|releas|reject|cancel|clos|destroy|abort)')`;
 const COLS = `batch_number, product_code, strength as strength, status, issued_at::text, completed_at::text, coalesce(released, false) as released,
@@ -68,17 +51,16 @@ type Row = { batch_number: string; product_code: string; strength: string | null
 const toBatch = (source: BatchSource) => (r: Row): Batch => ({ batchNumber: r.batch_number, productCode: r.product_code, strength: r.strength,
   status: r.status, issuedAt: r.issued_at, completedAt: r.completed_at, released: r.released, inProduction: r.in_production, source });
 
-/** Batchwright's batch records (with its abnormal records), or a TrueBatch product's (the same two views; a packing
- * product's batches are its `packing_batch_v1`, D-61). */
-export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'Batchwright', batchView = 'batch_fact_v1'): Batches {
+/** A TrueBatch product's batch records (a packing product's batches are its `packing_batch_v1`, D-61). */
+export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'TrueBatch', batchView = 'batch_fact_v1'): Batches {
   const read = async <T>(f: () => Promise<T>) => {
-    try { return await f(); } catch (e) { if (isCut(e)) throw source === 'Batchwright' ? new BatchwrightOff() : new TrueBatchOff(source); throw e; }
+    try { return await f(); } catch (e) { if (isCut(e)) throw new TrueBatchOff(source); throw e; }
   };
   const v = (name: string) => q(`${schema}.${name}`);
   const batch = toBatch(source);
   // A packing batch has no strength of its own.
   const cols = batchView === 'packing_batch_v1' ? COLS.replace('strength as strength', 'null::text as strength') : COLS;
-  const common: Batches = {
+  return {
     source,
     list: (recentDays) => read(async () => (await q<Row[]>`
       select ${q.unsafe(cols)} from ${v(batchView)}
@@ -92,35 +74,6 @@ export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'Bat
       select distinct batch_number from ${v('equipment_use_v1')}
       where upper(equipment_code) = any(${codes.map((c) => c.toUpperCase())}) or upper(room_code) = any(${codes.map((c) => c.toUpperCase())})`)
       .map((r) => r.batch_number))),
-  };
-  if (source !== 'Batchwright') return common;
-  return {
-    ...common,
-    abnormal: (days) => read(() => q.begin('read only', async (tx) => {
-      await tx`set local statement_timeout = '15s'`;
-      const since = tx`now() - make_interval(days => ${days})`;
-      const exceptions = (await tx<Record<string, string | null>[]>`
-        select batch_number, exception_id::text, exception_type, category, severity, step, step_title, description, status, disposition,
-          disposed_at::text, raised_at::text
-        from ${v('exception_detail_v1')} where status <> 'DISPOSITIONED' or raised_at > ${since} order by raised_at desc limit 1000`).map((r) => ({
-        batchNumber: r.batch_number!, exceptionId: r.exception_id!, type: r.exception_type!, category: r.category ?? '', severity: r.severity ?? '',
-        step: r.step, stepTitle: r.step_title, description: r.description, status: r.status ?? '', disposition: r.disposition, disposedAt: r.disposed_at,
-        raisedAt: r.raised_at! }));
-      const ipc = (await tx<Record<string, string | null>[]>`
-        select batch_number, step, step_title, check_kind, item, instrument_code, value_text, unit, lower_text, upper_text, result, recorded_at::text
-        from ${v('ipc_result_v1')} where result in ('FAIL', 'ALERT') and recorded_at > ${since} order by recorded_at desc limit 500`).map((r) => ({
-        batchNumber: r.batch_number!, step: r.step, stepTitle: r.step_title, checkKind: r.check_kind ?? '', item: r.item, instrumentCode: r.instrument_code,
-        value: r.value_text, unit: r.unit, lower: r.lower_text, upper: r.upper_text, result: r.result!, recordedAt: r.recorded_at! }));
-      const process = (await tx<Record<string, string | null>[]>`
-        select batch_number, step, tag, value_text, unit, lower_text, upper_text, recorded_at::text
-        from ${v('process_actual_v1')} where within_limits = false and recorded_at > ${since} order by recorded_at desc limit 500`).map((r) => ({
-        batchNumber: r.batch_number!, step: r.step, tag: r.tag ?? '', value: r.value_text, unit: r.unit, lower: r.lower_text, upper: r.upper_text, recordedAt: r.recorded_at! }));
-      const alarms = (await tx<{ alarm_code: string; source: string; subject_code: string | null; batch_numbers: string[] | null; raised_at: string }[]>`
-        select alarm_code, source, subject_code, batch_numbers, raised_at::text from ${v('alarm_v1')}
-        where gmp_critical and acked_at is null order by raised_at desc limit 200`).map((r) => ({
-        code: r.alarm_code, source: r.source, subject: r.subject_code, batchNumbers: r.batch_numbers ?? [], raisedAt: r.raised_at }));
-      return { exceptions, ipc, process, alarms } as Abnormal;
-    })),
   };
 }
 
@@ -183,7 +136,6 @@ export function sqlTrueBatchUses(q: Sql, schema = 'report', source: UseSource = 
 export function mergeBatches(sources: (Batches | null)[]): Batches | null {
   const all = sources.filter((s): s is Batches => s !== null);
   if (all.length <= 1) return all[0] ?? null;
-  const abnormal = all.find((s) => s.abnormal)?.abnormal;
   return {
     source: all.map((s) => s.source).join(', '),
     list: async (recentDays) => {
@@ -199,6 +151,5 @@ export function mergeBatches(sources: (Batches | null)[]): Batches | null {
       return null;
     },
     usedOn: async (codes) => new Set((await Promise.all(all.map((s) => s.usedOn(codes)))).flatMap((u) => [...u])),
-    ...(abnormal ? { abnormal } : {}),
   };
 }
