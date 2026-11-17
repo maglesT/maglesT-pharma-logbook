@@ -48,11 +48,18 @@ export interface EquipmentStatus {
   qualification: QualStatus['status'] | null;
   // D-45: the end of the verified cleaning in force (after the last use), and when this status was worked out.
   lastCleanEnd: Date | null;
+  // D-67: the product of the last use (Logbook uses only; null for a TrueBatch use) and whether a verified product-changeover
+  // (or major) cleaning followed it.
+  lastUseProductCode: string | null;
+  changeoverCleaned: boolean;
+  // D-67: the product code that alone may follow (the last use's antibiotic product, until a verified product-changeover
+  // or major cleaning); published as equipment_status_v1.only_product for TrueBatch. Null otherwise.
+  onlyProduct: string | null;
   checkedAt: Date;
 }
 
 export interface SterileDue {
-  kind: 'steriliser_test' | 'decontamination' | 'glove_test';
+  kind: 'steriliser_test' | 'decontamination' | 'glove_test' | 'sip';
   until: string;
   overdue: boolean;
 }
@@ -118,6 +125,8 @@ export interface StatusContext {
   trueBatch?: Map<number, { open: TrueBatchUse | null; last: TrueBatchUse | null }> | null;
   // D-46: the linked products that do not answer: the status says so for each, and is not published.
   usesOff?: UseSource[];
+  // D-67: the codes of the antibiotic products (master data).
+  antibiotics?: Set<string>;
 }
 /** D-46, D-47: the uses of every item recorded in each linked product, read live; a cut link leaves its uses out and says so. */
 async function trueBatchUses(sql: Sql | Tx, sources: TrueBatchUses[]): Promise<Pick<StatusContext, 'trueBatch' | 'usesOff'>> {
@@ -139,11 +148,20 @@ async function trueBatchUses(sql: Sql | Tx, sources: TrueBatchUses[]): Promise<P
 }
 export async function statusContext(sql: Sql | Tx, master: Master, qualification: Qualification | null, uses: TrueBatchUses[] = []): Promise<StatusContext> {
   const care = await careByLocalId(sql, master);
-  const tb = uses.length ? await trueBatchUses(sql, uses) : { trueBatch: null };
+  const tb = { ...(uses.length ? await trueBatchUses(sql, uses) : { trueBatch: null }), antibiotics: new Set((await master.products()).filter((p) => p.antibiotic).map((p) => p.code)) };
   if (!qualification) return { care, qual: null, ...tb };
   const byMaster = await qualification.statuses();
   const ids = await sql<{ id: number; item_id: string }[]>`select id::int, item_id::text from equipment where item_id is not null`;
   return { care, qual: new Map(ids.flatMap((r) => (byMaster.has(r.item_id) ? [[r.id, byMaster.get(r.item_id)!] as const] : []))), ...tb };
+}
+/** D-67 (owner, 17 Nov 2026): a product change to or from an antibiotic needs a verified product-changeover (or major)
+ * cleaning after the last use; a batch-to-batch cleaning is enough only for the same product. Null when the use may go on. */
+export function antibioticBlocker(last: { code: string; antibiotic?: boolean } | undefined,
+  next: { code: string; antibiotic?: boolean }, changeoverCleaned: boolean): string | null {
+  if (!last || last.code === next.code || changeoverCleaned) return null;
+  if (last.antibiotic) return `Last used for an antibiotic (${last.code}): a product-changeover cleaning is needed before another product.`;
+  if (next.antibiotic) return `${next.code} is an antibiotic and the last use was ${last.code}: a product-changeover cleaning is needed first.`;
+  return null;
 }
 /** D-46, D-47: what a cut link to TrueBatch or TrueBatch Packing leaves out of the status. */
 export const usesOffWarning = (source: UseSource) =>
@@ -158,6 +176,7 @@ interface Facts {
   qual: QualStatus | null;
   hasQual: boolean;
   tb: { open: TrueBatchUse | null; last: TrueBatchUse | null } | null;
+  antibiotics: Set<string>;
   usesOff: UseSource[];
   last_pm_end: Date | null;
   last_cal_pass_at: Date | null;
@@ -194,6 +213,9 @@ interface Facts {
   last_steriliser_pass_at: Date | null;
   has_vhp_cycles: boolean;
   last_vhp_pass_at: Date | null;
+  last_sip_pass_at: Date | null;
+  last_use_product: string | null;
+  last_changeover_clean_end: Date | null;
   oldest_glove_test_at: Date | null;
   pressure_out_of_limit: string[] | null;
   today: string;
@@ -215,7 +237,7 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
   const scope = ids === null ? q`true` : q`e.equipment_id = any(${ids}::bigint[])`;
   // D-46: the end of the last TrueBatch (or TrueBatch Packing) use counts as a use end (a cleaning must follow it).
   const tbEnds = [...(ctx.trueBatch ?? [])].filter(([id, u]) => u.last?.endedAt && (ids === null || ids.includes(id)));
-  const rows = await q<Omit<Facts, 'care' | 'qual' | 'hasQual' | 'tb' | 'usesOff'>[]>`
+  const rows = await q<Omit<Facts, 'care' | 'qual' | 'hasQual' | 'tb' | 'usesOff' | 'antibiotics'>[]>`
     with latest as (
       select e.*,
         exists (select 1 from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'verified') as verified
@@ -232,6 +254,7 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
     uses as (
       -- When the end of use was first recorded; a later correction of the use does not move it (S8 review).
       select distinct on (equipment_id) equipment_id, activity_end as last_use_end,
+        (select p.code from products p where p.id = latest.product_id) as last_use_product,
         (select min(x.entered_at) from entries x where x.entry_id = latest.entry_id and x.activity_end is not null) as last_use_entered_at
       from latest where logbook_type = 'equipment_use' and activity_end is not null
       order by equipment_id, activity_end desc
@@ -249,7 +272,7 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
       coalesce((select en.on from enabled en where en.logbook_type = 'calibration'), false) as calibrations_enabled,
       u.id::int as open_use_id, u.product_id::int as open_use_product, u.batch as open_use_batch,
       u.data->>'stage' as open_use_stage, u.activity_start as open_use_since,
-      lu.last_use_end,
+      lu.last_use_end, case when lu.last_use_end = us.last_use_end then us.last_use_product end as last_use_product,
       -- A cleaning counts only if it started after the last use ended (review S4-3). Forms enter whole
       -- minutes, so one in the minute the use ended counts if it was first entered after the use ended (S8).
       -- D-46: the last use is the Logbook's or TrueBatch's, whichever ended later (a TrueBatch end is known when signed).
@@ -258,6 +281,12 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
          and (lu.last_use_end is null or l.activity_start >= lu.last_use_end
               or (l.activity_start >= date_trunc('minute', lu.last_use_end)
                   and (select min(x.entered_at) from entries x where x.entry_id = l.entry_id) > lu.last_use_entered_at))) as last_clean_end,
+      -- D-67: the same, a product-changeover (or major) cleaning only.
+      (select max(l.activity_end) from latest l where l.equipment_id = q.id and l.verified
+         and l.logbook_type in ('equipment_cleaning', 'area_cleaning') and l.data->>'cleaningType' in ('product_change', 'major')
+         and (lu.last_use_end is null or l.activity_start >= lu.last_use_end
+              or (l.activity_start >= date_trunc('minute', lu.last_use_end)
+                  and (select min(x.entered_at) from entries x where x.entry_id = l.entry_id) > lu.last_use_entered_at))) as last_changeover_clean_end,
       (select count(*)::int from latest l where l.equipment_id = q.id and not l.verified
          and l.logbook_type in ('equipment_cleaning', 'area_cleaning')) as unverified_cleanings,
       (select count(*)::int from latest l where l.equipment_id = q.id and l.logbook_type = 'maintenance' and l.data->>'kind' = 'breakdown'
@@ -294,6 +323,9 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
       exists (select 1 from latest l where l.equipment_id = q.id and l.logbook_type = 'steriliser_cycle' and l.data->>'cycleType' = 'vhp') as has_vhp_cycles,
       (select max(coalesce(l.activity_end, l.activity_start)) from latest l where l.equipment_id = q.id and l.logbook_type = 'steriliser_cycle'
          and l.data->>'cycleType' = 'vhp' and l.verified and l.data->>'result' = 'pass') as last_vhp_pass_at,
+      -- D-66: the newest verified passed SIP cycle (a BFS machine used as the aseptic barrier).
+      (select max(coalesce(l.activity_end, l.activity_start)) from latest l where l.equipment_id = q.id and l.logbook_type = 'steriliser_cycle'
+         and l.data->>'cycleType' = 'sip' and l.verified and l.data->>'result' = 'pass') as last_sip_pass_at,
       (select min(g.at) from (
          select distinct on (l.data->>'port') coalesce(l.activity_end, l.activity_start) as at
          from latest l where l.equipment_id = q.id and l.logbook_type = 'glove_integrity'
@@ -332,7 +364,7 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
   const none = { cleanHoldHours: null, dirtyHoldHours: null, cleaningBasis: null, cleaningFrequencyHours: null, pmFrequencyDays: null,
     calibrationFrequencyDays: null, requalificationFrequencyMonths: null, needsCalibration: false, addedAt: new Date(0) };
   return rows.map((r) => ({ ...r, care: ctx.care.get(r.id) ?? none, qual: ctx.qual?.get(r.id) ?? null, hasQual: ctx.qual !== null,
-    tb: ctx.trueBatch?.get(r.id) ?? null, usesOff: ctx.usesOff ?? [] }));
+    tb: ctx.trueBatch?.get(r.id) ?? null, usesOff: ctx.usesOff ?? [], antibiotics: ctx.antibiotics ?? new Set() }));
 }
 
 export function deriveStatus(f: Facts): EquipmentStatus {
@@ -414,6 +446,9 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   // D-65 (owner, 17 Nov 2026): a barrier whose master data sets a decontamination validity or glove test interval is not fit
   // until its first verified pass, not only once a first one was recorded.
   if (f.has_vhp_cycles || f.care.decontaminationValidDays) sterile.push(['decontamination', f.care.decontaminationValidDays, f.last_vhp_pass_at, 'Decontamination (VHP)', 'decontaminate', 'Decontamination valid for (days)']);
+  // D-66 (owner, 17 Nov 2026): a BFS machine used as the aseptic barrier (master data sets its SIP validity) is fit only with a
+  // verified passed SIP cycle within those days; set only by master data (other items' SIP cycles stay unchecked).
+  if (f.care.sipValidDays) sterile.push(['sip', f.care.sipValidDays, f.last_sip_pass_at, 'SIP', 'sterilise in place', 'SIP valid for (days)']);
   if (f.oldest_glove_test_at || f.care.gloveTestEveryDays) sterile.push(['glove_test', f.care.gloveTestEveryDays, f.oldest_glove_test_at, 'Glove test', 'test every glove port', 'Glove test every (days)']);
   let sterileValidUntil: string | null = null;
   let sterileState: StatusCode | null = null;
@@ -436,6 +471,9 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   let dirtyUntil: Date | null = null;
   let due: CleaningDeadline | null = null;
   let cleanState: StatusCode | null = null;
+  // D-67: the last use's product: the Logbook use's, or the product of the TrueBatch batch that used it last.
+  const lastUseProductCode = f.last_use_product ?? (lastTrueBatchUse ? tbLast?.productCode ?? null : null);
+  let onlyProduct: string | null = null;
   const c = f.care;
   const schedule: EquipmentStatus['schedule'] = !f.tracks_cleaning ? null
     : f.kind === 'area' && c.cleaningBasis === 'frequency' && c.cleaningFrequencyHours ? 'frequency' : 'hold';
@@ -473,6 +511,12 @@ export function deriveStatus(f: Facts): EquipmentStatus {
         if (due.soon) warnings.push(`Clean hold ends at ${plantTime(cleanUntil)}: use or clean again before then.`);
       }
     } else cleanState = 'clean';
+    // D-67: after an antibiotic, only the same product may follow until a product-changeover cleaning (checked at the next use
+    // here; TrueBatch reads only_product).
+    if (lastUseProductCode && f.antibiotics.has(lastUseProductCode) && !f.last_changeover_clean_end) {
+      onlyProduct = lastUseProductCode;
+      warnings.push(`Last used for an antibiotic (${onlyProduct}): only ${onlyProduct} may follow until a product-changeover cleaning.`);
+    }
   }
 
   // Owner 2026-11-12 (slide 4, point 8): preventive maintenance, calibration and requalification dues, from master data's
@@ -518,7 +562,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
   if (inUse) blockers.push(inUse.source === 'Logbook' ? IN_USE : inTrueBatch(inUse.batch!, inUse.stage, inUse.source));
   // Cycles are stopped by everything except the cleaning status (review S6-1: including use).
   // D-50: nor by an expired sterile status (the cycle or test is how it is renewed).
-  const cycleBlockers = blockers.filter((b) => !/^(Dirty|Clean-hold|Cleaning overdue|Steriliser test|Decontamination \(VHP\)|Glove test)/.test(b));
+  const cycleBlockers = blockers.filter((b) => !/^(Dirty|Clean-hold|Cleaning overdue|Steriliser test|Decontamination \(VHP\)|SIP|Glove test)/.test(b));
 
   const state: StatusCode = inUse
     ? 'in_use'
@@ -549,6 +593,9 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     dues,
     qualification: f.qual?.status ?? null,
     lastCleanEnd: f.last_clean_end,
+    lastUseProductCode,
+    onlyProduct,
+    changeoverCleaned: f.last_changeover_clean_end !== null,
     checkedAt: f.now,
   };
 }

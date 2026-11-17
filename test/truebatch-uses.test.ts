@@ -346,3 +346,23 @@ describe('uses recorded in TrueBatch Injectables Packing count too, as Packing\'
     }
   });
 });
+
+describe('antibiotic last used in TrueBatch (D-67)', () => {
+  it('D-67: after a TrueBatch Injectables batch of an antibiotic, only_product names its product until a verified product-changeover cleaning', async () => {
+    await t.owner.unsafe(`insert into ${TBI}.batch_fact_v1 (batch_number, product_code, status, issued_at, completed_at, released)
+      values ('TI26AB01', 'FG-AB-TI', 'IN_PRODUCTION', now() - interval '1 day', null, false)`);
+    await addProduct(t, 'FG-AB-TI', 'Antibiotic injection');
+    t.master.products_.set('FG-AB-TI', { ...t.master.products_.get('FG-AB-TI')!, antibiotic: true });
+    const a = await item();
+    await tbUse('TI26AB01', a.code, { schema: TBI, startedMinutesAgo: 30, endedMinutesAgo: 1 });
+    await verify((await cleaning(a.id, { cleaningType: 'batch_to_batch' })).json().id);
+    await tick();
+    expect(await published(a.code)).toMatchObject({ fit_for_use: true, only_product: 'FG-AB-TI',
+      warnings: ['Last used for an antibiotic (FG-AB-TI): only FG-AB-TI may follow until a product-changeover cleaning.'] });
+    const use = await entry(a.id, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'TB260002', data: {} });
+    expect(use.statusCode).toBe(409);
+    expect(use.json().problems).toEqual(['Last used for an antibiotic (FG-AB-TI): a product-changeover cleaning is needed before another product.']);
+    await verify((await cleaning(a.id, { cleaningType: 'product_change' })).json().id);
+    await expect.poll(async () => (await published(a.code))?.only_product).toBeNull();
+  });
+});

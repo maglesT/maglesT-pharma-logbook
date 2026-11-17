@@ -9,7 +9,7 @@ import { DATA_SCHEMAS, REPORTED_FIELDS, checkData, correctCodes, mayCorrect, may
 import { logbookItem, logbookProducts, type Master } from '../master.js';
 import { SignError, authenticateSigner, contentHash, proofOnly, sign, signBody } from '../signatures.js';
 import { settingsInForce } from './settings.js';
-import { allStatuses, plantTime, statusOf, type EquipmentStatus } from '../status.js';
+import { allStatuses, antibioticBlocker, plantTime, statusOf, type EquipmentStatus } from '../status.js';
 import { VoiceError, confirmVoiceNotes, unsignedDrafts, voiceNotesFor, type VoiceUse } from '../voice.js';
 
 import { LATE_MINUTES } from '../entries.js';
@@ -385,6 +385,17 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           }
         }
         if (isUse && (!b.productId || !b.batch)) throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
+        // D-67: a product change to or from an antibiotic needs a product-changeover cleaning after the last use.
+        if (isUse && status.schedule !== null && status.lastUseEnd) {
+          const products = await logbookProducts(tx, app.master);
+          // The last use's product; for a TrueBatch use without one from its uses (packing), from the batch records.
+          const lastCode = status.lastUseProductCode
+            ?? (status.lastTrueBatchUse && app.batches ? (await app.batches.get(status.lastTrueBatchUse.batch))?.productCode ?? null : null);
+          const next = products.find((p) => p.id === b.productId);
+          const last = lastCode ? products.find((p) => p.code === lastCode) ?? { code: lastCode, antibiotic: false } : undefined;
+          const problem = next ? antibioticBlocker(last, next, status.changeoverCleaned) : null;
+          if (problem) throw new EntryError(409, 'not_fit_for_use', [problem]);
+        }
         if (isUse && b.activityEnd) throw new EntryError(400, 'check_failed', ['Record the end of use when it happens.']);
         // A breakdown may be reported before its repair has ended (D-25); a change over may be started and ended later
         // like a use; other activities end when recorded.
