@@ -219,9 +219,9 @@ export interface EquipmentStatus {
   dues: Due[];
   qualification: string | null;
 }
-export interface SterileDue { kind: 'steriliser_test' | 'decontamination' | 'glove_test'; until: string; overdue: boolean }
+export interface SterileDue { kind: 'steriliser_test' | 'decontamination' | 'glove_test' | 'sip'; until: string; overdue: boolean }
 // D-64: the plain line on the item page for a sterile check that is still valid.
-export const STERILE_DUE_LABEL: Record<SterileDue['kind'], string> = { steriliser_test: 'Steriliser test valid until', decontamination: 'Decontamination valid until', glove_test: 'Glove test due by' };
+export const STERILE_DUE_LABEL: Record<SterileDue['kind'], string> = { steriliser_test: 'Steriliser test valid until', decontamination: 'Decontamination valid until', glove_test: 'Glove test due by', sip: 'SIP valid until' };
 // Expired ones are not repeated here: the status shows them as blockers ("... overdue since ...").
 export const sterileLines = (status: Pick<EquipmentStatus, 'sterileDues'>) =>
   (status.sterileDues ?? []).filter((d) => !d.overdue).map((d) => `${STERILE_DUE_LABEL[d.kind]} ${plantDay(d.until)}`);

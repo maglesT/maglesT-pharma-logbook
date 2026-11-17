@@ -207,6 +207,39 @@ describe('sterile status for TrueBatch Injectables (D-50)', () => {
     expect(s.state).toBe('sterile_expired');
     expect(s.blockers).toEqual(['Glove test: its validity is not set in master data ("Glove test every (days)", from the qualification): not fit for use until it is.']);
   });
+
+  it('D-66: a BFS machine whose master data sets a SIP validity is fit only with a verified passed SIP cycle within those days', async () => {
+    const code = `BFS-${++n}`;
+    const bfs = await addItem(t, { code, name: 'BFS machine', kind: 'equipment', sterile: true, sipValidDays: 3 });
+    const sip = (start: string, id: string, extra: object = {}) => entry('op1', bfs, { logbookType: 'steriliser_cycle', activityStart: start, activityEnd: start,
+      data: { cycleType: 'sip', cycleId: id, programme: 'SIP-121', load: 'Product path', result: 'pass', controllerRecordRef: `BFS-${id}` }, signature: sig('op1'), ...extra });
+    let s = await status(bfs);
+    expect(s.state).toBe('sterile_expired');
+    expect(s.blockers).toEqual(['SIP: no verified pass on record: sterilise in place before first use.']);
+    // The SIP cycle is how it becomes fit: not a cycle blocker.
+    expect(s.cycleBlockers).toEqual([]);
+    const old = await sip(daysAgo(4), 'S-1', late);
+    expect(old.statusCode, old.body).toBe(201);
+    await verify(old.json().id);
+    s = await status(bfs);
+    expect(s.blockers.filter((b: string) => /^SIP overdue since .*: sterilise in place before use\.$/.test(b))).toHaveLength(1);
+    expect(s.sterileDues.map((d: { kind: string; overdue: boolean }) => [d.kind, d.overdue])).toEqual([['sip', true]]);
+    // A new SIP counts only once verified.
+    const fresh = await sip(now(), 'S-2');
+    expect(fresh.statusCode, fresh.body).toBe(201);
+    expect((await status(bfs)).blockers.some((b: string) => /^SIP/.test(b))).toBe(true);
+    await verify(fresh.json().id);
+    s = await status(bfs);
+    expect(s.blockers).toEqual([]);
+    const day = (d: number) => new Date(Date.now() + d * 86_400_000).toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
+    expect(s.sterileDues).toEqual([{ kind: 'sip', until: day(2), overdue: false }]);
+    expect(s.sterileValidUntil).toBe(day(2));
+    // An item without the setting is not checked on its SIP cycles.
+    const plain = await addItem(t, { code: `BFS-${++n}`, name: 'Vessel with SIP, no setting', kind: 'equipment', sterile: true });
+    expect((await entry('op1', plain, { logbookType: 'steriliser_cycle', activityStart: now(), activityEnd: now(),
+      data: { cycleType: 'sip', cycleId: 'S-9', result: 'pass', controllerRecordRef: 'V-S-9' }, signature: sig('op1') })).statusCode).toBe(201);
+    expect((await status(plain)).blockers.filter((b: string) => /SIP/.test(b))).toEqual([]);
+  });
 });
 
 describe('pressure readings (LB-16)', () => {

@@ -330,3 +330,56 @@ describe('minute precision (S5 browser finding)', () => {
     expect((await status(id)).state).toBe('clean');
   });
 });
+
+describe('antibiotic changeover (D-67)', () => {
+  const useOf = (id: number, productId: number) =>
+    entry('op1', id, { logbookType: 'equipment_use', activityStart: now(), productId, batch: `AB${++n}`, data: { stage: 'Filling' } });
+  const useAndEnd = async (id: number, productId: number) => {
+    const res = await useOf(id, productId);
+    expect(res.statusCode, res.body).toBe(201);
+    expect((await call(t.app, c.op1!, 'POST', `/api/entries/${res.json().id}/complete`, { activityEnd: now() })).statusCode).toBe(200);
+  };
+  const clean = async (id: number, cleaningType: string) => {
+    const e = (await entry('op1', id, { logbookType: 'equipment_cleaning', activityStart: now(), data: { cleaningType, checklist: {} }, signature: sig('op1') })).json().id;
+    expect((await signEntry('sup1', 'verify', e)).statusCode).toBe(200);
+  };
+  let antibiotic: number;
+  let other: number;
+  beforeAll(async () => {
+    antibiotic = await addProduct(t, 'FG-AB-1', 'Antibiotic powder');
+    t.master.products_.set('FG-AB-1', { ...t.master.products_.get('FG-AB-1')!, antibiotic: true });
+    other = await addProduct(t, 'FG-OT-1', 'Other product');
+  });
+
+  it('D-67: after an antibiotic, another product needs a product-changeover cleaning; the same product needs only batch to batch', async () => {
+    const id = await newItem();
+    await cleanAndVerify(id);
+    await useAndEnd(id, antibiotic);
+    await clean(id, 'batch_to_batch');
+    const s = await status(id);
+    expect(s.blockers).toEqual([]);
+    expect(s.warnings).toContain('Last used for an antibiotic (FG-AB-1): only FG-AB-1 may follow until a product-changeover cleaning.');
+    const refused = await useOf(id, other);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().problems).toEqual(['Last used for an antibiotic (FG-AB-1): a product-changeover cleaning is needed before another product.']);
+    // The same antibiotic again: batch to batch is enough.
+    await useAndEnd(id, antibiotic);
+    await clean(id, 'product_change');
+    expect((await status(id)).warnings.some((w: string) => /antibiotic/.test(w))).toBe(false);
+    await useAndEnd(id, other);
+  });
+
+  it('D-67: a change to an antibiotic needs a product-changeover cleaning too; a major cleaning counts', async () => {
+    const id = await newItem();
+    await cleanAndVerify(id);
+    await useAndEnd(id, other);
+    await clean(id, 'batch_to_batch');
+    const refused = await useOf(id, antibiotic);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json().problems[0]).toMatch(/^FG-AB-1 is an antibiotic and the last use was FG-OT-1: a product-changeover cleaning is needed first\.$/);
+    // Two products without the flag: batch to batch stays enough (as before).
+    await useAndEnd(id, product);
+    await clean(id, 'major');
+    await useAndEnd(id, antibiotic);
+  });
+});

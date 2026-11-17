@@ -36,9 +36,11 @@ export interface Care {
   // Platform D-38 (Logbook D-51): an isolator's or RABS's validated sterile timings, from its qualification (days).
   decontaminationValidDays?: number | null;
   gloveTestEveryDays?: number | null;
+  // Platform (Logbook D-66): a BFS machine used as the aseptic barrier: its sterilise-in-place (SIP) validity (days).
+  sipValidDays?: number | null;
 }
 export const NO_CARE: Care = { cleanHoldHours: null, dirtyHoldHours: null, cleaningBasis: null, cleaningFrequencyHours: null,
-  pmFrequencyDays: null, calibrationFrequencyDays: null, requalificationFrequencyMonths: null, decontaminationValidDays: null, gloveTestEveryDays: null };
+  pmFrequencyDays: null, calibrationFrequencyDays: null, requalificationFrequencyMonths: null, decontaminationValidDays: null, gloveTestEveryDays: null, sipValidDays: null };
 const int = (v: unknown) => (typeof v === 'number' ? v : typeof v === 'string' && /^\d+$/.test(v) ? Number(v) : null);
 // The parameters are read by column name from the row as JSON, so a master_data without them (before its 0003) still works.
 const careOf = (j: Record<string, unknown> | null | undefined, kind: Kind): Care => j ? {
@@ -48,9 +50,11 @@ const careOf = (j: Record<string, unknown> | null | undefined, kind: Kind): Care
   pmFrequencyDays: int(j.pm_frequency_days), calibrationFrequencyDays: kind === 'area' ? null : int(j.calibration_frequency_days),
   requalificationFrequencyMonths: int(j.requalification_frequency_months),
   decontaminationValidDays: int(j.decontamination_valid_days), gloveTestEveryDays: int(j.glove_test_every_days),
+  sipValidDays: int(j.sip_valid_days),
 } : { ...NO_CARE, cleaningBasis: kind === 'area' ? 'operation' : null };
 
-export interface MasterProduct { itemId: string; code: string; name: string; version: number; active: boolean }
+// Logbook D-67 (platform): antibiotic, a product whose last use needs a product-changeover cleaning before another product.
+export interface MasterProduct { itemId: string; code: string; name: string; version: number; active: boolean; antibiotic?: boolean }
 
 export interface Master {
   items(): Promise<MasterItem[]>;
@@ -88,8 +92,10 @@ export function sqlMaster(md: Sql): Master {
       ...(await md`select id, code, name, version, active, room_code, make, model, serial, needs_calibration, to_jsonb(v.*) as j from report.instrument_v1 v`).map(row('instrument')),
       ...(await md`select id, code, name, version, active, to_jsonb(v.*) as j from report.room_v1 v`).map(row('area')),
     ].sort((a, b) => a.itemId.localeCompare(b.itemId))),   // one insert order everywhere (no deadlock on first sight)
+    // antibiotic is read through the row as JSON, so a product_v1 without the column still answers (false).
     products: () => read(async () => (await md<MasterProduct[]>`
-      select id as "itemId", code, name, version, active from report.product_v1 order by id`).map((p) => ({ ...p }))),
+      select id as "itemId", code, name, version, active, coalesce((to_jsonb(v.*)->>'antibiotic')::boolean, false) as antibiotic
+      from report.product_v1 v order by id`).map((p) => ({ ...p }))),
   };
 }
 
