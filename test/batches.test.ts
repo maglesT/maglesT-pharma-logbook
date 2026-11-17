@@ -297,7 +297,7 @@ describe('a batch typed by hand (D-69, owner 17 Nov 2026)', () => {
     const [f] = await t.owner<{ data: Record<string, unknown> }[]>`select data from entries where id = ${forged.json().id}`;
     expect(f!.data).not.toHaveProperty('batchTyped');
     // The reviewer sees it counted on the period.
-    const day = new Date().toISOString().slice(0, 10);
+    const day = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' });
     const p = (await call(t.app, c.qa!, 'GET', `/api/equipment/${tablet}/period?fromDay=${day}&toDay=${day}`)).json();
     expect(p.openItems.typedByHand).toBe(1);
   });
