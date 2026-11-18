@@ -1,4 +1,9 @@
 import { z } from 'zod';
+import { TRUEBATCH_PROVIDERS, trueBatchUrlKey, type TrueBatchUrlKey } from './truebatch-providers.js';
+
+// A platform link's URL: set only while the link is on (an empty value, e.g. an unset compose variable, means not set).
+const linkUrl = z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional());
+const trueBatchUrls = Object.fromEntries(TRUEBATCH_PROVIDERS.map((p) => [trueBatchUrlKey(p), linkUrl])) as Record<TrueBatchUrlKey, typeof linkUrl>;
 
 const schema = z.object({
   // The app connects as the restricted role logbook_app (LB-18); migrations use MIGRATION_DATABASE_URL.
@@ -12,14 +17,9 @@ const schema = z.object({
   QUAL_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   // D-37: the Deviations product's database through the platform link (deviation_v1: numbers of raised deviations).
   DEVIATIONS_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
-  // D-45: TrueBatch Tablets' database through the platform link (batch_fact_v1, equipment_use_v1): batches are chosen, not typed.
-  TRUEBATCH_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
-  // D-47: TrueBatch Tablets Packing's database through the platform link (equipment_use_v1, as TrueBatch's).
-  TRUEBATCH_PACKING_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
-  // D-52: TrueBatch Injectables' database through the platform link (batch_fact_v1 and equipment_use_v1, as TrueBatch's).
-  TRUEBATCH_INJECTABLES_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
-  // D-54: TrueBatch Injectables Packing's database through the platform link (equipment_use_v1, as TrueBatch Packing's).
-  TRUEBATCH_INJECTABLES_PACKING_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
+  // D-45, D-47, D-52, D-54, D-75: each TrueBatch product's database through its platform link (TRUEBATCH_DATABASE_URL,
+  // TRUEBATCH_PACKING_DATABASE_URL, ..., TRUEBATCH_API_DATABASE_URL: one per product of TRUEBATCH_PROVIDERS); unset: not read.
+  ...trueBatchUrls,
   // D-71: the Recruitment product's database through the platform link (training_v1: who is trained in what, until when).
   RECRUITMENT_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   // Sign-on through Medhanta core (D-29), written by the platform's apply.

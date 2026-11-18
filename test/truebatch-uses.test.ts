@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { sqlTrueBatchUses } from '../server/batches.js';
+import { trueBatchReaders } from '../server/batches.js';
+import { TRUEBATCH_PROVIDERS, type TrueBatchProvider } from '../server/truebatch-providers.js';
 import { recordOverdue } from '../server/overdue.js';
 import { refreshStatus } from '../server/item-status.js';
 import { statusContext, TRUEBATCH_USES_OFF, usesOffWarning } from '../server/status.js';
@@ -12,6 +13,8 @@ import { addItem, addProduct, asReport, call, freshApp, login, proofFor, seedUse
 // D-47: TrueBatch Tablets Packing's equipment_use_v1 (same columns, its own link) counts the same way, merged with
 // TrueBatch's; its batches are not read.
 // D-54: TrueBatch Injectables Packing's equipment_use_v1 counts as TrueBatch Packing's (its batches are not read either).
+// D-75: the readers are built from the one list of TrueBatch products (TRUEBATCH_PROVIDERS), each with a stand-in schema;
+// Capsules, Oral Liquids and API count as Injectables (bulk), their packing products as Packing.
 
 let t: TestApp;
 let reader: Sql;
@@ -20,6 +23,11 @@ const TB = `tbu_${process.pid}`;
 const TBP = `tbp_${process.pid}`;
 const TBI = `tbi_${process.pid}`;
 const TBIP = `tbip_${process.pid}`;
+// D-75: the stand-in schema of each TrueBatch product (the four above, and one per new product).
+const SCHEMA: Record<TrueBatchProvider['id'], string> = { truebatch: TB, truebatch_packing: TBP, truebatch_injectables: TBI,
+  truebatch_injectables_packing: TBIP, truebatch_capsules: `tbc_${process.pid}`, truebatch_capsules_packing: `tbcp_${process.pid}`,
+  truebatch_liquids: `tbl_${process.pid}`, truebatch_liquids_packing: `tblp_${process.pid}`, truebatch_api: `tba_${process.pid}` };
+const NEW = TRUEBATCH_PROVIDERS.filter((p) => !['truebatch', 'truebatch_packing', 'truebatch_injectables', 'truebatch_injectables_packing'].includes(p.id));
 const PACKING_OFF = usesOffWarning('TrueBatch Packing');
 const sig = (u: string) => ({ proof: proofFor(u) });
 const now = () => new Date().toISOString();
@@ -58,8 +66,8 @@ const tick = () => recordOverdue(t.sql, t.master, null, t.app.trueBatchUses);
 beforeAll(async () => {
   // The reader logs in as the Logbook's link does; the views are stood in for by tables of the same names and columns.
   reader = connect(TEST_DATABASE_URL, { role: 'logbook_app' });
-  t = await freshApp({ trueBatchUses: [sqlTrueBatchUses(reader, TB), sqlTrueBatchUses(reader, TBP, 'TrueBatch Packing', null), sqlTrueBatchUses(reader, TBI, 'TrueBatch Injectables'),
-    sqlTrueBatchUses(reader, TBIP, 'TrueBatch Injectables Packing', null)] });
+  // D-75: every TrueBatch product linked, read as index.ts reads them.
+  t = await freshApp({ trueBatchUses: trueBatchReaders(TRUEBATCH_PROVIDERS.map((provider) => ({ provider, q: reader, schema: SCHEMA[provider.id] }))).uses });
   await t.owner.unsafe(`create schema ${TB}`);
   await t.owner.unsafe(`create schema ${TBP}`);
   await t.owner.unsafe(`create schema ${TBI}`);
@@ -90,6 +98,23 @@ beforeAll(async () => {
     create table ${TBIP}.equipment_use_v1 (batch_number text, equipment_code text, equipment_type text, room_code text, step text, started_at timestamptz,
       ended_at timestamptz, read_at timestamptz default now(), data_as_of timestamptz, step_name text);
     grant usage on schema ${TBIP} to logbook_app; grant select on all tables in schema ${TBIP} to logbook_app;`);
+  // D-75: the new products publish the same views: a bulk product batch_fact_v1 (one batch in production, one rejected) and
+  // equipment_use_v1; a packing product packing_batch_v1 and equipment_use_v1.
+  for (const p of NEW) {
+    const x = SCHEMA[p.id];
+    await t.owner.unsafe(`create schema ${x};
+      create table ${x}.equipment_use_v1 (batch_number text, equipment_code text, equipment_type text, room_code text, step text, started_at timestamptz,
+        ended_at timestamptz, read_at timestamptz default now(), data_as_of timestamptz, step_name text);
+      ${p.packing
+        ? `create table ${x}.packing_batch_v1 (batch_id uuid, batch_number text, coded_batch_number text, product_code text, bulk_product_code text,
+            pack_type text, status text, issued_at timestamptz, completed_at timestamptz, released boolean, read_at timestamptz default now(), data_as_of timestamptz);`
+        : `create table ${x}.batch_fact_v1 (batch_id uuid, batch_number text, product_code text, strength text, status text, issued_at timestamptz,
+            completed_at timestamptz, released boolean, read_at timestamptz default now(), data_as_of timestamptz);
+          insert into ${x}.batch_fact_v1 (batch_number, product_code, status, issued_at, completed_at, released) values
+            ('${x.toUpperCase()}-1', 'FG-NEW', 'IN_PRODUCTION', now() - interval '1 day', null, false),
+            ('${x.toUpperCase()}-X', 'FG-NEW', 'REJECTED', now() - interval '9 days', now() - interval '8 days', false);`}
+      grant usage on schema ${x} to logbook_app; grant select on all tables in schema ${x} to logbook_app;`);
+  }
   for (const [u, roles] of [['admin', ['admin']], ['qa1', ['qa']], ['op1', ['operator']], ['sup1', ['supervisor']]] as const) await seedUser(t.owner, u, [...roles]);
   for (const [k, u] of [['admin', 'admin'], ['qa', 'qa1'], ['op1', 'op1'], ['sup1', 'sup1']] as const) c[k] = (await login(t.app, u)).cookie;
   product = await addProduct(t, 'FG-TB', 'Product TB');
@@ -102,6 +127,7 @@ afterAll(async () => {
   await t.owner.unsafe(`drop schema if exists ${TBP} cascade`).catch(() => {});
   await t.owner.unsafe(`drop schema if exists ${TBI} cascade`).catch(() => {});
   await t.owner.unsafe(`drop schema if exists ${TBIP} cascade`).catch(() => {});
+  for (const p of NEW) await t.owner.unsafe(`drop schema if exists ${SCHEMA[p.id]} cascade`).catch(() => {});
 });
 
 describe('uses recorded in TrueBatch count in the status (D-46)', () => {
@@ -344,6 +370,52 @@ describe('uses recorded in TrueBatch Injectables Packing count too, as Packing\'
     } finally {
       await t.owner.unsafe(`grant select on all tables in schema ${TBIP} to logbook_app`);
     }
+  });
+});
+
+describe('uses recorded in TrueBatch Capsules, Oral Liquids, API and their packing count too (D-75)', () => {
+  it('LB-08: a capsule filler used by the first Capsules batch is in use, not clean; the messages name TrueBatch Capsules; published with the batch', async () => {
+    const a = await item();
+    await verify((await cleaning(a.id)).json().id);
+    expect((await status(a.id)).state).toBe('clean');
+    await tbUse(`${SCHEMA.truebatch_capsules.toUpperCase()}-1`, a.code, { schema: SCHEMA.truebatch_capsules });
+    const s = await status(a.id);
+    expect(s).toMatchObject({ state: 'in_use', inUse: { batch: `${SCHEMA.truebatch_capsules.toUpperCase()}-1`, source: 'TrueBatch Capsules', entryId: null } });
+    expect((await cleaning(a.id)).json().problems).toEqual([`In use by batch ${SCHEMA.truebatch_capsules.toUpperCase()}-1 in TrueBatch Capsules: record the cleaning once the batch is done with it in TrueBatch Capsules.`]);
+    await tick();
+    expect(await published(a.code)).toMatchObject({ state: 'in_use', in_use_batch: `${SCHEMA.truebatch_capsules.toUpperCase()}-1` });
+  });
+
+  it.each(NEW.map((p) => [p.name, p] as const))('LB-07, LB-08, PL-08: %s: in use while open, dirty after; its link off is named in its own warning', async (name, p) => {
+    const x = SCHEMA[p.id];
+    // A packing product's batches are not read for its uses: any number holds the item.
+    const batch = p.packing ? `${x.toUpperCase()}-P1` : `${x.toUpperCase()}-1`;
+    const a = await item();
+    await verify((await cleaning(a.id)).json().id);
+    await tbUse(batch, a.code, { schema: x });
+    expect(await status(a.id)).toMatchObject({ state: 'in_use', inUse: { batch, source: name } });
+    expect((await status(a.id)).blockers).toEqual([`In use by batch ${batch} in ${name} (granulation/charge-api): it ends when the batch is done with it in ${name} (its last stage using it closes, or the batch is approved or terminated).`]);
+    const b = await item();
+    await verify((await cleaning(b.id)).json().id);
+    await tbUse(batch, b.code, { schema: x, startedMinutesAgo: 0, endedMinutesAgo: 0 });
+    expect(await status(b.id)).toMatchObject({ state: 'dirty', inUse: null, lastTrueBatchUse: { batch, source: name } });
+    if (!p.packing) {
+      // A bulk product's uses are read with its batches: an open use of a rejected batch does not hold the item.
+      const r = await item();
+      await verify((await cleaning(r.id)).json().id);
+      await tbUse(`${x.toUpperCase()}-X`, r.code, { schema: x });
+      expect((await status(r.id)).state).not.toBe('in_use');
+    }
+    await t.owner.unsafe(`revoke select on all tables in schema ${x} from logbook_app`);
+    try {
+      const s = await status(b.id);
+      expect(s.warnings).toContain(usesOffWarning(name));
+      expect(s.warnings).not.toContain(TRUEBATCH_USES_OFF);
+      expect(s.state).toBe('clean');
+    } finally {
+      await t.owner.unsafe(`grant select on all tables in schema ${x} to logbook_app`);
+    }
+    expect((await status(b.id)).warnings).not.toContain(usesOffWarning(name));
   });
 });
 

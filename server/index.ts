@@ -9,7 +9,8 @@ import { createHash } from 'node:crypto';
 import { sqlMaster } from './master.js';
 import { sqlQualification } from './qualification.js';
 import { scheduleOverdue, sqlDeviations } from './overdue.js';
-import { mergeBatches, sqlBatches, sqlTrueBatchUses } from './batches.js';
+import { trueBatchReaders } from './batches.js';
+import { TRUEBATCH_PROVIDERS, trueBatchUrlKey } from './truebatch-providers.js';
 import { sqlTraining } from './training.js';
 
 const config = loadConfig();
@@ -32,23 +33,16 @@ const proofKey = createHash('sha256').update(`logbook-signing-proof:${config.OID
 const md = connect(config.MASTER_DATA_DATABASE_URL);
 const qual = config.QUAL_DATABASE_URL ? connect(config.QUAL_DATABASE_URL) : null;
 const dv = config.DEVIATIONS_DATABASE_URL ? connect(config.DEVIATIONS_DATABASE_URL) : null;
-const tb = config.TRUEBATCH_DATABASE_URL ? connect(config.TRUEBATCH_DATABASE_URL) : null;
-const tbp = config.TRUEBATCH_PACKING_DATABASE_URL ? connect(config.TRUEBATCH_PACKING_DATABASE_URL) : null;
-const tbi = config.TRUEBATCH_INJECTABLES_DATABASE_URL ? connect(config.TRUEBATCH_INJECTABLES_DATABASE_URL) : null;
-const tbip = config.TRUEBATCH_INJECTABLES_PACKING_DATABASE_URL ? connect(config.TRUEBATCH_INJECTABLES_PACKING_DATABASE_URL) : null;
 // D-71: Recruitment's training records; without the link a signer states their training (typed by hand).
 const rec = config.RECRUITMENT_DATABASE_URL ? connect(config.RECRUITMENT_DATABASE_URL) : null;
-// D-45: batches from TrueBatch; D-61: and from every linked TrueBatch product (packing: packing_batch_v1).
-const batches = mergeBatches([tb ? sqlBatches(tb, 'report', 'TrueBatch') : null,
-  tbi ? sqlBatches(tbi, 'report', 'TrueBatch Injectables') : null,
-  tbp ? sqlBatches(tbp, 'report', 'TrueBatch Packing', 'packing_batch_v1') : null,
-  tbip ? sqlBatches(tbip, 'report', 'TrueBatch Injectables Packing', 'packing_batch_v1') : null]);
-// D-46: TrueBatch's machine and room uses count in the status as Logbook uses do; D-47: TrueBatch Packing's too (its
-// batches are not read); D-52: TrueBatch Injectables' too (its batches read as TrueBatch's); D-54: TrueBatch Injectables
-// Packing's too (as Packing's, its batches are not read).
-const trueBatchUses = [...(tb ? [sqlTrueBatchUses(tb)] : []), ...(tbp ? [sqlTrueBatchUses(tbp, 'report', 'TrueBatch Packing', null)] : []),
-  ...(tbi ? [sqlTrueBatchUses(tbi, 'report', 'TrueBatch Injectables')] : []),
-  ...(tbip ? [sqlTrueBatchUses(tbip, 'report', 'TrueBatch Injectables Packing', null)] : [])];
+// D-45: batches from TrueBatch; D-61: and from every linked TrueBatch product (packing: packing_batch_v1). D-46: TrueBatch's
+// machine and room uses count in the status as Logbook uses do; D-47, D-52, D-54: every other TrueBatch product's too.
+// D-75: the products are those of TRUEBATCH_PROVIDERS whose link is on (its URL is set).
+const tbLinks = TRUEBATCH_PROVIDERS.flatMap((provider) => {
+  const url = config[trueBatchUrlKey(provider)];
+  return url ? [{ provider, q: connect(url) }] : [];
+});
+const { batches, uses: trueBatchUses } = trueBatchReaders(tbLinks);
 const master = sqlMaster(md);
 const qualification = qual ? sqlQualification(qual) : null;
 const app = await buildApp({ sql, signOn, proofKey, master, qualification, deviations: dv ? sqlDeviations(dv) : null, batches, trueBatchUses, training: rec ? sqlTraining(rec) : null, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
@@ -67,10 +61,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     await md.end();
     await qual?.end();
     await dv?.end();
-    await tb?.end();
-    await tbp?.end();
-    await tbi?.end();
-    await tbip?.end();
+    for (const l of tbLinks) await l.q.end();
     await rec?.end();
     process.exit(0);
   });

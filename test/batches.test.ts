@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mergeBatches, sqlBatches, TrueBatchOff, type Batch, type Batches, type BatchSource } from '../server/batches.js';
+import { mergeBatches, sqlBatches, trueBatchReaders, TrueBatchOff, type Batch, type Batches, type BatchSource } from '../server/batches.js';
+import { TRUEBATCH_PROVIDERS } from '../server/truebatch-providers.js';
 import { addItem, addProduct, call, freshApp, login, proofFor, seedUser, type TestApp } from './helpers.js';
 import { connect, type Sql } from '../server/db.js';
 import { TEST_DATABASE_URL } from './helpers.js';
@@ -255,6 +256,70 @@ describe('batches from the packing products as well (D-61)', () => {
       expect(r.json().batches.map((b: { batchNumber: string }) => b.batchNumber)).toContain('TBM26001');
     } finally {
       await t.owner.unsafe(`grant select on all tables in schema ${PK} to logbook_app`);
+    }
+  });
+});
+
+describe('batches from TrueBatch Capsules, Oral Liquids, API and their packing (D-75)', () => {
+  // A stand-in schema per new product, with the views its kind publishes (D-61): bulk batch_fact_v1, packing packing_batch_v1.
+  const NEW = TRUEBATCH_PROVIDERS.filter((p) => ['truebatch_capsules', 'truebatch_capsules_packing', 'truebatch_liquids', 'truebatch_liquids_packing', 'truebatch_api'].includes(p.id));
+  const schema = (id: string) => `${id.replace('truebatch', 'n')}_${process.pid}`;
+  const number = (id: string, n = 1) => `${id.replace('truebatch_', '').toUpperCase()}-${n}`;
+  let filler: number;
+  beforeAll(async () => {
+    for (const p of NEW) {
+      const x = schema(p.id);
+      await t.owner.unsafe(`create schema ${x};
+        create table ${x}.equipment_use_v1 (batch_number text, equipment_code text, equipment_type text, room_code text, step text, started_at timestamptz,
+          ended_at timestamptz, read_at timestamptz default now(), data_as_of timestamptz, step_name text);
+        ${p.packing
+          ? `create table ${x}.packing_batch_v1 (batch_id uuid, batch_number text, coded_batch_number text, product_code text, bulk_product_code text,
+              pack_type text, status text, issued_at timestamptz, completed_at timestamptz, released boolean, read_at timestamptz default now(), data_as_of timestamptz);
+            insert into ${x}.packing_batch_v1 (batch_number, product_code, status, issued_at, completed_at, released) values
+              ('${number(p.id)}', 'FG-MET500', 'IN_PACKING', now() - interval '1 hour', null, false),
+              ('${number(p.id, 2)}', 'FG-MET500', 'RELEASED', now() - interval '3 days', now() - interval '2 days', true);`
+          : `create table ${x}.batch_fact_v1 (batch_id uuid, batch_number text, product_code text, strength text, status text, issued_at timestamptz,
+              completed_at timestamptz, released boolean, read_at timestamptz default now(), data_as_of timestamptz);
+            insert into ${x}.batch_fact_v1 (batch_number, product_code, strength, status, issued_at, completed_at, released) values
+              ('${number(p.id)}', 'FG-MET500', '500 mg', 'IN_PRODUCTION', now() - interval '1 hour', null, false),
+              ('${number(p.id, 2)}', 'FG-MET500', '500 mg', 'PRODUCTION_APPROVED', now() - interval '3 days', now() - interval '2 days', false);`}
+        grant usage on schema ${x} to logbook_app; grant select on all tables in schema ${x} to logbook_app;`);
+    }
+    await t.owner.unsafe(`insert into ${schema('truebatch_capsules')}.equipment_use_v1 (batch_number, equipment_code, equipment_type, room_code, step)
+      values ('CAPSULES-1', 'CFM-N1', 'machine', 'CAPS-T', 'filling/run')`);
+    filler = await addItem(t, { code: 'CFM-N1', location: 'CAPS-T' });
+    t.app.batches = trueBatchReaders(NEW.map((provider) => ({ provider, q: reader, schema: schema(provider.id) }))).batches;
+  });
+  afterAll(async () => {
+    t.app.batches = mergeBatches([sqlBatches(reader, S, 'TrueBatch Injectables')]);
+    for (const p of NEW) await t.owner.unsafe(`drop schema if exists ${schema(p.id)} cascade`);
+  });
+
+  it('LB-02: each product\'s batches are listed under its name, a packing batch without a strength; a batch using this item is on top', async () => {
+    const r = (await call(t.app, c.op1!, 'GET', `/api/equipment/${filler}/batches`)).json();
+    expect(r).toMatchObject({ linked: true, notes: [] });
+    expect(r.batches[0]).toMatchObject({ batchNumber: 'CAPSULES-1', source: 'TrueBatch Capsules', strength: '500 mg', onThisItem: true, inProduction: true });
+    for (const p of NEW) {
+      expect(r.batches.find((b: { batchNumber: string }) => b.batchNumber === number(p.id))).toMatchObject({ source: p.name, inProduction: true,
+        strength: p.packing ? null : '500 mg', productName: 'Metformin tablets 500 mg' });
+      expect(r.batches.map((b: { batchNumber: string }) => b.batchNumber)).toContain(number(p.id, 2));
+    }
+    expect((await use(filler, { batch: 'CAPSULES-2' })).json().problems).toEqual(['Batch CAPSULES-2 is not in production in TrueBatch Capsules (PRODUCTION_APPROVED).']);
+    expect((await use(filler, { batch: 'LIQUIDS_PACKING-2' })).json().problems).toEqual(['Batch LIQUIDS_PACKING-2 is not in production in TrueBatch Oral Liquids Packing (RELEASED).']);
+    expect((await use(filler, { batch: 'NONE-9' })).json().problems).toEqual(['Batch NONE-9 is not in the batch records (TrueBatch Capsules, TrueBatch Oral Liquids, TrueBatch API, TrueBatch Capsules Packing, TrueBatch Oral Liquids Packing): choose it from the list or type it by hand.']);
+    expect((await use(filler, { batch: 'API-1' })).statusCode).toBe(201);
+  });
+
+  it('D-69: with the link to TrueBatch API cut, the list names it in one line and still has the other products\' batches', async () => {
+    await t.owner.unsafe(`revoke select on all tables in schema ${schema('truebatch_api')} from logbook_app`);
+    try {
+      const r = (await call(t.app, c.op1!, 'GET', `/api/equipment/${filler}/batches`)).json();
+      expect(r.notes).toEqual(['Connection to TrueBatch API is off: its batches are not listed.']);
+      const numbers = r.batches.map((b: { batchNumber: string }) => b.batchNumber);
+      expect(numbers).toContain('CAPSULES-1');
+      expect(numbers).not.toContain('API-1');
+    } finally {
+      await t.owner.unsafe(`grant select on all tables in schema ${schema('truebatch_api')} to logbook_app`);
     }
   });
 });

@@ -1,5 +1,6 @@
 import type { Sql } from './db.js';
 import { ConnectionOff } from './master.js';
+import { TRUEBATCH_PROVIDERS, type TrueBatchName, type TrueBatchProvider } from './truebatch-providers.js';
 
 // Owner 2026-11-12: the batch of a use or change over is chosen from the batch records, never typed. The Logbook reads
 // the batch-record products' report views through the platform links (report.batch_fact_v1: batches with product and
@@ -23,7 +24,8 @@ export interface Batch {
   /** The TrueBatch product that keeps the batch record. */
   source: BatchSource;
 }
-export type BatchSource = 'TrueBatch' | 'TrueBatch Packing' | 'TrueBatch Injectables' | 'TrueBatch Injectables Packing';
+// D-75: one of the TrueBatch products of TRUEBATCH_PROVIDERS.
+export type BatchSource = TrueBatchName;
 export interface Batches {
   /** The linked batch-record products, in words (for messages). */
   source: string;
@@ -90,7 +92,7 @@ export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'Tru
  * when there is one, else by its key (`step`, "stage/step"). Read through the row as JSON, so a view without the column
  * (a product not yet updated) still answers.
  */
-export type UseSource = 'TrueBatch' | 'TrueBatch Packing' | 'TrueBatch Injectables' | 'TrueBatch Injectables Packing';
+export type UseSource = TrueBatchName;
 // D-67: productCode, the batch's product (from the batch view; null without one, e.g. packing).
 export interface TrueBatchUse { code: string; batchNumber: string; step: string; startedAt: Date; endedAt: Date | null; source: UseSource; productCode?: string | null }
 export interface TrueBatchUses {
@@ -190,5 +192,23 @@ export function mergeBatches(sources: (Batches | null)[]): BatchRecords | null {
       return { batch: values.find((b) => b !== null) ?? null, down };
     },
     usedOn: async (codes) => new Set((await each((s) => s.usedOn(codes))).values.flatMap((u) => [...u])),
+  };
+}
+
+/** D-75: a linked TrueBatch product: its provider (TRUEBATCH_PROVIDERS) and the database its link gives. */
+export interface TrueBatchLink { provider: TrueBatchProvider; q: Sql; schema?: string }
+/**
+ * D-75: the batch records and the uses of every linked TrueBatch product, read as D-45 to D-61 say for its kind: a bulk
+ * product's batches are its batch_fact_v1 and its uses are read with them; a packing product's batches are its
+ * packing_batch_v1 and its uses are read without them. Batches: the bulk products first, then the packing ones; uses: in
+ * the order of TRUEBATCH_PROVIDERS. No link: no batch records (null) and no uses.
+ */
+export function trueBatchReaders(links: TrueBatchLink[]): { batches: BatchRecords | null; uses: TrueBatchUses[] } {
+  const ordered = [...links].sort((a, b) => TRUEBATCH_PROVIDERS.indexOf(a.provider) - TRUEBATCH_PROVIDERS.indexOf(b.provider));
+  const batchesOf = (packing: boolean) => ordered.filter((l) => l.provider.packing === packing)
+    .map((l) => sqlBatches(l.q, l.schema ?? 'report', l.provider.name, packing ? 'packing_batch_v1' : 'batch_fact_v1'));
+  return {
+    batches: mergeBatches([...batchesOf(false), ...batchesOf(true)]),
+    uses: ordered.map((l) => sqlTrueBatchUses(l.q, l.schema ?? 'report', l.provider.name, l.provider.packing ? null : 'batch_fact_v1')),
   };
 }

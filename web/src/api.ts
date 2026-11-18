@@ -220,9 +220,10 @@ export interface EquipmentStatus {
   state: string;
   blockers: string[];
   warnings: string[];
-  // D-46: a use open in TrueBatch (D-47: or TrueBatch Packing) has no Logbook entry (entryId null).
-  inUse: { entryId: number | null; productId: number | null; batch: string | null; stage: string; since: string; source: 'Logbook' | 'TrueBatch' | 'TrueBatch Packing' } | null;
-  lastTrueBatchUse: { batch: string; step: string; endedAt: string; source: 'TrueBatch' | 'TrueBatch Packing' } | null;
+  // D-46: a use open in TrueBatch (D-47: or TrueBatch Packing) has no Logbook entry (entryId null). source: 'Logbook' or the
+  // TrueBatch product's name (D-75: one of server/truebatch-providers.ts).
+  inUse: { entryId: number | null; productId: number | null; batch: string | null; stage: string; since: string; source: string } | null;
+  lastTrueBatchUse: { batch: string; step: string; endedAt: string; source: string } | null;
   cleanUntil: string | null;
   // D-64: each sterile check's last valid plant day (YYYY-MM-DD).
   sterileDues?: SterileDue[];
