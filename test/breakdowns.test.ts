@@ -1,7 +1,7 @@
 import { audit } from '../server/audit.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { call, freshApp, login, seedUser, type TestApp, proofFor, addItem, addProduct, changeItem } from './helpers.js';
-import { breakdownStats, type Breakdown } from '../server/breakdowns.js';
+import { asReport, call, freshApp, login, seedUser, type TestApp, proofFor, addItem, addProduct, changeItem } from './helpers.js';
+import { LATE_MINUTES } from '../server/entries.js';
 import { changeLines } from '../server/changes.js';
 import { runIntegrityCheck } from '../server/integrity.js';
 
@@ -243,30 +243,79 @@ describe('breakdown register (LB-02, LB-22)', () => {
     expect(all.stats.machines[0].mttrHours).toBeLessThan(2);
   });
 
-  it('LB-02: MTTR and MTBF are computed from the records', () => {
+  it('LB-02: MTTR and MTBF are computed from the records, as report.reliability_v1 publishes them per month (D-77)', async () => {
+    const id = await newItem({ location: 'Block R' });
     const h = 3_600_000;
-    const from = new Date('2026-01-01T00:00:00Z');
-    const to = new Date('2026-01-11T00:00:00Z');
-    const bd = (occurred: number, released: number | null): Breakdown => ({
-      equipmentId: 1, code: 'M1', name: 'M', occurredAt: new Date(from.getTime() + occurred * h), releasedAt: released === null ? null : new Date(from.getTime() + released * h),
-      downtimeEnd: new Date(released === null ? 8.64e15 : from.getTime() + released * h), downtimeMinutes: released === null ? 0 : (released - occurred) * 60, downtimeFinal: released !== null, failureCategory: 'mechanical',
-    }) as Breakdown;
-    // 240 h window, two failures: 4 h and 8 h down.
-    const { machines } = breakdownStats([bd(10, 14), bd(100, 108)], from, to, new Date('2027-01-01'), new Map());
-    expect(machines[0]).toMatchObject({ failures: 2, downtimeHours: 12, mttrHours: 6, mtbfHours: 114 });
-    // Installed on day 5: the window is 144 h.
-    const late = breakdownStats([bd(100, 108)], from, to, new Date('2027-01-01'), new Map([[1, new Date(from.getTime() + 96 * h)]]));
-    expect(late.machines[0]).toMatchObject({ failures: 1, mtbfHours: 136 });
-    // D-59: "in service since" after a counted breakdown (no installation date, created later): the window starts
-    // at that breakdown, so its downtime counts in full. Window 230 h (from hour 10), 12 h down.
-    const created = breakdownStats([bd(10, 14), bd(100, 108)], from, to, new Date('2027-01-01'), new Map([[1, new Date(from.getTime() + 96 * h)]]));
-    expect(created.machines[0]).toMatchObject({ failures: 2, downtimeHours: 12, mttrHours: 6, mtbfHours: 109 });
-    // Overlapping breakdowns count their downtime once: 10–20 h and 15–30 h are 20 h down.
-    const overlap = breakdownStats([bd(10, 20), bd(15, 30)], from, to, new Date('2027-01-01'), new Map());
-    expect(overlap.machines[0]).toMatchObject({ downtimeHours: 20, mtbfHours: 110 });
-    // An unreleased breakdown counts as down until now and has no MTTR yet.
-    const open = breakdownStats([bd(230, null)], from, to, new Date(from.getTime() + 235 * h), new Map());
-    expect(open.machines[0]).toMatchObject({ downtimeHours: 5, mttrHours: null, mtbfHours: 230 });
+    // Last calendar month in plant time.
+    const [m] = await t.owner<{ starts: Date; ends: Date; first: string; last: string; month: string }[]>`
+      select m at time zone 'Asia/Kolkata' as starts, (m + interval '1 month') at time zone 'Asia/Kolkata' as ends,
+        to_char(m, 'YYYY-MM-DD') as first, to_char(m + interval '1 month' - interval '1 day', 'YYYY-MM-DD') as last, to_char(m, 'YYYY-MM-DD') as month
+      from (select date_trunc('month', now() at time zone 'Asia/Kolkata') - interval '1 month' as m) x`;
+    const at = (base: Date, hours: number) => new Date(base.getTime() + hours * h).toISOString();
+    // Past breakdowns (recorded long after their repair, D-58): down from occurrence to repair end.
+    const past = async (occurred: string, start: string, end: string) => {
+      const v = (await entry('eng1', id, { logbookType: 'maintenance', activityStart: start, activityEnd: end, lateReason: 'from the paper log',
+        data: repairData({ occurredAt: occurred }), signature: sig('eng1') })).json().id;
+      expect(v).toBeGreaterThan(0);
+      await signEntry('sup1', 'verify', v);
+      await signEntry('qa', 'release', v);
+    };
+    await past(at(m!.starts, 48), at(m!.starts, 49), at(m!.starts, 51));          // 3 h down
+    await past(at(m!.starts, 240), at(m!.starts, 241), at(m!.starts, 245));       // 5 h down
+    // Runs over the month end: 2 h in last month, 1 minute in this one.
+    await past(at(m!.ends, -2), at(m!.ends, -1), new Date(m!.ends.getTime() + 60_000).toISOString());
+    // The item was added today; it was in service from its first breakdown (D-59): 48 h after the month start.
+    const span = (m!.ends.getTime() - m!.starts.getTime()) / h - 48;
+    const view = (await asReport(t.owner, `select *, to_char(month, 'YYYY-MM-DD') as day from ${t.reportSchema}.reliability_v1 where equipment_code = 'BD-${n}' order by month`)).rows!;
+    const last = view[0]!;
+    expect(last).toMatchObject({ day: m!.month, equipment_id: String(id), breakdowns: 3 });
+    expect(Number(last.downtime_hours)).toBe(10);
+    expect(Number(last.in_service_hours)).toBe(span - 10);
+    expect(Number(last.mtbf_hours)).toBe(Math.round(((span - 10) / 3) * 100) / 100);
+    expect(Number(last.mttr_hours)).toBe(3.33);
+    // Months before the item was in service have no row; this month has the minute of the last breakdown, no breakdown.
+    expect(view).toHaveLength(2);
+    expect(view[1]).toMatchObject({ breakdowns: 0, mtbf_hours: null, mttr_hours: null });
+    expect(Number(view[1]!.downtime_hours)).toBeCloseTo(1 / 60, 3);
+    // The register for the same month gives the same numbers (rounded to 0.1 h).
+    const screen = (await call(t.app, c.op1!, 'GET', `/api/breakdowns?fromDay=${m!.first}&toDay=${m!.last}&equipmentId=${id}`)).json();
+    expect(screen.stats.machines).toEqual([{ equipmentId: id, code: `BD-${n}`, name: `Machine ${n}`, failures: 3, inServiceHours: Math.round((span - 10) * 10) / 10,
+      downtimeHours: 10, mttrHours: 3.3, mtbfHours: Math.round(((span - 10) / 3) * 10) / 10 }]);
+    // The sum of months is the register over both months: 3 breakdowns, the downtime of both months.
+    const both = (await call(t.app, c.op1!, 'GET', `/api/breakdowns?fromDay=${m!.first}&toDay=${today()}&equipmentId=${id}`)).json();
+    const sum = (k: string) => view.reduce((s, r) => s + Number(r[k]), 0);
+    expect(both.stats.machines[0].failures).toBe(sum('breakdowns'));
+    expect(both.stats.machines[0].downtimeHours).toBe(Math.round(sum('downtime_hours') * 10) / 10);
+    expect(Math.abs(both.stats.machines[0].inServiceHours - sum('in_service_hours'))).toBeLessThan(0.1);
+  });
+
+  it('LB-02: overlapping breakdowns are down once; a breakdown not yet released is down until now (D-77)', async () => {
+    const id = await newItem({ location: 'Block R' });
+    // Recorded as they happen (not past): down from occurrence to QA release, to now while not released.
+    for (const [occurred, start, end] of [[120, 25, 20], [60, 15, 10]]) {
+      const res = await entry('eng1', id, { logbookType: 'maintenance', activityStart: ago(start!), activityEnd: ago(end!), data: repairData({ occurredAt: ago(occurred!) }), signature: sig('eng1') });
+      expect(res.statusCode).toBe(201);
+    }
+    const [row] = (await asReport(t.owner, `select * from ${t.reportSchema}.reliability_v1 where equipment_code = 'BD-${n}' and breakdowns > 0`)).rows!;
+    expect(row!.breakdowns).toBe(2);
+    expect(Number(row!.downtime_hours)).toBeCloseTo(2, 1);
+    expect(Number(row!.mttr_hours)).toBeCloseTo(1, 1);
+    // In service from the first breakdown: all of it was down so far.
+    expect(Number(row!.in_service_hours)).toBeCloseTo(0, 1);
+    expect(Number(row!.mtbf_hours)).toBeCloseTo(0, 1);
+  });
+
+  it('LB-21: report.reliability_v1 has the published columns; the report role reads it but not the views it is built on', async () => {
+    const cols = await t.owner<{ column_name: string; data_type: string }[]>`
+      select column_name, data_type from information_schema.columns where table_schema = ${t.reportSchema} and table_name = 'reliability_v1' order by ordinal_position`;
+    expect(cols.map((x) => `${x.column_name} ${x.data_type}`)).toEqual(['equipment_id bigint', 'equipment_code text', 'month date', 'in_service_hours numeric',
+      'breakdowns integer', 'downtime_hours numeric', 'mtbf_hours numeric', 'mttr_hours numeric', 'data_as_of timestamp with time zone']);
+    expect((await asReport(t.owner, `select count(*) from ${t.reportSchema}.reliability_v1`)).error).toBeUndefined();
+    const base = t.reportSchema.replace(/_report$/, '');
+    expect((await asReport(t.owner, `select count(*) from ${base}.breakdown_downtime`)).error).toBe('42501');
+    expect((await asReport(t.owner, `delete from ${t.reportSchema}.reliability_v1`)).error).toBeDefined();
+    // The view writes the late-entry time (D-58) as 30 minutes.
+    expect(LATE_MINUTES).toBe(30);
   });
 
   it('LB-22: the register exports as CSV and PDF', async () => {

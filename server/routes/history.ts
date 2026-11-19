@@ -10,7 +10,7 @@ import { FAILURE_CATEGORY_LABEL, ITEM_ACTION_LABEL, STATE_NAME, TYPE_LABEL } fro
 import { canonical } from '../signatures.js';
 import { PLANT_TZ, plantDay, statusOf, type StatusContext } from '../status.js';
 import {
-  breakdowns, filterAndSort, breakdownStats, checkDetails, detailsSchema, detailsVersions, inServiceSince, locationHistory, registerQuery,
+  breakdowns, filterAndSort, breakdownStats, checkDetails, detailsSchema, detailsVersions, locationHistory, registerQuery, reliability,
   type Breakdown,
 } from '../breakdowns.js';
 import { present, type EntryRow } from './entries.js';
@@ -44,10 +44,10 @@ async function today(sql: Sql): Promise<string> {
 
 async function register(sql: Sql, master: Master, q: z.infer<typeof registerQuery>) {
   const { from, to } = await plantRange(sql, q.fromDay, q.toDay);
-  const now = new Date();
-  const all = await breakdowns(sql, await logbookItems(sql, master), from, to, q, now);
-  // Counts, MTTR and MTBF cover every breakdown of the period, whatever the status filter (review S9).
-  const stats = breakdownStats(all, from, to, now, await inServiceSince(sql, [...new Set(all.map((b) => b.equipmentId))]));
+  const all = await breakdowns(sql, await logbookItems(sql, master), from, to, q);
+  // Counts, MTTR and MTBF cover every breakdown of the period, whatever the status filter (review S9); a machine's
+  // MTBF and MTTR all its breakdowns of the period, worked out as report.reliability_v1 does (D-77).
+  const stats = breakdownStats(all, await reliability(sql, from, to, [...new Set(all.map((b) => b.equipmentId))]));
   return { from, to, items: filterAndSort(all, q), stats };
 }
 
@@ -244,7 +244,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
       { heading: 'Per failure category', columns: ['Category', 'Failures'], widths: ['*', 60], rows: stats.categories.map((c) => ({ cells: [FAILURE_CATEGORY_LABEL[c.category] ?? c.category, String(c.failures)] })) },
     ];
     return sendCopy(reply, 'pdf', name, await tablesPdf(sql, 'Breakdown register',
-      `Breakdowns that occurred ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time)${filters ? ` · ${filters}` : ''}. Downtime runs from occurrence to QA release; for a past breakdown recorded after its repair, to the repair end. MTTR: mean downtime of released breakdowns. MTBF: operating time in the period per failure.`,
+      `Breakdowns that occurred ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time)${filters ? ` · ${filters}` : ''}. Downtime runs from occurrence to QA release; for a past breakdown recorded after its repair, to the repair end. MTTR: downtime in the period per breakdown. MTBF: operating time in the period (in service, minus downtime) per breakdown.`,
       tables, req.user!.fullName));
   });
 

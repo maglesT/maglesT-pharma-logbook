@@ -1,8 +1,7 @@
 import { z } from 'zod';
 import type { Sql, Tx } from './db.js';
 import type { LogbookItem } from './master.js';
-import { FAILURE_CATEGORIES, LATE_MINUTES } from './entries.js';
-import { PLANT_TZ } from './status.js';
+import { FAILURE_CATEGORIES } from './entries.js';
 
 // S9 breakdown register and equipment details (D-25). Everything here is computed from the log and
 // the master data; nothing is stored twice.
@@ -132,20 +131,16 @@ export type RegisterQuery = z.infer<typeof registerQuery>;
 // An entry made before S9 has no occurrence time: its repair start stands in (D-25). Status filter and
 // sort are applied by the caller, so statistics can use the whole list (review S9).
 // Names and locations are master data, read live (D-29): `items` from logbookItems().
-export async function breakdowns(q: Sql | Tx, items: LogbookItem[], from: Date, to: Date, f: Partial<RegisterQuery> & { entryIds?: number[] } = {}, now = new Date()): Promise<Breakdown[]> {
+export async function breakdowns(q: Sql | Tx, items: LogbookItem[], from: Date, to: Date, f: Partial<RegisterQuery> & { entryIds?: number[] } = {}): Promise<Breakdown[]> {
   const byId = new Map(items.map((i) => [i.id, i]));
-  const rows = await q<{ id: number; entry_id: number; equipment_id: number; code: string; activity_start: Date; activity_end: Date | null; data: Record<string, unknown>; occurred_at: Date; verified_at: Date | null; released_at: Date | null; past: boolean }[]>`
-    select e.id::int, e.entry_id::int, e.equipment_id::int, q.code, e.activity_start, e.activity_end, e.data,
-      coalesce((e.data->>'occurredAt')::timestamptz, e.activity_start) as occurred_at,
+  // Occurrence and end of downtime (D-25, D-58) come from the view breakdown_downtime (migration 0027, D-77): the same
+  // definition the published MTBF and MTTR use.
+  const rows = await q<{ id: number; entry_id: number; equipment_id: number; code: string; activity_start: Date; activity_end: Date | null; data: Record<string, unknown>; occurred_at: Date; down_until: Date; verified_at: Date | null; released_at: Date | null }[]>`
+    select e.id::int, e.entry_id::int, e.equipment_id::int, q.code, e.activity_start, e.activity_end, e.data, b.occurred_at, b.down_until,
       (select g.signed_at from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'verified') as verified_at,
-      (select g.signed_at from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'released') as released_at,
-      coalesce((select x.entered_at > x.activity_end + make_interval(mins => ${LATE_MINUTES}) from entries x
-        where x.entry_id = e.entry_id and x.version = 1), false) as past
-    from entries e join equipment q on q.id = e.equipment_id
-    where e.logbook_type = 'maintenance' and e.data->>'kind' = 'breakdown'
-      and not exists (select 1 from entries x where x.supersedes = e.id)
-      and coalesce((e.data->>'occurredAt')::timestamptz, e.activity_start) >= ${from}
-      and coalesce((e.data->>'occurredAt')::timestamptz, e.activity_start) < ${to}
+      (select g.signed_at from signatures g where g.object_type = 'entry' and g.object_id = e.id and g.meaning = 'released') as released_at
+    from breakdown_downtime b join entries e on e.id = b.version_id join equipment q on q.id = e.equipment_id
+    where b.occurred_at >= ${from} and b.occurred_at < ${to}
       and ${f.equipmentId ? q`e.equipment_id = ${f.equipmentId}` : q`true`}
       and ${f.category ? q`e.data->>'failureCategory' = ${f.category}` : q`true`}
       and ${f.entryIds ? q`e.entry_id = any(${f.entryIds}::bigint[])` : q`true`}
@@ -154,7 +149,7 @@ export async function breakdowns(q: Sql | Tx, items: LogbookItem[], from: Date, 
   const list = located.map((r): Breakdown => {
     const status: BreakdownStatus = !r.activity_end ? 'open' : !r.verified_at ? 'awaiting_verification' : !r.released_at ? 'awaiting_release' : 'released';
     // D-58: first recorded more than the late-entry time after its repair had ended: a past breakdown, down until its repair end.
-    const end = r.past && r.activity_end ? r.activity_end : r.released_at ?? now;
+    const end = r.down_until;
     return {
       versionId: r.id,
       entryId: r.entry_id,
@@ -197,61 +192,59 @@ export interface MachineStats {
   code: string;
   name: string;
   failures: number;
+  // Operating time in the period: in service, minus downtime (D-77).
+  inServiceHours: number;
   downtimeHours: number;
-  // Mean downtime (occurred to QA release) of the released breakdowns; null when none is released.
+  // Downtime in the period per breakdown that started in it; null without breakdowns (D-77).
   mttrHours: number | null;
-  // Operating time in the window (window minus downtime) per failure; null without failures.
+  // Operating time in the period per breakdown that started in it; null without breakdowns (D-77).
   mtbfHours: number | null;
 }
 
-const hours = (ms: number) => Math.round((ms / 3_600_000) * 10) / 10;
+export interface Reliability { equipmentId: number; inServiceHours: number; breakdowns: number; downtimeHours: number }
 
-// Counts per machine and per category, MTTR and MTBF per machine (D-25). The window for a machine is
-// the period, cut to what has already passed and to when the machine was installed (or created); D-59: never
-// after its first breakdown counted (it was in service then), so every counted failure's downtime is in it.
-export function breakdownStats(list: Breakdown[], from: Date, to: Date, now: Date, inServiceSince: Map<number, Date>) {
-  const byMachine = new Map<number, Breakdown[]>();
-  for (const b of list) byMachine.set(b.equipmentId, [...(byMachine.get(b.equipmentId) ?? []), b]);
-  const windowEnd = Math.min(to.getTime(), now.getTime());
-  const machines: MachineStats[] = [...byMachine.entries()].map(([id, items]) => {
-    const firstFailure = Math.min(...items.map((b) => b.occurredAt.getTime()));
-    const start = Math.min(Math.max(from.getTime(), inServiceSince.get(id)?.getTime() ?? from.getTime()), firstFailure);
-    const window = Math.max(0, windowEnd - start);
-    // Overlapping breakdowns are down only once (review S9).
-    const spans = items
-      .map((b) => [Math.max(b.occurredAt.getTime(), start), Math.min(b.downtimeEnd.getTime(), windowEnd)] as const)
-      .filter(([s, e]) => e > s)
-      .sort((x, y) => x[0] - y[0]);
-    let down = 0;
-    let reach = -Infinity;
-    for (const [s, e] of spans) {
-      if (e <= reach) continue;
-      down += e - Math.max(s, reach);
-      reach = e;
-    }
-    const released = items.filter((b) => b.downtimeFinal);
+// D-77: MTBF and MTTR of a period, one row per item in service in it, worked out exactly as report.reliability_v1 does
+// for a calendar month (migration 0027; test/breakdowns.test.ts checks both give the same numbers):
+//   window = [from, to) cut to the item's in-service start (D-59) and to now; downtime = the item's merged downtime in the
+//   window (D-25, D-58); in service = window − downtime; breakdowns = those that occurred in [from, to).
+//   MTBF = in service / breakdowns, MTTR = downtime / breakdowns.
+export async function reliability(q: Sql | Tx, from: Date, to: Date, ids: number[]): Promise<Map<number, Reliability>> {
+  const rows = await q<{ equipmentId: number; spanHours: string; downtimeHours: string; breakdowns: number }[]>`
+    select s.equipment_id::int as "equipmentId",
+      round((select coalesce(sum(extract(epoch from upper(r) - lower(r))), 0) from unnest(p.span) r) / 3600, 4) as "spanHours",
+      round((select coalesce(sum(extract(epoch from upper(r) - lower(r))), 0) from unnest(s.down * p.span) r) / 3600, 4) as "downtimeHours",
+      (select count(*) from breakdown_downtime b where b.equipment_id = s.equipment_id and b.occurred_at >= ${from} and b.occurred_at < ${to})::int as breakdowns
+    from equipment_in_service s
+    cross join lateral (select greatest(${from}::timestamptz, s.in_service_from) as starts, least(${to}::timestamptz, now()) as ends) c
+    cross join lateral (select tstzmultirange(case when c.starts < c.ends then tstzrange(c.starts, c.ends) else 'empty' end) as span) p
+    where c.starts < c.ends and s.equipment_id = any(${ids}::bigint[])`;
+  return new Map(rows.map((r) => [r.equipmentId, {
+    equipmentId: r.equipmentId, inServiceHours: Number(r.spanHours) - Number(r.downtimeHours), breakdowns: r.breakdowns, downtimeHours: Number(r.downtimeHours),
+  }]));
+}
+
+const tenth = (h: number) => Math.round(h * 10) / 10;
+
+// Counts per machine and per category, MTTR and MTBF per machine (D-25, D-77). A machine's figures cover all its
+// breakdowns of the period, whatever filter narrowed the list (`figures` from reliability()).
+export function breakdownStats(list: Breakdown[], figures: Map<number, Reliability>) {
+  const seen = new Map<number, Breakdown>();
+  for (const b of list) if (!seen.has(b.equipmentId)) seen.set(b.equipmentId, b);
+  const machines: MachineStats[] = [...seen.values()].map((b) => {
+    const r = figures.get(b.equipmentId) ?? { inServiceHours: 0, breakdowns: 0, downtimeHours: 0 };
     return {
-      equipmentId: id,
-      code: items[0]!.code,
-      name: items[0]!.name,
-      failures: items.length,
-      downtimeHours: hours(down),
-      mttrHours: released.length ? hours((released.reduce((s, b) => s + b.downtimeMinutes, 0) / released.length) * 60_000) : null,
-      mtbfHours: items.length ? hours(Math.max(0, window - down) / items.length) : null,
+      equipmentId: b.equipmentId,
+      code: b.code,
+      name: b.name,
+      failures: r.breakdowns,
+      inServiceHours: tenth(r.inServiceHours),
+      downtimeHours: tenth(r.downtimeHours),
+      mttrHours: r.breakdowns ? tenth(r.downtimeHours / r.breakdowns) : null,
+      mtbfHours: r.breakdowns ? tenth(r.inServiceHours / r.breakdowns) : null,
     };
   }).sort((a, b) => b.failures - a.failures || a.code.localeCompare(b.code));
   const categories = [...FAILURE_CATEGORIES, null]
     .map((c) => ({ category: c ?? 'not recorded', failures: list.filter((b) => b.failureCategory === c).length }))
     .filter((c) => c.failures > 0);
   return { machines, categories };
-}
-
-// When each machine entered service, for the MTBF window: installation date, else when it was created.
-export async function inServiceSince(q: Sql | Tx, ids: number[]): Promise<Map<number, Date>> {
-  const rows = await q<{ id: number; since: Date }[]>`
-    select q.id::int, coalesce((
-      select (d.details->>'installationDate')::date::timestamp at time zone ${PLANT_TZ} from equipment_details d
-      where d.equipment_id = q.id order by d.version desc limit 1), q.created_at) as since
-    from equipment q where q.id = any(${ids}::bigint[])`;
-  return new Map(rows.map((r) => [r.id, r.since]));
 }

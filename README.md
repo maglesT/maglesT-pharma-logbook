@@ -49,6 +49,8 @@ or, on a single box, let the owner login switch to it with `DB_APP_ROLE=logbook_
 **Report views on the Medhanta platform (D-29).** Names and locations are master data now; `report.equipment_v1` keeps
 showing the name and location each item had when it was moved or first seen by the Logbook. Read current names from
 master_data's own views.
+`report.reliability_v1` (D-77) publishes MTBF and MTTR per item per calendar month (plant time, last 24 months), the same
+numbers as the breakdown register: MTBF = in-service hours (minus downtime) / breakdowns, MTTR = downtime hours / breakdowns.
 `report.equipment_status_v1` (D-45) publishes each item's status as the Logbook works it out (for TrueBatch Tablets), refreshed
 every minute and after each entry; `checked_at` says when. Sterile items (D-50, D-51, for TrueBatch Injectables): a steriliser is fit only
 with a verified passed steriliser test today, an isolator or RABS only with a verified passed VHP decontamination and every
