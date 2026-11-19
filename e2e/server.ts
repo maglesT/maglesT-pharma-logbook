@@ -3,6 +3,7 @@
 import { connect } from '../server/db.js';
 import { migrate } from '../db/migrate.js';
 import { buildApp } from '../server/app.js';
+import { sqlCycles } from '../server/cycles.js';
 import globalSetup from '../test/global-setup.js';
 import { TEST_DATABASE_URL, TEST_PROOF_KEY, fakeSignOn, login, proofFor, seedUser, call } from '../test/helpers.js';
 import { NO_CARE, type Care, type Master } from '../server/master.js';
@@ -22,6 +23,18 @@ const owner = connect(TEST_DATABASE_URL);
 await owner.unsafe(`drop schema if exists ${E2E_SCHEMA} cascade`);
 await owner.unsafe(`drop schema if exists ${E2E_SCHEMA}_report cascade`);
 await owner.unsafe(`create schema ${E2E_SCHEMA}`);
+// D-78: TrueBatch Injectables linked: its batches and sterilisation cycles, stood in for by tables of the same names and
+// columns (the specs fill them, e2e/sterile.spec.ts).
+await owner.unsafe(`drop schema if exists ${E2E_SCHEMA}_ti cascade; create schema ${E2E_SCHEMA}_ti;
+  create table ${E2E_SCHEMA}_ti.batch_fact_v1 (batch_id uuid, batch_number text, product_code text, strength text, status text, issued_at timestamptz,
+    completed_at timestamptz, released boolean, read_at timestamptz default now(), data_as_of timestamptz);
+  insert into ${E2E_SCHEMA}_ti.batch_fact_v1 (batch_number, product_code, status, issued_at) values ('TI260007', 'FG-TI', 'IN_PRODUCTION', now());
+  create table ${E2E_SCHEMA}_ti.steriliser_cycle_v1 (cycle_id text, batch_number text, product_code text, step_key text, step_name text, equipment_code text,
+    equipment_name text, equipment_type text, room_code text, cycle_type text, programme text, load text, controller_record_ref text,
+    started_at timestamptz, ended_at timestamptz, result text, exposure_min numeric, lowest_temp_c numeric, lowest_f0 numeric,
+    max_product_temp_c numeric, h2o2_ppm numeric, leak_rate numeric, units numeric, bi_id text, use_by date, signed text[],
+    read_at timestamptz default now(), data_as_of timestamptz);
+  grant usage on schema ${E2E_SCHEMA}_ti to logbook_app; grant select on all tables in schema ${E2E_SCHEMA}_ti to logbook_app;`);
 await owner.end();
 
 const schemaOwner = connect(TEST_DATABASE_URL, { searchPath: E2E_SCHEMA });
@@ -44,7 +57,8 @@ const master: Master = {
   products: async () => (await setup<{ item_id: string; code: string; name: string; active: boolean; version: number }[]>`
     select * from e2e_master_items where is_product`).map((r) => ({ itemId: r.item_id, code: r.code, name: r.name, active: r.active, version: r.version })),
 };
-const app = await buildApp({ sql, signOn: fakeSignOn(), proofKey: TEST_PROOF_KEY, master, webRoot: new URL('../dist/web', import.meta.url).pathname, cookieSecure: false, speech });
+const app = await buildApp({ sql, signOn: fakeSignOn(), proofKey: TEST_PROOF_KEY, master, webRoot: new URL('../dist/web', import.meta.url).pathname, cookieSecure: false, speech,
+  cycles: sqlCycles(sql, `${E2E_SCHEMA}_ti`, 'TrueBatch Injectables') });
 
 const admin = (await login(app, 'admin')).cookie;
 const qa = (await login(app, 'qa1')).cookie;

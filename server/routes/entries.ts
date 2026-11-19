@@ -5,6 +5,7 @@ import { audit } from '../audit.js';
 import { batchWithProduct } from './batches.js';
 import { batchesOffNote, LIMS, useOf } from '../batches.js';
 import { QualificationOff } from '../qualification.js';
+import { CyclesOff, batchWords } from '../cycles.js';
 import { parseId, requirePermission, type SessionUser } from '../auth.js';
 import { LOGBOOK_TYPES, typeByKey, type LogbookSettings } from '../logbook-types.js';
 import { DATA_SCHEMAS, REPORTED_FIELDS, checkData, correctCodes, mayCorrect, mayRecord, recordCode, performerSigns, verificationNeeded, type EntryContext, type EquipmentInfo } from '../entries.js';
@@ -247,6 +248,27 @@ async function checkCycleId(tx: Tx, type: string, equipmentId: number, data: Rec
   if (dup) throw new EntryError(409, 'check_failed', [`Cycle ID ${String(data.cycleId)} is already recorded on this steriliser.`]);
 }
 
+/**
+ * D-78 (owner, 19 Nov 2026): with TrueBatch Injectables linked, a cycle run for one of its batches is recorded in the batch
+ * record there and shown here read only; the Logbook records only cycles not made for a batch (empty chamber, non-batch
+ * loads). A cycle entry naming a batch (the entry's batch, or a batch number of its batch records in the load or cycle
+ * number) is refused. Its link down: not checked, and the entry says so. Without the link (standalone) nothing changes.
+ */
+export const cycleForBatchMessage = (source: string, batch: string) =>
+  `Batch ${batch}: a sterilisation cycle for a batch is recorded in its batch record in ${source} and shown here read only. Record here only cycles not made for a batch (e.g. empty chamber, non-batch loads).`;
+async function notForBatch(app: FastifyInstance, type: string, batch: string | null | undefined, data: Record<string, unknown>): Promise<Record<string, string>> {
+  if (type !== 'steriliser_cycle' || !app.cycles) return {};
+  if (batch) throw new EntryError(400, 'check_failed', [cycleForBatchMessage(app.cycles.source, batch)]);
+  try {
+    const [found] = await app.cycles.batchesIn(batchWords(String(data.load ?? ''), String(data.cycleId ?? '')));
+    if (found) throw new EntryError(400, 'check_failed', [cycleForBatchMessage(app.cycles.source, found)]);
+    return {};
+  } catch (e) {
+    if (e instanceof CyclesOff) return { batchNotChecked: `${app.cycles.source} was not reachable` };
+    throw e;
+  }
+}
+
 async function dbNow(tx: Tx): Promise<Date> {
   const [r] = await tx<{ now: Date }[]>`select now() as now`;
   return r!.now;
@@ -481,6 +503,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (b.productId) await activeProduct(tx, app.master, b.productId);
         const late = timing(await dbNow(tx), [b.activityStart, end], b.lateReason);
         const data = { ...validate(b.logbookType, b.data, settings, eq, b.activityStart, { end, legacy: false }), ...flags };
+        Object.assign(data, await notForBatch(app, b.logbookType, b.batch, data));
         await checkCycleId(tx, b.logbookType, equipmentId, data, null);
         await guardVoice(tx, user, equipmentId, b.logbookType, data, b.voiceNotes);
         const row = await insertVersion(tx, app.master, {
@@ -611,7 +634,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         }
         // D-69, D-70: what the entry says about typed batches and an unchecked qualification stays with it; a corrected
         // batch is checked again (pulled, or typed by hand).
-        const flags: Record<string, unknown> = Object.fromEntries(['batchTyped', 'qualNotChecked'].filter((k) => prev.data[k]).map((k) => [k, prev.data[k]]));
+        const flags: Record<string, unknown> = Object.fromEntries(['batchTyped', 'qualNotChecked', 'batchNotChecked'].filter((k) => prev.data[k]).map((k) => [k, prev.data[k]]));
         if (app.batches && prev.logbook_type === 'equipment_use' && b.batch && b.batch !== prev.batch) {
           const got = await linkedBatch(tx, app, b.batch, { typed: b.batchTyped, mustRun: false, product: { id: b.productId } });
           b.productId = got.productId;
@@ -633,6 +656,11 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         // An open repair stays a breakdown until it is completed (D-25).
         if (prev.activity_end === null && prev.logbook_type === 'maintenance' && data.kind !== 'breakdown') {
           throw new EntryError(400, 'check_failed', ['An open breakdown stays a breakdown; complete the repair first.']);
+        }
+        // D-78: a corrected load or cycle number (or a batch given) is checked again.
+        if (b.batch || data.load !== prev.data.load || data.cycleId !== prev.data.cycleId) {
+          delete data.batchNotChecked;
+          Object.assign(data, await notForBatch(app, prev.logbook_type, b.batch, data));
         }
         await checkCycleId(tx, prev.logbook_type, prev.equipment_id, data, prev.entry_id);
         await guardVoice(tx, user, prev.equipment_id, prev.logbook_type, data, b.voiceNotes);

@@ -35,6 +35,8 @@ export const ENTRY_FIELD_LABEL: Record<string, string> = {
   endReason: 'Why ended',
   // D-69: a batch typed by hand (not from the batch records), and why; D-70: a use the Qualification product did not check.
   batchTyped: 'Typed by hand', qualNotChecked: 'Qualification not checked',
+  // D-78: a cycle recorded while TrueBatch Injectables did not answer (not checked against its batches).
+  batchNotChecked: 'Batch not checked',
 };
 
 export const FAILURE_CATEGORY_LABEL: Record<string, string> = {

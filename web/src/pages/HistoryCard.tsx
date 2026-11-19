@@ -163,6 +163,18 @@ function EventRow({ ev, onVoice }: { ev: HistoryEvent; onVoice: (id: number) => 
       </tr>
     );
   }
+  if (ev.kind === 'cycle') {
+    const c = ev.cycle;
+    return (
+      <tr className={c.result === 'fail' ? 'truebatch breakdown' : 'truebatch'}>
+        <td>{plantTime(c.startedAt)}{c.endedAt && <><br />to {plantTime(c.endedAt)}</>}</td>
+        <td>{TYPE_LABEL.steriliser_cycle}<br /><span className="muted">from {c.source}, batch {c.batchNumber} (read only)</span></td>
+        <td>{c.lines.map((l) => <div key={l}>{l}</div>)}</td>
+        <td>{c.source}</td>
+        <td className="muted">Signed in {c.source}{c.signed.length > 0 && ` (${c.signed.join(', ')})`}</td>
+      </tr>
+    );
+  }
   return (
     <tr className="masterdata">
       <td>{plantTime(ev.at)}</td>

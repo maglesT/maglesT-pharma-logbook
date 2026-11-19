@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { LIMS, UsesOff, useOf, type BatchRecords, type TrueBatchUse, type TrueBatchUses } from '../batches.js';
 import { audit } from '../audit.js';
+import { CyclesOff, cycleLines, cyclesOffHistoryNote, type SterileCycle, type SterileCycles } from '../cycles.js';
 import { needsCalibrationOf, logbookItem, logbookItems, type Master } from '../master.js';
 import { parseId, requirePermission } from '../auth.js';
 import { changeLines, entryLines } from '../changes.js';
@@ -55,7 +56,9 @@ type Event =
   | { kind: 'entry'; at: Date; entry: Awaited<ReturnType<typeof present>>[number] & { latest: boolean }; breakdown?: { downtime: string; parts: string; status: string } }
   | { kind: 'review'; at: Date; review: Awaited<ReturnType<typeof reviewsFor>>[number] }
   | { kind: 'masterdata'; at: Date; actor: string | null; action: string; old: unknown; new: unknown; reason: string | null; lines: string[] }
-  | { kind: 'truebatch'; at: Date; use: { batch: string; productCode: string | null; step: string; startedAt: Date; endedAt: Date | null; source: TrueBatchUse['source'] } };
+  | { kind: 'truebatch'; at: Date; use: { batch: string; productCode: string | null; step: string; startedAt: Date; endedAt: Date | null; source: TrueBatchUse['source'] } }
+  // D-78: a sterilisation cycle recorded in TrueBatch Injectables for one of its batches, read only.
+  | { kind: 'cycle'; at: Date; cycle: SterileCycle & { lines: string[] } };
 
 /** D-72: what a TrueBatch product that does not answer leaves out of the history card. */
 export const usesOffHistoryNote = (source: string) => `Connection to ${source} is off: its uses of this item are not shown.`;
@@ -82,10 +85,24 @@ async function trueBatchHistory(sql: Sql, uses: TrueBatchUses[], batches: BatchR
   return { events, notes };
 }
 
+// D-78: the item's sterilisation cycles recorded in TrueBatch Injectables for its batches (steriliser_cycle_v1), read live,
+// as read-only rows of the history. Not answering: left out, and named in a note.
+async function cycleHistory(sql: Sql, cycles: SterileCycles | null, id: number, from: Date, to: Date) {
+  const [row] = await sql<{ code: string }[]>`select code from equipment where id = ${id}`;
+  if (!row || !cycles) return { events: [] as Event[], notes: [] as string[] };
+  try {
+    const events: Event[] = (await cycles.inPeriod(row.code, from, to)).map((c) => ({ kind: 'cycle' as const, at: c.startedAt, cycle: { ...c, lines: cycleLines(c) } }));
+    return { events, notes: [] as string[] };
+  } catch (e) {
+    if (e instanceof CyclesOff) return { events: [] as Event[], notes: [cyclesOffHistoryNote(cycles.source)] };
+    throw e;
+  }
+}
+
 // The life history of one item: every entry version, QA reviews and master-data changes, oldest first; D-72: with the
 // uses recorded in the TrueBatch products (shown with the equipment uses).
 async function history(sql: Sql, master: Master, id: number, fromDay: string, toDay: string, types: Set<string> | null,
-  uses: TrueBatchUses[] = [], batches: BatchRecords | null = null) {
+  uses: TrueBatchUses[] = [], batches: BatchRecords | null = null, cycles: SterileCycles | null = null) {
   const { from, to } = await plantRange(sql, fromDay, toDay);
   const versions: EntryRow[] = (await periodVersions(sql, id, from, to))
     // "breakdown" picks the breakdown entries out of the maintenance logbook (S12).
@@ -120,6 +137,11 @@ async function history(sql: Sql, master: Master, id: number, fromDay: string, to
     const tb = await trueBatchHistory(sql, uses, batches, id, from, to);
     events.push(...tb.events);
     notes.push(...tb.notes);
+  }
+  if (!types || types.has('steriliser_cycle')) {
+    const cy = await cycleHistory(sql, cycles, id, from, to);
+    events.push(...cy.events);
+    notes.push(...cy.notes);
   }
   events.sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
   return { from, to, events, notes };
@@ -168,6 +190,12 @@ function eventRow(ev: Event): { at: Date; kind: string; type: string; what: stri
       what: `${useOf(u.source) === 'analysis' ? 'Analysis' : 'Batch'} ${u.batch}${u.productCode ? ` · ${u.productCode}` : ''}`,
       detail: [u.step ? `Step: ${u.step}` : '', `Started ${plant(u.startedAt)}`, u.endedAt ? `Ended ${plant(u.endedAt)}` : 'Not ended yet', `From ${u.source}: read only, recorded there`].filter(Boolean).join('\n'),
       who: u.source, signatures: `Signed in ${u.source}`, breakdown: '', highlight: false, grey: false };
+  }
+  if (ev.kind === 'cycle') {
+    const c = ev.cycle;
+    return { at: ev.at, kind: 'truebatch cycle', type: `Sterilisation cycle (${c.source})`, what: `From ${c.source}, batch ${c.batchNumber}`,
+      detail: [...c.lines, `Started ${plant(c.startedAt)}`, c.endedAt ? `Ended ${plant(c.endedAt)}` : '', `From ${c.source}: read only, recorded there`].filter(Boolean).join('\n'),
+      who: c.source, signatures: `Signed in ${c.source} (${c.signed.join(', ') || 'not signed'})`, breakdown: '', highlight: c.result === 'fail', grey: false };
   }
   return { at: ev.at, kind: 'master data', type: 'Master data', what: ITEM_ACTION_LABEL[ev.action] ?? ev.action, detail: [ev.reason ? `Reason: ${ev.reason}` : '', ...ev.lines].filter(Boolean).join('\n'), who: ev.actor ?? 'system', signatures: '', breakdown: '', highlight: false, grey: false };
 }
@@ -255,7 +283,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     const head = await card(sql, app.master, id, await app.statusContext());
     if (!head) return reply.code(404).send({ error: 'not_found' });
     const types = q.data.types ? new Set(q.data.types.split(',').filter(Boolean)) : null;
-    return { ...head, ...(await history(sql, app.master, id, q.data.fromDay, q.data.toDay, types, app.trueBatchUses, app.batches)) };
+    return { ...head, ...(await history(sql, app.master, id, q.data.fromDay, q.data.toDay, types, app.trueBatchUses, app.batches, app.cycles)) };
   });
 
   app.get<{ Params: { format: string }; Querystring: Record<string, string> }>('/api/export/history.:format', anyUser, async (req, reply) => {
@@ -266,7 +294,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     const head = await card(sql, app.master, id, await app.statusContext());
     if (!head) return reply.code(404).send({ error: 'not_found' });
     const types = q.data.types ? new Set(q.data.types.split(',').filter(Boolean)) : null;
-    const { events, notes } = await history(sql, app.master, id, q.data.fromDay, q.data.toDay, types, app.trueBatchUses, app.batches);
+    const { events, notes } = await history(sql, app.master, id, q.data.fromDay, q.data.toDay, types, app.trueBatchUses, app.batches, app.cycles);
     if (events.length > MAX_ROWS) return reply.code(413).send({ error: 'too_large', message: 'Choose a shorter period.' });
     const rows = events.map(eventRow);
     const eq = head.equipment as { code: string; name: string; kind: string; location: string; make: string | null; model: string | null; serial: string | null };
@@ -284,7 +312,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
         ['Product contact / MOC', d.productContactMoc], ['SOPs', d.sopRefs], ['Details version', `${head.details!.version}, ${head.details!.changedBy}, ${plant(head.details!.changedAt)}`],
       ] as [string, string][]) : [['Details', 'not recorded']] as [string, string][]),
     ];
-    return sendCopy(reply, 'pdf', name, await tablesPdf(sql, `Equipment history card ${eq.code} · ${eq.name}`, `Period ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time). All versions; superseded versions grey, breakdowns shaded. Uses recorded in TrueBatch or Medhanta LIMS are read from there (read only).${notes.length ? ` ${notes.join(' ')}` : ''}`, [
+    return sendCopy(reply, 'pdf', name, await tablesPdf(sql, `Equipment history card ${eq.code} · ${eq.name}`, `Period ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time). All versions; superseded versions grey, breakdowns shaded. Uses recorded in TrueBatch or Medhanta LIMS, and sterilisation cycles recorded in TrueBatch Injectables, are read from there (read only).${notes.length ? ` ${notes.join(' ')}` : ''}`, [
       { heading: 'Equipment', columns: ['Field', 'Value'], widths: [120, '*'], rows: detailRows.map((r) => ({ cells: r })) },
       { heading: 'Location history', columns: ['When', 'By', 'From', 'To', 'Reason'], widths: [90, 90, 120, 120, '*'],
         rows: head.locationHistory.map((l) => ({ cells: [plant(l.at), l.by ?? '', l.from ?? '(created)', l.to, l.reason ?? ''] })) },

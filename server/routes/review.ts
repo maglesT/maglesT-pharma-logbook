@@ -155,7 +155,7 @@ export function reviewRoutes(app: FastifyInstance, sql: Sql) {
         failedCalibrations: latest.filter((v) => v.logbook_type === 'calibration' && v.data.result === 'fail').length,
         // D-69, D-70: entries made without a link: a batch typed by hand, a use with the qualification not checked;
         // D-71: a signer's training typed by hand.
-        typedByHand: latest.filter((v) => v.data.batchTyped || v.data.qualNotChecked || typedTraining.has(v.entry_id)).length,
+        typedByHand: latest.filter((v) => v.data.batchTyped || v.data.qualNotChecked || v.data.batchNotChecked || typedTraining.has(v.entry_id)).length,
       },
       audit: await auditFor(sql, app.master, versions, reviews.map((r) => r.id)),
       contentHash: contentHash('review', 0, content),
