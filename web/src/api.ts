@@ -324,7 +324,7 @@ export interface BreakdownItem {
   status: string;
 }
 
-export interface MachineStats { equipmentId: number; code: string; name: string; failures: number; downtimeHours: number; mttrHours: number | null; mtbfHours: number | null }
+export interface MachineStats { equipmentId: number; code: string; name: string; failures: number; inServiceHours: number; downtimeHours: number; mttrHours: number | null; mtbfHours: number | null }
 
 export interface Register {
   items: BreakdownItem[];

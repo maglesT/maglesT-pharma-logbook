@@ -50,7 +50,7 @@ const makeModel = (i: Pick<LogbookItem, 'make' | 'model'> | undefined) =>
 export async function similarBreakdowns(sql: Sql, items: LogbookItem[], entryId: number, equipmentId: number, failureCategory: string | null, now = new Date()): Promise<Similar[]> {
   const eq = items.find((i) => i.id === equipmentId);
   if (!eq) return [];
-  const recent = await breakdowns(sql, items, new Date(now.getTime() - YEARS_BACK * 365 * 864e5), now, {}, now);
+  const recent = await breakdowns(sql, items, new Date(now.getTime() - YEARS_BACK * 365 * 864e5), now);
   const byId = new Map(items.map((i) => [i.id, i]));
   const ownModel = makeModel(eq);
   const ownType = machineType(eq.name);
