@@ -24,6 +24,7 @@ import { ConnectionOff, type Master } from './master.js';
 import type { Qualification } from './qualification.js';
 import type { Deviations } from './overdue.js';
 import type { BatchRecords, TrueBatchUses } from './batches.js';
+import type { SterileCycles } from './cycles.js';
 import type { Training } from './training.js';
 import { trainingRoutes } from './routes/training.js';
 import { batchRoutes } from './routes/batches.js';
@@ -55,6 +56,9 @@ export interface AppOptions {
   // D-46: TrueBatch's machine and room uses (equipment_use_v1), counted in the status, and TrueBatch Packing's (D-47);
   // empty without either link.
   trueBatchUses?: TrueBatchUses[];
+  // D-78: TrueBatch Injectables' sterilisation cycles (steriliser_cycle_v1), shown read only in the history; null without its link
+  // (standalone: every cycle is recorded in the Logbook).
+  cycles?: SterileCycles | null;
   // D-71: the Recruitment product's training records (training_v1); null without the link (signers state their training).
   training?: Training | null;
   logger?: boolean;
@@ -67,7 +71,7 @@ export interface AppOptions {
   advisor?: AdviceProvider | null;
 }
 
-export async function buildApp({ sql, signOn, master, qualification = null, deviations = null, batches = null, trueBatchUses = [], training = null, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ sql, signOn, master, qualification = null, deviations = null, batches = null, trueBatchUses = [], cycles = null, training = null, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger, trustProxy: true });
   app.decorate('cookieSecure', cookieSecure);
   app.decorate('proofKey', proofKey);
@@ -76,6 +80,7 @@ export async function buildApp({ sql, signOn, master, qualification = null, devi
   app.decorate('deviations', deviations);
   app.decorate('batches', batches);
   app.decorate('trueBatchUses', trueBatchUses);
+  app.decorate('cycles', cycles);
   app.decorate('training', training);
   app.decorate('statusContext', (q: Sql | Tx = sql) => statusContext(q, master, qualification, trueBatchUses));
   // A cut master-data link stops the feature with one message (platform D-02, PL-08).
@@ -149,6 +154,7 @@ declare module 'fastify' {
     deviations: Deviations | null;
     batches: BatchRecords | null;
     trueBatchUses: TrueBatchUses[];
+    cycles: SterileCycles | null;
     training: Training | null;
     // What every status needs from master data and the Qualification product (platform D-24).
     statusContext: (q?: Sql | Tx) => Promise<StatusContext>;

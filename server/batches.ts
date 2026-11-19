@@ -39,7 +39,7 @@ export const TRUEBATCH_OFF = 'Connection to TrueBatch (batch records) is off. As
 export class TrueBatchOff extends ConnectionOff {
   constructor(source = 'TrueBatch') { super(); this.message = `Connection to ${source} (batch records) is off. Ask your administrator.`; }
 }
-const isCut = (e: unknown) => {
+export const isCut = (e: unknown) => {
   const code = (e as { code?: string }).code ?? '';
   return ['42501', '42P01', '28000', '57P01', 'ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'CONNECT_TIMEOUT', 'CONNECTION_CLOSED',
     'CONNECTION_ENDED', 'CONNECTION_DESTROYED'].includes(code) || code.startsWith('08');

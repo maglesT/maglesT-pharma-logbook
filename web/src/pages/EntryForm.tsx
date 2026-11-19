@@ -129,6 +129,12 @@ export function EntryForm({
       .then(setBatchList)
       .catch((e) => setBatchList({ linked: true, batches: [], error: e instanceof Error ? e.message : String(e) }));
   }, [type, equipment.id]);
+  // D-78: with TrueBatch Injectables linked, cycles for its batches are recorded there; this form is for the others.
+  const [cyclesFrom, setCyclesFrom] = useState<string | null>(null);
+  useEffect(() => {
+    if (type !== 'steriliser_cycle') return;
+    api<{ from: string | null }>('GET', '/api/cycles-link').then((r) => setCyclesFrom(r.from)).catch(() => setCyclesFrom(null));
+  }, [type]);
   const linkedBatches = batchList?.linked && !batchTyped ? batchList.batches : null;
   const productLabels = products.filter((p) => p.active).map((p) => `${p.code} · ${p.name}`);
   const chosen = linkedBatches?.find((b) => b.batchNumber === batch) ?? null;
@@ -244,6 +250,7 @@ export function EntryForm({
         <h2>{completing ? 'Complete repair' : correcting ? 'Correct' : 'New'}: {TYPE_LABEL[type]} · {equipment.code}</h2>
         {settings.sopRef && <p className="muted">SOP {settings.sopRef}</p>}
 
+        {cyclesFrom && <p className="reason" role="status">Only cycles not made for a batch (e.g. empty chamber, non-batch loads). A cycle for a batch is recorded in its batch record in {cyclesFrom} and shown in the history card read only.</p>}
         {batchList?.error && <p className="error" role="alert">{batchList.error}</p>}
         {(batchList?.notes ?? []).map((n) => <p key={n} className="reason" role="status">{n}</p>)}
         {(type === 'equipment_use' || type === 'change_over') && batchList?.linked && (

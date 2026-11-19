@@ -10,6 +10,7 @@ import { sqlMaster } from './master.js';
 import { sqlQualification } from './qualification.js';
 import { scheduleOverdue, sqlDeviations } from './overdue.js';
 import { sqlLabUses, trueBatchReaders } from './batches.js';
+import { sqlCycles } from './cycles.js';
 import { TRUEBATCH_PROVIDERS, trueBatchUrlKey } from './truebatch-providers.js';
 import { sqlTraining } from './training.js';
 
@@ -45,10 +46,13 @@ const tbLinks = TRUEBATCH_PROVIDERS.flatMap((provider) => {
 const { batches, uses: tbUses } = trueBatchReaders(tbLinks);
 // D-76: and Medhanta LIMS' lab instrument uses (instrument_use_v1), counted as the TrueBatch products' uses are.
 const lims = config.LIMS_DATABASE_URL ? connect(config.LIMS_DATABASE_URL) : null;
+// D-78: TrueBatch Injectables' sterilisation cycles (steriliser_cycle_v1), through its link (TRUEBATCH_INJECTABLES_DATABASE_URL).
+const tiLink = tbLinks.find((l) => l.provider.id === 'truebatch_injectables');
+const cycles = tiLink ? sqlCycles(tiLink.q, 'report', tiLink.provider.name) : null;
 const trueBatchUses = lims ? [...tbUses, sqlLabUses(lims)] : tbUses;
 const master = sqlMaster(md);
 const qualification = qual ? sqlQualification(qual) : null;
-const app = await buildApp({ sql, signOn, proofKey, master, qualification, deviations: dv ? sqlDeviations(dv) : null, batches, trueBatchUses, training: rec ? sqlTraining(rec) : null, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
+const app = await buildApp({ sql, signOn, proofKey, master, qualification, deviations: dv ? sqlDeviations(dv) : null, batches, trueBatchUses, cycles, training: rec ? sqlTraining(rec) : null, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
 
 await app.listen({ port: config.PORT, host: config.HOST });
 const stopIntegrity = scheduleIntegrityCheck(sql, (msg) => app.log.info(msg));

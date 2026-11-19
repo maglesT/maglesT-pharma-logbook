@@ -20,6 +20,10 @@ export async function batchWithProduct(q: Sql | Tx, app: FastifyInstance, batchN
 }
 
 export function batchRoutes(app: FastifyInstance, sql: Sql) {
+  // D-78: the product that records the cycles made for its batches (TrueBatch Injectables), or null without its link
+  // (standalone: every cycle is recorded here). The cycle form says so.
+  app.get('/api/cycles-link', { preHandler: requirePermission() }, async () => ({ from: app.cycles?.source ?? null }));
+
   app.get<{ Params: { id: string } }>('/api/equipment/:id/batches', { preHandler: requirePermission() }, async (req, reply) => {
     const id = parseId(req.params.id);
     if (id === null) return reply.code(400).send({ error: 'invalid_request' });

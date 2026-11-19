@@ -66,6 +66,9 @@ Oral Liquids and API (as Injectables) and Capsules Packing and Oral Liquids Pack
 (its `instrument_use_v1`, `LIMS_DATABASE_URL`; the batch is the analysis number) count the same way, without a batch filter (D-76). Each link off is named in its own warning. Steps are named by the view's `step_name` ("Stage › Step")
 when it has one, else by the step key (D-48). A use ends with *Why the use ends* (D-49), required when its batch is from linked batch
 records. Days and times are shown as "30 Jan 2027, 3:05 pm IST" in plant time, never ISO (D-49).
+Sterilisation cycles run for a TrueBatch Injectables batch are recorded in its batch record (its `steriliser_cycle_v1`, read through
+the same `TRUEBATCH_INJECTABLES_DATABASE_URL`): the history card shows them read only, and the Logbook's cycle form is then only
+for cycles not made for a batch (a batch named in it is refused). Without that link every cycle is recorded in the Logbook (D-78).
 
 **Read-only role for the Deviations system (D-28).** Migration 0013 creates the role `logbook_report` without a login. (On the Medhanta platform, D-29, it is not created: other products read the views through platform links.)
 It can read the four views in the schema `report` (`equipment_v1`, `entry_v1`, `calibration_v1`, `logbook_sop_v1`) and

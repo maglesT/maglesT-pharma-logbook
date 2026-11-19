@@ -372,7 +372,9 @@ export type HistoryEvent =
   | { kind: 'review'; at: string; review: { id: number; periodFrom: string; periodTo: string; reviewedBy: string | null; reviewedAt: string | null; superseded: boolean; valid: boolean } }
   | { kind: 'masterdata'; at: string; actor: string | null; action: string; old: unknown; new: unknown; reason: string | null; lines: string[] }
   // D-72: a use recorded in a TrueBatch product, read only.
-  | { kind: 'truebatch'; at: string; use: { batch: string; productCode: string | null; step: string; startedAt: string; endedAt: string | null; source: string } };
+  | { kind: 'truebatch'; at: string; use: { batch: string; productCode: string | null; step: string; startedAt: string; endedAt: string | null; source: string } }
+  // D-78: a sterilisation cycle recorded in TrueBatch Injectables for one of its batches, read only.
+  | { kind: 'cycle'; at: string; cycle: { cycleId: string; batchNumber: string; result: string; startedAt: string; endedAt: string | null; source: string; signed: string[]; lines: string[] } };
 
 // S10 voice notes (D-26).
 export const VOICE_LANGUAGE_LABEL: Record<string, string> = {
