@@ -60,7 +60,8 @@ stage using it closes, or the batch is approved or terminated; D-49), dirty afte
 TrueBatch Tablets Packing's uses (its `equipment_use_v1`, `TRUEBATCH_PACKING_DATABASE_URL`) count the same way, merged with
 TrueBatch's (D-47), TrueBatch Injectables' with its batches (D-52) and TrueBatch Injectables Packing's (D-54); so do TrueBatch Capsules,
 Oral Liquids and API (as Injectables) and Capsules Packing and Oral Liquids Packing (as Packing), D-75. The TrueBatch products are one list,
-`server/truebatch-providers.ts`: each is read while its link sets `<PROVIDER>_DATABASE_URL`. Each link off is named in its own warning. Steps are named by the view's `step_name` ("Stage › Step")
+`server/truebatch-providers.ts`: each is read while its link sets `<PROVIDER>_DATABASE_URL`. Medhanta LIMS' lab instrument uses
+(its `instrument_use_v1`, `LIMS_DATABASE_URL`; the batch is the analysis number) count the same way, without a batch filter (D-76). Each link off is named in its own warning. Steps are named by the view's `step_name` ("Stage › Step")
 when it has one, else by the step key (D-48). A use ends with *Why the use ends* (D-49), required when its batch is from linked batch
 records. Days and times are shown as "30 Jan 2027, 3:05 pm IST" in plant time, never ISO (D-49).
 

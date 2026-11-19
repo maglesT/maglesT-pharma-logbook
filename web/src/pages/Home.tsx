@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { api, daysLeft, DEADLINE_LABEL, plantDay, plantTime, timeLeft, timeText, TYPE_LABEL, type Due, type Entry, type Equipment, type EquipmentStatus, type Me } from '../api.js';
+import { api, useOf, daysLeft, DEADLINE_LABEL, plantDay, plantTime, timeLeft, timeText, TYPE_LABEL, type Due, type Entry, type Equipment, type EquipmentStatus, type Me } from '../api.js';
 
 // Owner 2026-11-13 (D-41): the home dashboard.
 //  1. Compliance: on-time completion of scheduled activities; dues in four columns (cleaning, PM, calibration,
@@ -169,7 +169,7 @@ function StatusGraph({ items, onOpen }: { items: Item[]; onOpen: (id: number) =>
       </div>
     );
   } else if (zoom) {
-    detail = <div className="zoom"><ItemList items={inZoom} onOpen={onOpen} note={(i) => i.st.inUse?.batch ? `batch ${i.st.inUse.batch} · since ${shortTime(i.st.inUse.since)}` : i.st.warnings[0] ?? ''} /></div>;
+    detail = <div className="zoom"><ItemList items={inZoom} onOpen={onOpen} note={(i) => i.st.inUse?.batch ? `${useOf(i.st.inUse.source)} ${i.st.inUse.batch} · since ${shortTime(i.st.inUse.since)}` : i.st.warnings[0] ?? ''} /></div>;
   }
   return (
     <section className="dash-panel" aria-label="Status of the plant">

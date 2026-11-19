@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { api, cleaningText, daysLeft, joinParts, type Due, can, ApiError, MEANING_LABEL, plantDay, plantTime, sterileLines, mediaFillLine, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
+import { api, useOf, cleaningText, daysLeft, joinParts, type Due, can, ApiError, MEANING_LABEL, plantDay, plantTime, sterileLines, mediaFillLine, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
@@ -158,8 +158,8 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
       {status && (
         <div className={`statusbar ${status.blockers.length ? 'blocked' : 'fit'}`}>
           <StatusChip status={status} />
-          {status.inUse && <span>Batch {status.inUse.batch} {status.inUse.stage && `· ${status.inUse.stage}`}{status.inUse.source !== 'Logbook' && ` · in ${status.inUse.source}`} since {plantTime(status.inUse.since)}</span>}
-          {!status.inUse && status.lastTrueBatchUse && <span>Last used by batch {status.lastTrueBatchUse.batch} in {status.lastTrueBatchUse.source}{status.lastTrueBatchUse.step && ` (${status.lastTrueBatchUse.step})`}, ended {plantTime(status.lastTrueBatchUse.endedAt)}</span>}
+          {status.inUse && <span>{useOf(status.inUse.source) === 'analysis' ? 'Analysis' : 'Batch'} {status.inUse.batch} {status.inUse.stage && `· ${status.inUse.stage}`}{status.inUse.source !== 'Logbook' && ` · in ${status.inUse.source}`} since {plantTime(status.inUse.since)}</span>}
+          {!status.inUse && status.lastTrueBatchUse && <span>Last used by {useOf(status.lastTrueBatchUse.source)} {status.lastTrueBatchUse.batch} in {status.lastTrueBatchUse.source}{status.lastTrueBatchUse.step && ` (${status.lastTrueBatchUse.step})`}, ended {plantTime(status.lastTrueBatchUse.endedAt)}</span>}
           {status.cleanUntil && !status.blockers.length && <span>Clean until {plantTime(status.cleanUntil)}</span>}
           {sterileLines(status).map((l) => <span key={l}>{l}</span>)}
           {mediaFillLine(status) && <span>{mediaFillLine(status)}</span>}

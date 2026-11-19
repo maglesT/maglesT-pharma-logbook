@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Sql } from '../db.js';
-import { UsesOff, type BatchRecords, type TrueBatchUse, type TrueBatchUses } from '../batches.js';
+import { LIMS, UsesOff, useOf, type BatchRecords, type TrueBatchUse, type TrueBatchUses } from '../batches.js';
 import { audit } from '../audit.js';
 import { needsCalibrationOf, logbookItem, logbookItems, type Master } from '../master.js';
 import { parseId, requirePermission } from '../auth.js';
@@ -73,7 +73,8 @@ async function trueBatchHistory(sql: Sql, uses: TrueBatchUses[], batches: BatchR
   const notes = uses.filter((_, i) => read[i] === null).map((u) => usesOffHistoryNote(u.source));
   const all = read.flatMap((r) => r ?? []);
   const products = new Map<string, string | null>();
-  for (const b of new Set(all.filter((u) => !u.productCode).map((u) => u.batchNumber))) {
+  // D-76: a LIMS use is for an analysis, not a batch: no product looked up.
+  for (const b of new Set(all.filter((u) => !u.productCode && u.source !== LIMS).map((u) => u.batchNumber))) {
     products.set(b, batches ? await batches.get(b).then((r) => r.batch?.productCode ?? null, () => null) : null);
   }
   const events: Event[] = all.map((u) => ({ kind: 'truebatch' as const, at: u.startedAt, use: { batch: u.batchNumber,
@@ -164,7 +165,7 @@ function eventRow(ev: Event): { at: Date; kind: string; type: string; what: stri
   if (ev.kind === 'truebatch') {
     const u = ev.use;
     return { at: ev.at, kind: 'truebatch', type: `Equipment use (${u.source})`,
-      what: `Batch ${u.batch}${u.productCode ? ` · ${u.productCode}` : ''}`,
+      what: `${useOf(u.source) === 'analysis' ? 'Analysis' : 'Batch'} ${u.batch}${u.productCode ? ` · ${u.productCode}` : ''}`,
       detail: [u.step ? `Step: ${u.step}` : '', `Started ${plant(u.startedAt)}`, u.endedAt ? `Ended ${plant(u.endedAt)}` : 'Not ended yet', `From ${u.source}: read only, recorded there`].filter(Boolean).join('\n'),
       who: u.source, signatures: `Signed in ${u.source}`, breakdown: '', highlight: false, grey: false };
   }
@@ -283,7 +284,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
         ['Product contact / MOC', d.productContactMoc], ['SOPs', d.sopRefs], ['Details version', `${head.details!.version}, ${head.details!.changedBy}, ${plant(head.details!.changedAt)}`],
       ] as [string, string][]) : [['Details', 'not recorded']] as [string, string][]),
     ];
-    return sendCopy(reply, 'pdf', name, await tablesPdf(sql, `Equipment history card ${eq.code} · ${eq.name}`, `Period ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time). All versions; superseded versions grey, breakdowns shaded. Uses recorded in TrueBatch are read from it (read only).${notes.length ? ` ${notes.join(' ')}` : ''}`, [
+    return sendCopy(reply, 'pdf', name, await tablesPdf(sql, `Equipment history card ${eq.code} · ${eq.name}`, `Period ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time). All versions; superseded versions grey, breakdowns shaded. Uses recorded in TrueBatch or Medhanta LIMS are read from there (read only).${notes.length ? ` ${notes.join(' ')}` : ''}`, [
       { heading: 'Equipment', columns: ['Field', 'Value'], widths: [120, '*'], rows: detailRows.map((r) => ({ cells: r })) },
       { heading: 'Location history', columns: ['When', 'By', 'From', 'To', 'Reason'], widths: [90, 90, 120, 120, '*'],
         rows: head.locationHistory.map((l) => ({ cells: [plant(l.at), l.by ?? '', l.from ?? '(created)', l.to, l.reason ?? ''] })) },

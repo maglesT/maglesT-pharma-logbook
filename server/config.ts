@@ -20,6 +20,8 @@ const schema = z.object({
   // D-45, D-47, D-52, D-54, D-75: each TrueBatch product's database through its platform link (TRUEBATCH_DATABASE_URL,
   // TRUEBATCH_PACKING_DATABASE_URL, ..., TRUEBATCH_API_DATABASE_URL: one per product of TRUEBATCH_PROVIDERS); unset: not read.
   ...trueBatchUrls,
+  // D-76: Medhanta LIMS' database through the platform link (instrument_use_v1: lab instrument uses); unset: not read.
+  LIMS_DATABASE_URL: linkUrl,
   // D-71: the Recruitment product's database through the platform link (training_v1: who is trained in what, until when).
   RECRUITMENT_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   // Sign-on through Medhanta core (D-29), written by the platform's apply.

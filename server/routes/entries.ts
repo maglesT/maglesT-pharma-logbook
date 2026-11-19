@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
 import { batchWithProduct } from './batches.js';
-import { batchesOffNote } from '../batches.js';
+import { batchesOffNote, LIMS, useOf } from '../batches.js';
 import { QualificationOff } from '../qualification.js';
 import { parseId, requirePermission, type SessionUser } from '../auth.js';
 import { LOGBOOK_TYPES, typeByKey, type LogbookSettings } from '../logbook-types.js';
@@ -174,7 +174,8 @@ function timing(now: Date, times: (Date | null | undefined)[], lateReason: strin
 function cleaningFits(status: Pick<EquipmentStatus, 'inUse' | 'lastUseEnd'>, start: Date) {
   if (status.inUse && status.inUse.source !== 'Logbook') {
     const { batch, source } = status.inUse;
-    throw new EntryError(409, 'in_use', [`In use by batch ${batch} in ${source}: record the cleaning once the batch is done with it in ${source}.`]);
+    const what = useOf(source); // D-76: an analysis in LIMS
+    throw new EntryError(409, 'in_use', [`In use by ${what} ${batch} in ${source}: record the cleaning once the ${what} is done with it in ${source}.`]);
   }
   if (status.inUse) throw new EntryError(409, 'in_use', ['End the current use before recording a cleaning.']);
   // Forms enter times to the minute, so compare at minute precision.
@@ -452,7 +453,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           const products = await logbookProducts(tx, app.master);
           // The last use's product; for a TrueBatch use without one from its uses (packing), from the batch records.
           const lastCode = status.lastUseProductCode
-            ?? (status.lastTrueBatchUse && app.batches ? (await app.batches.get(status.lastTrueBatchUse.batch)).batch?.productCode ?? null : null);
+            ?? (status.lastTrueBatchUse && status.lastTrueBatchUse.source !== LIMS && app.batches ? (await app.batches.get(status.lastTrueBatchUse.batch)).batch?.productCode ?? null : null);
           const next = products.find((p) => p.id === b.productId);
           const last = lastCode ? products.find((p) => p.code === lastCode) ?? { code: lastCode, antibiotic: false } : undefined;
           const problem = next ? antibioticBlocker(last, next, status.changeoverCleaned) : null;

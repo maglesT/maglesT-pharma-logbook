@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
-  api, can, ApiError, EMPTY_DETAILS, MEANING_LABEL, plantDay, plantTime, QUALIFICATION_LABEL, TYPE_LABEL,
+  api, useOf, can, ApiError, EMPTY_DETAILS, MEANING_LABEL, plantDay, plantTime, QUALIFICATION_LABEL, TYPE_LABEL,
   type Details, type Equipment, type EquipmentCard, type HistoryEvent, type Me,
 } from '../api.js';
 import { StatusChip } from '../components/StatusChip.js';
@@ -157,7 +157,7 @@ function EventRow({ ev, onVoice }: { ev: HistoryEvent; onVoice: (id: number) => 
       <tr className="truebatch">
         <td>{plantTime(u.startedAt)}<br />to {u.endedAt ? plantTime(u.endedAt) : 'not ended yet'}</td>
         <td>{TYPE_LABEL.equipment_use}<br /><span className="muted">from {u.source} (read only)</span></td>
-        <td><div>Batch {u.batch}{u.productCode && ` · ${u.productCode}`}</div>{u.step && <div>{u.step}</div>}</td>
+        <td><div>{useOf(u.source) === 'analysis' ? 'Analysis' : 'Batch'} {u.batch}{u.productCode && ` · ${u.productCode}`}</div>{u.step && <div>{u.step}</div>}</td>
         <td>{u.source}</td>
         <td className="muted">Signed in {u.source}</td>
       </tr>

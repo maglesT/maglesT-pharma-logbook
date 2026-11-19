@@ -92,7 +92,11 @@ export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'Tru
  * when there is one, else by its key (`step`, "stage/step"). Read through the row as JSON, so a view without the column
  * (a product not yet updated) still answers.
  */
-export type UseSource = TrueBatchName;
+export type UseSource = TrueBatchName | typeof LIMS;
+/** D-76: Medhanta LIMS (platform provider `lims`): its lab instrument uses (instrument_use_v1) count as TrueBatch's do. */
+export const LIMS = 'Medhanta LIMS';
+/** D-76: what a use is for: a batch in a TrueBatch product, an analysis in LIMS (the analysis number is its batch_number). */
+export const useOf = (source: UseSource) => (source === LIMS ? 'analysis' : 'batch');
 // D-67: productCode, the batch's product (from the batch view; null without one, e.g. packing).
 export interface TrueBatchUse { code: string; batchNumber: string; step: string; startedAt: Date; endedAt: Date | null; source: UseSource; productCode?: string | null }
 export interface TrueBatchUses {
@@ -105,9 +109,10 @@ export interface TrueBatchUses {
 }
 /** The uses of one product could not be read: its link is off. */
 export class UsesOff extends ConnectionOff {
-  constructor(readonly source: UseSource) { super(); this.message = `Connection to ${source} (machine and room uses) is off. Ask your administrator.`; }
+  constructor(readonly source: UseSource) { super(); this.message = `Connection to ${source} (${source === LIMS ? 'instrument' : 'machine and room'} uses) is off. Ask your administrator.`; }
 }
-export function sqlTrueBatchUses(q: Sql, schema = 'report', source: UseSource = 'TrueBatch', batchView: string | null = 'batch_fact_v1'): TrueBatchUses {
+export function sqlTrueBatchUses(q: Sql, schema = 'report', source: UseSource = 'TrueBatch', batchView: string | null = 'batch_fact_v1',
+  view = 'equipment_use_v1'): TrueBatchUses {
   const v = (name: string) => q(`${schema}.${name}`);
   return {
     source,
@@ -120,7 +125,7 @@ export function sqlTrueBatchUses(q: Sql, schema = 'report', source: UseSource = 
           select distinct on (upper(u.equipment_code), u.ended_at is null) upper(u.equipment_code) as code, u.batch_number,
             coalesce(nullif(to_jsonb(u)->>'step_name', ''), u.step) as step,
             coalesce(u.started_at, u.data_as_of) as started_at, u.ended_at, ${product} as product_code
-          from ${v('equipment_use_v1')} u
+          from ${v(view)} u
           where upper(u.equipment_code) = any(${codes.map((c) => c.toUpperCase())})
             and (u.ended_at is not null or ${inProduction})
           order by upper(u.equipment_code), u.ended_at is null, coalesce(u.ended_at, u.started_at) desc nulls last`)
@@ -134,7 +139,7 @@ export function sqlTrueBatchUses(q: Sql, schema = 'report', source: UseSource = 
         return (await q<{ code: string; batch_number: string; step: string | null; started_at: Date; ended_at: Date | null; product_code: string | null }[]>`
           select upper(u.equipment_code) as code, u.batch_number, coalesce(nullif(to_jsonb(u)->>'step_name', ''), u.step) as step,
             coalesce(u.started_at, u.data_as_of) as started_at, u.ended_at, ${product} as product_code
-          from ${v('equipment_use_v1')} u
+          from ${v(view)} u
           where upper(u.equipment_code) = ${code.toUpperCase()}
             and coalesce(u.started_at, u.data_as_of) < ${to} and (u.ended_at is null or u.ended_at >= ${from})
           order by 4, u.batch_number limit 5000`)
@@ -144,6 +149,14 @@ export function sqlTrueBatchUses(q: Sql, schema = 'report', source: UseSource = 
     },
   };
 }
+
+/**
+ * D-76 (owner, 19 Nov 2026): the lab instrument uses recorded in Medhanta LIMS (report.instrument_use_v1, the columns of
+ * equipment_use_v1; batch_number is the analysis number). Read as a packing product's uses: no batch view, so no "batch in
+ * production" filter; LIMS ends a use itself (every step naming the instrument signed done, or the analysis stopped or
+ * reviewed; a balance's use ends when the weighing is recorded).
+ */
+export const sqlLabUses = (q: Sql, schema = 'report') => sqlTrueBatchUses(q, schema, LIMS, null, 'instrument_use_v1');
 
 /** The batch records of every linked product, read each on its own (D-69): a product that does not answer is left out. */
 export interface BatchRecords {

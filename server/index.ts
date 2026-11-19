@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import { sqlMaster } from './master.js';
 import { sqlQualification } from './qualification.js';
 import { scheduleOverdue, sqlDeviations } from './overdue.js';
-import { trueBatchReaders } from './batches.js';
+import { sqlLabUses, trueBatchReaders } from './batches.js';
 import { TRUEBATCH_PROVIDERS, trueBatchUrlKey } from './truebatch-providers.js';
 import { sqlTraining } from './training.js';
 
@@ -42,7 +42,10 @@ const tbLinks = TRUEBATCH_PROVIDERS.flatMap((provider) => {
   const url = config[trueBatchUrlKey(provider)];
   return url ? [{ provider, q: connect(url) }] : [];
 });
-const { batches, uses: trueBatchUses } = trueBatchReaders(tbLinks);
+const { batches, uses: tbUses } = trueBatchReaders(tbLinks);
+// D-76: and Medhanta LIMS' lab instrument uses (instrument_use_v1), counted as the TrueBatch products' uses are.
+const lims = config.LIMS_DATABASE_URL ? connect(config.LIMS_DATABASE_URL) : null;
+const trueBatchUses = lims ? [...tbUses, sqlLabUses(lims)] : tbUses;
 const master = sqlMaster(md);
 const qualification = qual ? sqlQualification(qual) : null;
 const app = await buildApp({ sql, signOn, proofKey, master, qualification, deviations: dv ? sqlDeviations(dv) : null, batches, trueBatchUses, training: rec ? sqlTraining(rec) : null, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
@@ -62,6 +65,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     await qual?.end();
     await dv?.end();
     for (const l of tbLinks) await l.q.end();
+    await lims?.end();
     await rec?.end();
     process.exit(0);
   });

@@ -1,7 +1,7 @@
 import type { Sql, Tx } from './db.js';
 import { careByLocalId, type Care, type Master } from './master.js';
 import { QualificationOff, type MediaFill, type Qualification, type QualStatus } from './qualification.js';
-import { UsesOff, type TrueBatchUse, type TrueBatchUses, type UseSource } from './batches.js';
+import { LIMS, UsesOff, type TrueBatchUse, type TrueBatchUses, type UseSource } from './batches.js';
 import { dayText, timeText } from './dates.js';
 
 // Plant time zone: calibration due dates are plant-local dates (D-19).
@@ -204,8 +204,9 @@ export function antibioticBlocker(last: { code: string; antibiotic?: boolean } |
   return null;
 }
 /** D-46, D-47: what a cut link to TrueBatch or TrueBatch Packing leaves out of the status. */
-export const usesOffWarning = (source: UseSource) =>
-  `Connection to ${source} is off: machine and room uses recorded in ${source} (in use, dirty after use) are not shown. Ask your administrator.`;
+export const usesOffWarning = (source: UseSource) => source === LIMS
+  ? `Connection to ${source} is off: instrument uses recorded in ${source} (in use) are not shown. Ask your administrator.`
+  : `Connection to ${source} is off: machine and room uses recorded in ${source} (in use, dirty after use) are not shown. Ask your administrator.`;
 export const TRUEBATCH_USES_OFF = usesOffWarning('TrueBatch');
 /** D-70: what a Qualification link that is down leaves out of the status. */
 export const QUAL_DOWN_WARNING = 'Qualification not reachable: qualification not checked.';
@@ -271,9 +272,11 @@ const DUE_SOON_DAYS = 7;
 export const IN_USE = 'In use: end the current use first.';
 /** D-46: the blocker of a use open in TrueBatch (D-47: or TrueBatch Packing). D-49: since TrueBatch 1.6.0 a use ends when
  * the batch is done with the item there (the last stage using it closes, or the batch is approved or terminated). */
-export const inTrueBatch = (batch: string, step: string, source: UseSource = 'TrueBatch') =>
-  `In use by batch ${batch} in ${source}${step ? ` (${step})` : ''}: it ends when the batch is done with it in ${source} (its last stage using it closes, or the batch is approved or terminated).`;
-export const isInUse = (blocker: string) => blocker === IN_USE || blocker.startsWith('In use by batch ');
+export const inTrueBatch = (batch: string, step: string, source: UseSource = 'TrueBatch') => source === LIMS
+  // D-76: a lab instrument use open in LIMS, for an analysis.
+  ? `In use by analysis ${batch} in ${source}${step ? ` (${step})` : ''}: it ends when the analysis is done with it in ${source} (every step naming it is signed done, or the analysis is stopped or reviewed).`
+  : `In use by batch ${batch} in ${source}${step ? ` (${step})` : ''}: it ends when the batch is done with it in ${source} (its last stage using it closes, or the batch is approved or terminated).`;
+export const isInUse = (blocker: string) => blocker === IN_USE || blocker.startsWith('In use by batch ') || blocker.startsWith('In use by analysis ');
 
 // One query for any number of items: the facts status is derived from. The entry scan is limited
 // to the requested items (review S4-4).

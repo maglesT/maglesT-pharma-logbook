@@ -215,13 +215,16 @@ export { TYPE_LABEL };
 // Mirrors the server (D-16): these types are signed by the performer.
 export const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading', 'change_over', 'requalification']);
 
+/** D-76: what a use is for, by where it was recorded: an analysis in Medhanta LIMS, else a batch. */
+export const useOf = (source: string) => (source === 'Medhanta LIMS' ? 'analysis' : 'batch');
+
 export interface EquipmentStatus {
   equipmentId: number;
   state: string;
   blockers: string[];
   warnings: string[];
   // D-46: a use open in TrueBatch (D-47: or TrueBatch Packing) has no Logbook entry (entryId null). source: 'Logbook' or the
-  // TrueBatch product's name (D-75: one of server/truebatch-providers.ts).
+  // TrueBatch product's name (D-75: one of server/truebatch-providers.ts), or 'Medhanta LIMS' (D-76: batch is the analysis number).
   inUse: { entryId: number | null; productId: number | null; batch: string | null; stage: string; since: string; source: string } | null;
   lastTrueBatchUse: { batch: string; step: string; endedAt: string; source: string } | null;
   cleanUntil: string | null;

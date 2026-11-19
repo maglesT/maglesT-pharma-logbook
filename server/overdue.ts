@@ -5,7 +5,7 @@ import { logbookItems, type LogbookItem, type Master } from './master.js';
 import type { Qualification } from './qualification.js';
 import { allStatuses, PLANT_TZ, plantDay, plantTime, statusContext, type EquipmentStatus } from './status.js';
 import { saveStatuses } from './item-status.js';
-import type { TrueBatchUses } from './batches.js';
+import { useOf, type TrueBatchUses } from './batches.js';
 
 // Owner 2026-11-12 (D-37): a missed limit raises a deviation on its own. The Logbook records each overdue cleaning
 // (dirty hold, clean hold, scheduled cleaning), preventive maintenance, calibration and requalification once, with the
@@ -44,10 +44,11 @@ async function report(sql: Sql, kind: OverdueKind, i: LogbookItem, s: EquipmentS
       // D-46: the last use may be TrueBatch's (D-47: or TrueBatch Packing's).
       const tb = s.lastTrueBatchUse;
       const u = tb ? { ended: tb.endedAt, batch: `${tb.batch} in ${tb.source}${tb.step ? ` (${tb.step})` : ''}`, product: null } : await lastUse(sql, i.id);
+      const what = tb ? useOf(tb.source) : 'batch'; // D-76: an analysis in LIMS
       return {
         title: `Dirty hold expired: ${i.code} not cleaned within ${c.dirtyHoldHours ?? '?'} h of use`,
         description: `${named(i)} was not cleaned within its dirty hold of ${c.dirtyHoldHours ?? '?'} hours after use. `
-          + `The use ended ${u?.ended ? plant(u.ended) : '(not recorded)'}${u?.batch ? `, batch ${u.batch}${u.product ? ` of ${u.product}` : ''}` : ''}. `
+          + `The use ended ${u?.ended ? plant(u.ended) : '(not recorded)'}${u?.batch ? `, ${what} ${u.batch}${u.product ? ` of ${u.product}` : ''}` : ''}. `
           + `The dirty hold ran out ${plant(at)} with no verified cleaning on record. ${AUTO}`,
         immediateAction: `${blocks} a cleaning is recorded and verified. No action recorded yet: this report was raised when the dirty hold ran out.`,
         impactNotes: 'Automatic report from the Logbook: QA to assess the impact (cleaning validation of the dirty hold time, residue and microbial risk, the batch last made).',
