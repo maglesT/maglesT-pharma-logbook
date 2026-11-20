@@ -16,7 +16,7 @@ export function App() {
 
   const refresh = useCallback(async () => {
     try {
-      setMe(await api<Me>('GET', '/api/me'));
+      setMe((await api<{ me: Me | null }>('GET', '/api/session')).me);
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) setMe(null);
       else throw e;

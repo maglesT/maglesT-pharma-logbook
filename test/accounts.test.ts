@@ -29,6 +29,15 @@ describe('sign-on through core', () => {
     expect(res.statusCode).toBe(401);
   });
 
+  it('PL-01: the first-load probe /api/session answers signed out quietly (200, null) and names a signed-in person', async () => {
+    const out = await t.app.inject({ method: 'GET', url: '/api/session' });
+    expect(out.statusCode).toBe(200);
+    expect(out.json()).toEqual({ me: null });
+    const id = await seedUser(t.owner, uniq('op'), ['operator']);
+    const { cookie } = await login(t.app, `op${n}`);
+    expect((await call(t.app, cookie, 'GET', '/api/session')).json()).toEqual({ me: { id, username: `op${n}`, fullName: `OP${n}`, permissions: ROLE_PERMISSIONS.operator } });
+  });
+
   it('PL-01: /login sends the browser to core with PKCE; sign-on opens a session with the permissions from core and is audited', async () => {
     const id = await seedUser(t.owner, uniq('op'), ['operator']);
     const username = `op${n}`;

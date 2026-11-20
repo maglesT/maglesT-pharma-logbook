@@ -3,8 +3,13 @@ import { logIn, logOut } from './helpers.js';
 
 // B1-2 (D-29): sign-on goes through Medhanta core; the test server signs in through a stand-in for core.
 test('PL-01: the sign-in page sends people to core; after sign-on Home shows their name, and logout signs them out', async ({ page }) => {
+  // Display round 21 Nov: the first load asks quietly whether someone is signed in; no 401 in the console.
+  const errors: string[] = [];
+  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('response', (r) => { if (r.status() === 401) errors.push(`401 ${r.url()}`); });
   await page.goto('/');
   await expect(page.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/login');
+  expect(errors).toEqual([]);
   await expect(page.getByLabel('Password')).toHaveCount(0);
 
   await logIn(page, 'op1');
