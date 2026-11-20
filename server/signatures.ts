@@ -5,7 +5,8 @@ import { audit } from './audit.js';
 import type { Permission, SessionUser } from './auth.js';
 import type { Identity } from './signon.js';
 
-export const MEANINGS = ['performed', 'verified', 'released', 'reviewed', 'approved', 'corrected', 'voice_confirmed'] as const;
+// D-80: 'closed' is a missed limit (exception) closed in the Logbook.
+export const MEANINGS = ['performed', 'verified', 'released', 'reviewed', 'approved', 'corrected', 'voice_confirmed', 'closed'] as const;
 export type Meaning = (typeof MEANINGS)[number];
 
 // B1-4 (D-29, platform PL-05): at every signature the signer enters their password again at Medhanta core
@@ -101,7 +102,7 @@ export interface SignRequest {
   signer: AuthenticatedSigner;
   // The hash the signer was shown (from SignInput); must equal the hash of `content`.
   shownHash: string;
-  objectType: 'entry' | 'settings' | 'review' | 'voice_note';
+  objectType: 'entry' | 'settings' | 'review' | 'voice_note' | 'exception';
   objectId: number;
   meaning: Meaning;
   content: unknown;

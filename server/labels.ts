@@ -86,4 +86,5 @@ export const OVERDUE_LABEL: Record<string, string> = {
 export const ITEM_ACTION_LABEL: Record<string, string> = {
   'equipment.created': 'Item created', 'equipment.added': 'Item added from master data', 'equipment.updated': 'Master data changed',
   'equipment.details_updated': 'Equipment details changed', 'overdue.recorded': 'Overdue recorded',
+  'exception.closed': 'Missed limit closed in the Logbook', 'exception.sent': 'Missed limit sent to Deviations',
 };

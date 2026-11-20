@@ -6,7 +6,7 @@ import { buildApp } from '../server/app.js';
 import { sqlCycles } from '../server/cycles.js';
 import { sqlSops } from '../server/sops.js';
 import globalSetup from '../test/global-setup.js';
-import { TEST_DATABASE_URL, TEST_PROOF_KEY, fakeSignOn, login, proofFor, seedUser, call } from '../test/helpers.js';
+import { TEST_DATABASE_URL, TEST_PROOF_KEY, directory, fakeSignOn, login, proofFor, seedUser, call } from '../test/helpers.js';
 import { NO_CARE, type Care, type Master } from '../server/master.js';
 import { E2E_PORT, E2E_SCHEMA, USERS } from './config.js';
 import type { SpeechProvider } from '../server/voice.js';
@@ -49,6 +49,8 @@ await owner.end();
 const schemaOwner = connect(TEST_DATABASE_URL, { searchPath: E2E_SCHEMA });
 await migrate(schemaOwner);
 for (const [username, roles] of Object.entries(USERS)) await seedUser(schemaOwner, username, [...roles]);
+// D-80: the exception permission is per person: qa1 holds it.
+directory.get('qa1')!.permissions.push('logbook.exception.decide');
 await schemaOwner.end();
 
 const sql = connect(TEST_DATABASE_URL, { role: 'logbook_app', searchPath: E2E_SCHEMA });
@@ -67,7 +69,9 @@ const master: Master = {
     select * from e2e_master_items where is_product`).map((r) => ({ itemId: r.item_id, code: r.code, name: r.name, active: r.active, version: r.version })),
 };
 const app = await buildApp({ sql, signOn: fakeSignOn(), proofKey: TEST_PROOF_KEY, master, webRoot: new URL('../dist/web', import.meta.url).pathname, cookieSecure: false, speech,
-  cycles: sqlCycles(sql, `${E2E_SCHEMA}_ti`, 'TrueBatch Injectables'), sops: sqlSops(sql, `${E2E_SCHEMA}_qms`) });
+  cycles: sqlCycles(sql, `${E2E_SCHEMA}_ti`, 'TrueBatch Injectables'), sops: sqlSops(sql, `${E2E_SCHEMA}_qms`),
+  // D-80: Deviations linked (no deviation filed yet), so a missed limit can be sent there.
+  deviations: { bySource: async () => new Map() } });
 
 const admin = (await login(app, 'admin')).cookie;
 const qa = (await login(app, 'qa1')).cookie;
