@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
 import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
@@ -7,6 +7,19 @@ import { mayRecord } from '../entries.js';
 import { LOGBOOK_TYPES, settingsSchema, typeByKey } from '../logbook-types.js';
 import { SignError, authenticateSigner, contentHash, sign, signBody } from '../signatures.js';
 import { TrainingOff } from '../training.js';
+import { SOPS_FROM_QMS, SOPS_OFF, SopsOff, pullSops, sopRefsOf, type QmsSop } from '../sops.js';
+
+/**
+ * D-79: with QMS linked, a settings version's SOP references are QMS' effective SOPs (picked); references the type already
+ * records (`recorded`: the settings text of the versions it builds on) stay as recorded. Sends the refusal itself, else true.
+ */
+async function sopsOk(app: FastifyInstance, settings: { sopRef: string }, recorded: string[], reply: FastifyReply): Promise<boolean> {
+  const r = await pullSops(app.sops, settings.sopRef, recorded.flatMap(sopRefsOf));
+  if (r.off) { await reply.code(503).send({ error: 'connection_off', message: SOPS_OFF, problems: r.problems }); return false; }
+  if (r.problems.length) { await reply.code(400).send({ error: 'invalid_request', problems: r.problems }); return false; }
+  settings.sopRef = r.text;
+  return true;
+}
 
 /**
  * D-71: the training a settings version asks of signers is picked from the skills Recruitment publishes; its title is
@@ -61,6 +74,17 @@ export async function settingsInForce(q: Sql | Tx, logbookType: string) {
 export function settingsRoutes(app: FastifyInstance, sql: Sql) {
   const anyUser = { preHandler: requirePermission() };
 
+  // D-79: QMS' effective SOPs for the SOP pickers. Not linked: SOP references are typed (standalone, as before).
+  app.get('/api/sops', anyUser, async () => {
+    if (!app.sops) return { linked: false, available: false, sops: [] as QmsSop[], note: '' };
+    try {
+      return { linked: true, available: true, sops: await app.sops.effective(), note: SOPS_FROM_QMS };
+    } catch (e) {
+      if (!(e instanceof SopsOff)) throw e;
+      return { linked: true, available: false, sops: [] as QmsSop[], note: SOPS_OFF };
+    }
+  });
+
   // All versions per type, with their approval signature (printed name, time, meaning: LB-19).
   app.get('/api/logbook-types', anyUser, async (req) => {
     const rows = await sql`
@@ -101,6 +125,9 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
     const { logbookType, settings, effectiveFrom } = body.data;
     const problem = await pullTraining(app, settings);
     if (problem) return reply.code(400).send({ error: 'invalid_request', problems: [problem] });
+    const latest = await sql<{ sop: string | null }[]>`
+      select settings->>'sopRef' as sop from logbook_settings where logbook_type = ${logbookType} order by version desc limit 1`;
+    if (!(await sopsOk(app, settings, latest.map((r) => r.sop ?? ''), reply))) return reply;
     const row = await sql.begin(async (tx) => {
       // Serialise version numbering per type.
       await tx`select pg_advisory_xact_lock(hashtext(${'settings:' + logbookType}))`;
@@ -124,6 +151,12 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
     if (id === null || !body.success) return reply.code(400).send({ error: 'invalid_request' });
     const problem = await pullTraining(app, body.data.settings);
     if (problem) return reply.code(400).send({ error: 'invalid_request', problems: [problem] });
+    // The draft and the version before it.
+    const built = await sql<{ sop: string | null }[]>`
+      select b.settings->>'sopRef' as sop from logbook_settings d
+      join logbook_settings b on b.logbook_type = d.logbook_type and b.version <= d.version
+      where d.id = ${id} order by b.version desc limit 2`;
+    if (!(await sopsOk(app, body.data.settings, built.map((r) => r.sop ?? ''), reply))) return reply;
     const result = await sql.begin(async (tx) => {
       const [before] = await tx<SettingsRow[]>`
         select id::int, logbook_type, version, settings, effective_from, created_by::int, created_at

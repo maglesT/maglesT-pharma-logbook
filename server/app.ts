@@ -26,6 +26,7 @@ import type { Deviations } from './overdue.js';
 import type { BatchRecords, TrueBatchUses } from './batches.js';
 import type { SterileCycles } from './cycles.js';
 import type { Training } from './training.js';
+import type { Sops } from './sops.js';
 import { trainingRoutes } from './routes/training.js';
 import { batchRoutes } from './routes/batches.js';
 import { dashboardRoutes } from './routes/dashboard.js';
@@ -61,6 +62,8 @@ export interface AppOptions {
   cycles?: SterileCycles | null;
   // D-71: the Recruitment product's training records (training_v1); null without the link (signers state their training).
   training?: Training | null;
+  // D-79: QMS' effective SOPs (document_v1), picked for SOP references; null without the link (SOP references typed).
+  sops?: Sops | null;
   logger?: boolean;
   webRoot?: string;
   // Secure flag on the session cookie; off only for plain-HTTP development.
@@ -71,7 +74,7 @@ export interface AppOptions {
   advisor?: AdviceProvider | null;
 }
 
-export async function buildApp({ sql, signOn, master, qualification = null, deviations = null, batches = null, trueBatchUses = [], cycles = null, training = null, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
+export async function buildApp({ sql, signOn, master, qualification = null, deviations = null, batches = null, trueBatchUses = [], cycles = null, training = null, sops = null, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger, trustProxy: true });
   app.decorate('cookieSecure', cookieSecure);
   app.decorate('proofKey', proofKey);
@@ -82,6 +85,7 @@ export async function buildApp({ sql, signOn, master, qualification = null, devi
   app.decorate('trueBatchUses', trueBatchUses);
   app.decorate('cycles', cycles);
   app.decorate('training', training);
+  app.decorate('sops', sops);
   app.decorate('statusContext', (q: Sql | Tx = sql) => statusContext(q, master, qualification, trueBatchUses));
   // A cut master-data link stops the feature with one message (platform D-02, PL-08).
   app.setErrorHandler((err, _req, reply) => {
@@ -156,6 +160,7 @@ declare module 'fastify' {
     trueBatchUses: TrueBatchUses[];
     cycles: SterileCycles | null;
     training: Training | null;
+    sops: Sops | null;
     // What every status needs from master data and the Qualification product (platform D-24).
     statusContext: (q?: Sql | Tx) => Promise<StatusContext>;
   }

@@ -126,6 +126,11 @@ export interface Settings {
 // D-71: Recruitment's skills, and what signing asks of the signed-in person.
 export interface Skill { code: string; title: string }
 export interface TrainingSkills { linked: boolean; skills: Skill[]; note: string }
+
+// D-79: QMS' effective SOPs. linked: SOP references are picked from them (none typed); available false: QMS not answering.
+export interface QmsSop { number: string; revision: string; title: string; effectiveDate: string | null; nextReviewDue: string | null }
+export interface QmsSops { linked: boolean; available: boolean; sops: QmsSop[]; note: string }
+export const sopRefsOf = (text: string) => text.split(/[,;\n]/).map((r) => r.trim()).filter(Boolean);
 export type TrainingCheck =
   | { needed: null }
   | { needed: Skill; state: 'trained'; note: string }

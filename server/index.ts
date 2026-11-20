@@ -13,6 +13,7 @@ import { sqlLabUses, trueBatchReaders } from './batches.js';
 import { sqlCycles } from './cycles.js';
 import { TRUEBATCH_PROVIDERS, trueBatchUrlKey } from './truebatch-providers.js';
 import { sqlTraining } from './training.js';
+import { sqlSops } from './sops.js';
 
 const config = loadConfig();
 const sql = connect(config.DATABASE_URL, { role: config.DB_APP_ROLE });
@@ -36,6 +37,8 @@ const qual = config.QUAL_DATABASE_URL ? connect(config.QUAL_DATABASE_URL) : null
 const dv = config.DEVIATIONS_DATABASE_URL ? connect(config.DEVIATIONS_DATABASE_URL) : null;
 // D-71: Recruitment's training records; without the link a signer states their training (typed by hand).
 const rec = config.RECRUITMENT_DATABASE_URL ? connect(config.RECRUITMENT_DATABASE_URL) : null;
+// D-79: QMS' effective SOPs (document_v1); without the link SOP references are typed.
+const qms = config.QMS_DATABASE_URL ? connect(config.QMS_DATABASE_URL) : null;
 // D-45: batches from TrueBatch; D-61: and from every linked TrueBatch product (packing: packing_batch_v1). D-46: TrueBatch's
 // machine and room uses count in the status as Logbook uses do; D-47, D-52, D-54: every other TrueBatch product's too.
 // D-75: the products are those of TRUEBATCH_PROVIDERS whose link is on (its URL is set).
@@ -52,7 +55,7 @@ const cycles = tiLink ? sqlCycles(tiLink.q, 'report', tiLink.provider.name) : nu
 const trueBatchUses = lims ? [...tbUses, sqlLabUses(lims)] : tbUses;
 const master = sqlMaster(md);
 const qualification = qual ? sqlQualification(qual) : null;
-const app = await buildApp({ sql, signOn, proofKey, master, qualification, deviations: dv ? sqlDeviations(dv) : null, batches, trueBatchUses, cycles, training: rec ? sqlTraining(rec) : null, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
+const app = await buildApp({ sql, signOn, proofKey, master, qualification, deviations: dv ? sqlDeviations(dv) : null, batches, trueBatchUses, cycles, training: rec ? sqlTraining(rec) : null, sops: qms ? sqlSops(qms) : null, logger: true, cookieSecure: config.COOKIE_SECURE, speech, advisor });
 
 await app.listen({ port: config.PORT, host: config.HOST });
 const stopIntegrity = scheduleIntegrityCheck(sql, (msg) => app.log.info(msg));
@@ -71,6 +74,7 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     for (const l of tbLinks) await l.q.end();
     await lims?.end();
     await rec?.end();
+    await qms?.end();
     process.exit(0);
   });
 }

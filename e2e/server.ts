@@ -4,6 +4,7 @@ import { connect } from '../server/db.js';
 import { migrate } from '../db/migrate.js';
 import { buildApp } from '../server/app.js';
 import { sqlCycles } from '../server/cycles.js';
+import { sqlSops } from '../server/sops.js';
 import globalSetup from '../test/global-setup.js';
 import { TEST_DATABASE_URL, TEST_PROOF_KEY, fakeSignOn, login, proofFor, seedUser, call } from '../test/helpers.js';
 import { NO_CARE, type Care, type Master } from '../server/master.js';
@@ -35,6 +36,14 @@ await owner.unsafe(`drop schema if exists ${E2E_SCHEMA}_ti cascade; create schem
     max_product_temp_c numeric, h2o2_ppm numeric, leak_rate numeric, units numeric, bi_id text, use_by date, signed text[],
     read_at timestamptz default now(), data_as_of timestamptz);
   grant usage on schema ${E2E_SCHEMA}_ti to logbook_app; grant select on all tables in schema ${E2E_SCHEMA}_ti to logbook_app;`);
+// D-79: QMS linked: its controlled documents, stood in for by a table of document_v1's name and columns.
+await owner.unsafe(`drop schema if exists ${E2E_SCHEMA}_qms cascade; create schema ${E2E_SCHEMA}_qms;
+  create table ${E2E_SCHEMA}_qms.document_v1 (number text, revision text, title text, type text, effective_date date, next_review_due date, status text,
+    record_number text, next_revision text, next_effective_date date, read_at timestamptz default now(), data_as_of timestamptz);
+  insert into ${E2E_SCHEMA}_qms.document_v1 (number, revision, title, type, effective_date, status) values
+    ('SOP-1', '01', 'Logbook entries', 'SOP', '2026-01-01', 'effective'), ('SOP-CO-01', '02', 'Product change over', 'SOP', '2026-01-01', 'effective'),
+    ('SOP-ENG-010', '03', 'Preventive maintenance', 'SOP', '2026-01-01', 'effective'), ('SOP-ENG-020', '01', 'Old PM', 'SOP', '2025-01-01', 'superseded');
+  grant usage on schema ${E2E_SCHEMA}_qms to logbook_app; grant select on all tables in schema ${E2E_SCHEMA}_qms to logbook_app;`);
 await owner.end();
 
 const schemaOwner = connect(TEST_DATABASE_URL, { searchPath: E2E_SCHEMA });
@@ -58,7 +67,7 @@ const master: Master = {
     select * from e2e_master_items where is_product`).map((r) => ({ itemId: r.item_id, code: r.code, name: r.name, active: r.active, version: r.version })),
 };
 const app = await buildApp({ sql, signOn: fakeSignOn(), proofKey: TEST_PROOF_KEY, master, webRoot: new URL('../dist/web', import.meta.url).pathname, cookieSecure: false, speech,
-  cycles: sqlCycles(sql, `${E2E_SCHEMA}_ti`, 'TrueBatch Injectables') });
+  cycles: sqlCycles(sql, `${E2E_SCHEMA}_ti`, 'TrueBatch Injectables'), sops: sqlSops(sql, `${E2E_SCHEMA}_qms`) });
 
 const admin = (await login(app, 'admin')).cookie;
 const qa = (await login(app, 'qa1')).cookie;

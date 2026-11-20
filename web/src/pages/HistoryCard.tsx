@@ -7,6 +7,7 @@ import { StatusChip } from '../components/StatusChip.js';
 import { ITEM_ACTION_LABEL } from '../../../server/labels.js';
 import { Summary, VoiceLinks } from './EquipmentPage.js';
 import { VoiceNoteDialog } from '../components/VoiceNote.js';
+import { SopPicker } from '../components/SopPicker.js';
 
 const day = (offset: number) => {
   const d = new Date();
@@ -202,7 +203,7 @@ function DetailsDialog({ equipmentId, current, onCancel, onDone }: {
   const [reason, setReason] = useState('');
   const [problems, setProblems] = useState<string[]>([]);
   const set = <K extends keyof Details>(k: K, v: Details[K]) => setD({ ...d, [k]: v });
-  const text = (k: 'assetNumber' | 'capacity' | 'supplier' | 'sopRefs', label: string) => (
+  const text = (k: 'assetNumber' | 'capacity' | 'supplier', label: string) => (
     <label>{label}<input value={d[k]} onChange={(e) => set(k, e.target.value)} /></label>
   );
   const step = (k: 'iq' | 'oq' | 'pq', label: string) => (
@@ -241,7 +242,7 @@ function DetailsDialog({ equipmentId, current, onCancel, onDone }: {
         {step('pq', 'PQ')}
         <label>Last requalification<input type="date" value={d.lastRequalification ?? ''} onChange={(e) => set('lastRequalification', e.target.value || null)} /></label>
         <label>Product-contact parts / MOC<textarea value={d.productContactMoc} onChange={(e) => set('productContactMoc', e.target.value)} /></label>
-        {text('sopRefs', 'SOP references')}
+        <SopPicker label="SOP references" value={d.sopRefs} onChange={(v) => set('sopRefs', v)} />
         <label>Reason for the change<input value={reason} onChange={(e) => setReason(e.target.value)} /></label>
         {problems.length > 0 && <ul className="error">{problems.map((p) => <li key={p}>{p}</li>)}</ul>}
         <div className="actions">
