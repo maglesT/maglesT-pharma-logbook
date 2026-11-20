@@ -1,7 +1,7 @@
 // D-49: one date format for the server and the pages (no Node APIs in it).
 import { dayText, timeText } from '../../server/dates.js';
-import { FAILURE_CATEGORY_LABEL, TYPE_LABEL } from '../../server/labels.js';
-export { timeText, FAILURE_CATEGORY_LABEL };
+import { FAILURE_CATEGORY_LABEL, MEANING_LABEL, PERFORMER_SIGNS, TYPE_LABEL } from '../../server/labels.js';
+export { timeText, FAILURE_CATEGORY_LABEL, MEANING_LABEL, PERFORMER_SIGNS };
 
 export class ApiError extends Error {
   constructor(
@@ -13,6 +13,16 @@ export class ApiError extends Error {
   ) {
     super(message ?? code);
   }
+}
+
+/** A server code in words, for an error the server sent without a message ("not_found" → "Not found."). */
+export const plainCode = (code: unknown) => (typeof code === 'string' && code
+  ? `${code.replaceAll('_', ' ').replace(/^\w/, (c) => c.toUpperCase())}.` : 'Something went wrong. Try again.');
+/** The lines a form shows for a refused save: its own words for a known code, then the server's problems; never the bare code. */
+export function refusalLines(err: unknown, words: Record<string, string>): string[] {
+  if (!(err instanceof ApiError)) return [err instanceof Error ? err.message : String(err)];
+  const head = words[err.code];
+  return head ? [head, ...err.problems] : err.problems.length ? err.problems : [err.message];
 }
 
 // background: polls that must not keep an idle session alive (server checks this header).
@@ -27,7 +37,11 @@ export async function api<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT', url: stri
     credentials: 'same-origin',
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new ApiError(res.status, data.error ?? 'error', data.message, data.problems ?? []);
+  if (!res.ok) {
+    const problems: string[] = data.problems ?? [];
+    // Never a raw code ("check_failed") on a screen: the server's own words, else the problems, else a plain sentence.
+    throw new ApiError(res.status, data.error ?? 'error', data.message ?? (problems.length ? problems.join(' ') : plainCode(data.error)), problems);
+  }
   return data as T;
 }
 
@@ -47,9 +61,10 @@ export interface Alert {
   createdAt: string;
 }
 
-// LB-19: times are shown in plant time with the zone label. D-49: days in words ("30 Jan 2027"), never ISO.
+// LB-19: times are shown in plant time with the zone label. D-49: days in words ("30 Jan 2027"), never ISO. On the
+// screens the year only when it is not this year ("20 Nov, 21:21 IST"); printed copies always carry it (server).
 export function plantTime(iso: string | null): string {
-  return timeText(iso);
+  return timeText(iso, { withYear: 'auto' });
 }
 // A line of parts joined with " · "; empty parts are left out, so no "· ·".
 export const joinParts = (parts: (string | null | undefined)[]) => parts.map((p) => (p ?? '').trim()).filter(Boolean).join(' · ');
@@ -160,16 +175,6 @@ export interface LogbookTypeInfo {
   versions: SettingsVersion[];
 }
 
-export const MEANING_LABEL: Record<string, string> = {
-  performed: 'Performed',
-  verified: 'Verified',
-  released: 'Released',
-  reviewed: 'Reviewed',
-  approved: 'Approved',
-  corrected: 'Corrected',
-  voice_confirmed: 'Voice note confirmed',
-  closed: 'Closed',
-};
 
 // Value for a datetime-local input, in the browser's local time.
 export function localInputValue(iso: string | Date = new Date()): string {
@@ -218,8 +223,11 @@ export interface Entry {
 
 export { TYPE_LABEL };
 
-// Mirrors the server (D-16): these types are signed by the performer.
-export const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading', 'change_over', 'requalification']);
+/** An entry of a signed type made before that type was signed (e.g. glove tests before D-63): it has no signature at all.
+ *  The screens say so instead of leaving the signature column blank. */
+export const unsignedOlder = (e: { logbookType: string; version: number; signatures: unknown[] }) =>
+  PERFORMER_SIGNS.has(e.logbookType) && e.version === 1 && e.signatures.length === 0;
+export const UNSIGNED_OLDER = 'No signature: recorded before this kind of entry was signed in the Logbook.';
 
 /** D-76: what a use is for, by where it was recorded: an analysis in Medhanta LIMS, else a batch. */
 export const useOf = (source: string) => (source === 'Medhanta LIMS' ? 'analysis' : 'batch');

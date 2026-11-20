@@ -95,7 +95,7 @@ describe('cleaning status (LB-07)', () => {
     const s = await status(id);
     // D-49: in words, never ISO ("16 Nov 2026, 3:05 pm IST").
     expect(s.blockers).toEqual([`Clean-hold time expired at ${timeText(s.cleanUntil)}: clean again before use.`]);
-    expect(s.blockers[0]).toMatch(/at \d{1,2} [A-Z][a-z]{2} \d{4}, \d{1,2}:\d\d [ap]m IST:/);
+    expect(s.blockers[0]).toMatch(/at \d{1,2} [A-Z][a-z]{2} \d{4}, \d\d:\d\d IST:/);
   });
 
   it('LB-10: cleaning cannot be recorded while the equipment is in use', async () => {

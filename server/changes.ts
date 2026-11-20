@@ -1,6 +1,6 @@
 import { canonical } from './signatures.js';
 import { plantDay, plantTime } from './status.js';
-import { ENTRY_FIELD_LABEL, OVERDUE_LABEL, partsLine, valueLabel, type PartUsed } from './labels.js';
+import { ENTRY_FIELD_LABEL, OVERDUE_LABEL, partsLine, PRODUCT_FIELDS, valueLabel, withProductName, type PartUsed } from './labels.js';
 
 // Master-data changes in words for the history card and its exports (S11): the audit trail keeps
 // the raw old and new values; people read "Location: Block A → Block B".
@@ -89,8 +89,9 @@ export function recordLines(v: unknown, indent = '', names: Record<string, strin
 // D-60: in the screen's order (From product, From batch, To product, To batch, ...), the checklist as one line.
 const ENTRY_ORDER = Object.keys(ENTRY_FIELD_LABEL);
 const entryRank = (k: string) => (ENTRY_ORDER.includes(k) ? ENTRY_ORDER.indexOf(k) : ENTRY_ORDER.length);
-export function entryLines(data: Record<string, unknown>): string[] {
-  const kept = Object.entries(data).filter(([, v]) => v !== '' && v !== false && v !== null && v !== undefined
+export function entryLines(data: Record<string, unknown>, productNames?: Map<string, string>): string[] {
+  const named = productNames ? Object.entries(data).map(([k, v]): [string, unknown] => [k, PRODUCT_FIELDS.has(k) ? withProductName(v, (c) => productNames.get(c)) : v]) : Object.entries(data);
+  const kept = named.filter(([, v]) => v !== '' && v !== false && v !== null && v !== undefined
     && !(Array.isArray(v) && v.length === 0) && !(isObj(v) && Object.keys(v).length === 0)).sort(([a], [b]) => entryRank(a) - entryRank(b));
   const checklist = kept.find(([k]) => k === 'checklist')?.[1];
   const ticked = isObj(checklist) ? Object.entries(checklist).filter(([, v]) => v === true).map(([k]) => k) : [];

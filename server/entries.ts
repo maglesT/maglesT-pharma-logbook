@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { Permission } from './auth.js';
 import { typeByKey, type LogbookSettings } from './logbook-types.js';
+import { PERFORMER_SIGNS } from './labels.js';
 
 // Product default (LB-04): an activity time older than this makes the entry a late entry.
 export const LATE_MINUTES = 30;
@@ -143,7 +144,6 @@ export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
 
 // D-16: types whose performer signs with an e-signature (a clause requires the signature).
 // D-63: glove integrity tests and pressure readings too, like the other sterile records.
-const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading', 'change_over', 'requalification']);
 export const performerSigns = (type: string) => PERFORMER_SIGNS.has(type);
 
 // LB-03 / LB-11: second-person verification needed for this type under these settings.

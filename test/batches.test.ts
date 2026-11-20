@@ -305,8 +305,8 @@ describe('batches from TrueBatch Capsules, Oral Liquids, API and their packing (
       expect(r.batches.map((b: { batchNumber: string }) => b.batchNumber)).toContain(number(p.id, 2));
     }
     expect((await use(filler, { batch: 'CAPSULES-2' })).json().problems).toEqual(['Batch CAPSULES-2 is not in production in TrueBatch Capsules (PRODUCTION_APPROVED).']);
-    expect((await use(filler, { batch: 'LIQUIDS_PACKING-2' })).json().problems).toEqual(['Batch LIQUIDS_PACKING-2 is not in production in TrueBatch Oral Liquids Packing (RELEASED).']);
-    expect((await use(filler, { batch: 'NONE-9' })).json().problems).toEqual(['Batch NONE-9 is not in the batch records (TrueBatch Capsules, TrueBatch Oral Liquids, TrueBatch API, TrueBatch Capsules Packing, TrueBatch Oral Liquids Packing): choose it from the list or type it by hand.']);
+    expect((await use(filler, { batch: 'LIQUIDS_PACKING-2' })).json().problems).toEqual(['Batch LIQUIDS_PACKING-2 is not in production in TrueBatch Liquids Packing (RELEASED).']);
+    expect((await use(filler, { batch: 'NONE-9' })).json().problems).toEqual(['Batch NONE-9 is not in the batch records (TrueBatch Capsules, TrueBatch Liquids, TrueBatch API, TrueBatch Capsules Packing, TrueBatch Liquids Packing): choose it from the list or type it by hand.']);
     expect((await use(filler, { batch: 'API-1' })).statusCode).toBe(201);
   });
 

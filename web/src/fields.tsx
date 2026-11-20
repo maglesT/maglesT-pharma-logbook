@@ -1,5 +1,5 @@
-import { plantDay, plantTime, VOICE_LANGUAGE_LABEL, type Part } from './api.js';
-import { ENTRY_FIELD_LABEL, OUTCOME_LABEL, partsLine as sharedPartsLine, STAGE_LABEL, valueLabel } from '../../server/labels.js';
+import { plantDay, plantTime, VOICE_LANGUAGE_LABEL, type Part, type Product } from './api.js';
+import { ENTRY_FIELD_LABEL, OUTCOME_LABEL, partsLine as sharedPartsLine, PRODUCT_FIELDS, STAGE_LABEL, valueLabel, withProductName } from '../../server/labels.js';
 
 // Field labels in the order they are shown (shared with the printed copies, D-60).
 export const LABELS: Record<string, string> = { ...ENTRY_FIELD_LABEL };
@@ -46,8 +46,10 @@ export const fieldValue = (k: string, v: unknown): string =>
 
 
 // Data fields one per line, in reading order, empty ones left out.
-export function Fields({ data, extra = [] }: { data: Record<string, unknown>; extra?: [string, string][] }) {
+export function Fields({ data, extra = [], products = [] }: { data: Record<string, unknown>; extra?: [string, string][]; products?: Product[] }) {
+  const nameOf = (code: string) => products.find((p) => p.code === code)?.name;
   const parts = Object.entries(data)
+    .map(([k, v]): [string, unknown] => [k, PRODUCT_FIELDS.has(k) ? withProductName(v, nameOf) : v])
     .filter(([k, v]) => k !== 'checklist' && v !== '' && v !== false && v !== null && v !== undefined && !(Array.isArray(v) && v.length === 0))
     .sort(([a], [b]) => rank(a) - rank(b))
     .map(([k, v]): [string, string] => [LABELS[k] ?? k, fieldValue(k, v)]);

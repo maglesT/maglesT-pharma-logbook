@@ -23,11 +23,14 @@ export function dayText(v: string | Date | null | undefined, { withYear = true, 
   return day(p.y, p.m, p.d, withYear);
 }
 
-/** A moment in plant time with the zone: "30 Jan 2027, 3:05 pm IST". */
-export function timeText(v: string | Date | null | undefined, { withYear = true, tz = PLANT_TZ, zone = 'IST' } = {}): string {
+/** A moment in plant time with the zone, 24-hour like the rest of the suite (TrueBatch rule, 17 Nov 2026):
+ *  "30 Jan 2027, 15:05 IST". withYear 'auto' (the screens): the year only when it is not this plant year ("30 Jan, 15:05
+ *  IST"); true (the default: printed copies, published messages, report text) always; false never. */
+export function timeText(v: string | Date | null | undefined, { withYear = true as boolean | 'auto', tz = PLANT_TZ, zone = 'IST', now = new Date() } = {}): string {
   if (v === null || v === undefined || v === '') return '—';
   const d = v instanceof Date ? v : new Date(v);
   if (Number.isNaN(d.getTime())) return String(v);
   const p = parts(d, tz);
-  return `${day(p.y, p.m, p.d, withYear)}, ${p.h % 12 || 12}:${p.min} ${p.h < 12 ? 'am' : 'pm'}${zone ? ` ${zone}` : ''}`;
+  const year = withYear === 'auto' ? p.y !== parts(now, tz).y : withYear;
+  return `${day(p.y, p.m, p.d, year)}, ${String(p.h).padStart(2, '0')}:${p.min}${zone ? ` ${zone}` : ''}`;
 }

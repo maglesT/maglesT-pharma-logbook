@@ -20,8 +20,8 @@ describe('the TrueBatch products the Logbook reads (D-75)', () => {
       ['truebatch_injectables_packing', 'TrueBatch Injectables Packing', 'packing', 'TRUEBATCH_INJECTABLES_PACKING_DATABASE_URL'],
       ['truebatch_capsules', 'TrueBatch Capsules', 'bulk', 'TRUEBATCH_CAPSULES_DATABASE_URL'],
       ['truebatch_capsules_packing', 'TrueBatch Capsules Packing', 'packing', 'TRUEBATCH_CAPSULES_PACKING_DATABASE_URL'],
-      ['truebatch_liquids', 'TrueBatch Oral Liquids', 'bulk', 'TRUEBATCH_LIQUIDS_DATABASE_URL'],
-      ['truebatch_liquids_packing', 'TrueBatch Oral Liquids Packing', 'packing', 'TRUEBATCH_LIQUIDS_PACKING_DATABASE_URL'],
+      ['truebatch_liquids', 'TrueBatch Liquids', 'bulk', 'TRUEBATCH_LIQUIDS_DATABASE_URL'],
+      ['truebatch_liquids_packing', 'TrueBatch Liquids Packing', 'packing', 'TRUEBATCH_LIQUIDS_PACKING_DATABASE_URL'],
       ['truebatch_api', 'TrueBatch API', 'bulk', 'TRUEBATCH_API_DATABASE_URL'],
     ]);
   });
@@ -46,8 +46,8 @@ describe('the TrueBatch products the Logbook reads (D-75)', () => {
     expect(four.batches!.source).toBe('TrueBatch, TrueBatch Injectables, TrueBatch Packing, TrueBatch Injectables Packing');
     expect(four.uses.map((u) => u.source)).toEqual(['TrueBatch', 'TrueBatch Packing', 'TrueBatch Injectables', 'TrueBatch Injectables Packing']);
     const all = trueBatchReaders(TRUEBATCH_PROVIDERS.map((p) => link(p.id)));
-    expect(all.batches!.source).toBe('TrueBatch, TrueBatch Injectables, TrueBatch Capsules, TrueBatch Oral Liquids, TrueBatch API, '
-      + 'TrueBatch Packing, TrueBatch Injectables Packing, TrueBatch Capsules Packing, TrueBatch Oral Liquids Packing');
+    expect(all.batches!.source).toBe('TrueBatch, TrueBatch Injectables, TrueBatch Capsules, TrueBatch Liquids, TrueBatch API, '
+      + 'TrueBatch Packing, TrueBatch Injectables Packing, TrueBatch Capsules Packing, TrueBatch Liquids Packing');
     expect(all.uses.map((u) => u.source)).toEqual(TRUEBATCH_PROVIDERS.map((p) => p.name));
     expect(trueBatchReaders([link('truebatch_capsules')]).batches!.source).toBe('TrueBatch Capsules');
   });

@@ -17,6 +17,21 @@ export const TYPE_LABEL: Record<string, string> = {
   pressure_reading: 'Pressure reading',
 };
 
+// D-16: these types are signed by the performer (one list for the server and the pages).
+export const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading', 'change_over', 'requalification']);
+
+// Signature meanings in words (screens and printed copies).
+export const MEANING_LABEL: Record<string, string> = {
+  performed: 'Performed',
+  verified: 'Verified',
+  released: 'Released',
+  reviewed: 'Reviewed',
+  approved: 'Approved',
+  corrected: 'Corrected',
+  voice_confirmed: 'Voice note confirmed',
+  closed: 'Closed',
+};
+
 // Entry fields in the order they are shown; a breakdown reads top to bottom from failure to repair.
 export const ENTRY_FIELD_LABEL: Record<string, string> = {
   // Change over (D-55): from which product and batch to which, first (D-60).
@@ -58,6 +73,14 @@ export const VALUE_LABEL: Record<string, Record<string, string>> = {
   source: { protocol: 'Qualification protocol', manual: 'Written by hand' },
   stage: STAGE_LABEL,
   outcome: OUTCOME_LABEL,
+};
+/** D-55 change over products: older entries kept the bare product code ("FG-PCM500"); shown with the master-data name
+ *  ("FG-PCM500 · Paracetamol tablets 500 mg") like newer ones. The stored value is not changed. */
+export const PRODUCT_FIELDS = new Set(['fromProduct', 'toProduct']);
+export const withProductName = (v: unknown, nameOf: (code: string) => string | undefined): unknown => {
+  if (typeof v !== 'string' || !v || v.includes(' · ')) return v;
+  const name = nameOf(v.trim());
+  return name ? `${v.trim()} · ${name}` : v;
 };
 /** The form's word for a picked value, or undefined when the field has no pick list (or the value is not on it). */
 export const valueLabel = (field: string, v: unknown): string | undefined => (typeof v === 'string' ? VALUE_LABEL[field]?.[v] : undefined);
