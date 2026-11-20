@@ -12,7 +12,7 @@ export interface Exception {
 export interface Overdue { linked: boolean; mayDecide: boolean; events: Exception[] }
 
 const DEV_STEP: Record<string, string> = { classification: 'awaiting QA classification', approval: 'awaiting approval', investigation: 'under investigation',
-  closure: 'awaiting closure', closed: 'closed', rejected: 'rejected' };
+  closure: 'awaiting closure', closed: 'closed', rejected: 'rejected', cancelled: 'cancelled: not a deviation' };
 
 function Outcome({ e, linked }: { e: Exception; linked: boolean }) {
   const d = e.decision;
