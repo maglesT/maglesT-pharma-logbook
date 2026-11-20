@@ -5,6 +5,7 @@ import { api, ApiError, can, localInputValue, plantTime, type LogbookTypeInfo, t
 const SITE_SETTINGS = ['voice_notes', 'breakdown_advice'];
 const skillName = (s: { code: string; title: string }) => (s.title && s.title !== s.code ? `${s.title} (${s.code})` : s.code);
 import { SignDialog } from '../components/SignDialog.js';
+import { SopPicker } from '../components/SopPicker.js';
 
 const blank: Settings = { enabled: true, sopRef: '', checklist: [], verificationRequired: false, limits: {}, pressurePoints: [] };
 
@@ -137,7 +138,7 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
       }
       onClose();
     } catch (err) {
-      setError(err instanceof ApiError && err.problems.length ? err.problems.join(' ') : 'Check the fields. Pressure points need: name; CCS reference; min; max.');
+      setError(err instanceof ApiError && err.problems.length ? err.problems.join(' ') : err instanceof ApiError && err.code === 'connection_off' ? err.message : 'Check the fields. Pressure points need: name; CCS reference; min; max.');
     }
   };
 
@@ -146,7 +147,7 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
       <form className="card dialog" onSubmit={save}>
         <h2>{type.label}: {draftId ? 'edit draft' : 'new version'}</h2>
         <label className="check"><input type="checkbox" checked={s.enabled} onChange={(e) => setS({ ...s, enabled: e.target.checked })} />Switched on at this site</label>
-        <label>SOP reference<input value={s.sopRef} onChange={(e) => setS({ ...s, sopRef: e.target.value })} /></label>
+        <SopPicker label="SOP reference" value={s.sopRef} onChange={(sopRef) => setS({ ...s, sopRef })} />
         <label>Checklist items (one per line)<textarea value={checklist} onChange={(e) => setChecklist(e.target.value)} /></label>
         {!type.alwaysVerified && (
           <label className="check">

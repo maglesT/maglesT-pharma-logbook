@@ -9,6 +9,7 @@ import { parseId, requirePermission } from '../auth.js';
 import { changeLines, entryLines } from '../changes.js';
 import { FAILURE_CATEGORY_LABEL, ITEM_ACTION_LABEL, STATE_NAME, TYPE_LABEL } from '../labels.js';
 import { canonical } from '../signatures.js';
+import { SOPS_OFF, pullSops, sopRefsOf } from '../sops.js';
 import { PLANT_TZ, plantDay, statusOf, type StatusContext } from '../status.js';
 import {
   breakdowns, filterAndSort, breakdownStats, checkDetails, detailsSchema, detailsVersions, locationHistory, registerQuery, reliability,
@@ -219,6 +220,13 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
     }
     const problems = checkDetails(body.data.details, await today(sql));
     if (problems.length) return reply.code(400).send({ error: 'check_failed', problems });
+    // D-79: with QMS linked, new SOP references are QMS' effective SOPs; those the item already records stay as recorded.
+    const [prev] = await sql<{ sop: string | null }[]>`
+      select details->>'sopRefs' as sop from equipment_details where equipment_id = ${id} order by version desc limit 1`;
+    const sops = await pullSops(app.sops, body.data.details.sopRefs, sopRefsOf(prev?.sop));
+    if (sops.off) return reply.code(503).send({ error: 'connection_off', message: SOPS_OFF });
+    if (sops.problems.length) return reply.code(400).send({ error: 'check_failed', problems: sops.problems });
+    body.data.details.sopRefs = sops.text;
     const result = await sql.begin(async (tx) => {
       const [eq] = await tx`select 1 from equipment where id = ${id} for update`;
       if (!eq) return { status: 404, error: 'not_found' } as const;

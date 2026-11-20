@@ -23,6 +23,8 @@ const schema = z.object({
   // D-76: Medhanta LIMS' database through the platform link (instrument_use_v1: lab instrument uses); unset: not read.
   LIMS_DATABASE_URL: linkUrl,
   // D-71: the Recruitment product's database through the platform link (training_v1: who is trained in what, until when).
+  // D-79: QMS' database through the platform link (document_v1: its effective SOPs, picked for SOP references); unset: typed.
+  QMS_DATABASE_URL: linkUrl,
   RECRUITMENT_DATABASE_URL: z.preprocess((v) => (v === '' ? undefined : v), z.string().url().optional()),
   // Sign-on through Medhanta core (D-29), written by the platform's apply.
   OIDC_ISSUER: z.string().url(),
