@@ -1,4 +1,5 @@
 import { MEANING_LABEL, plantTime, TYPE_LABEL } from '../api.js';
+import { auditActionText as actionText } from '../../../server/labels.js';
 import { LABELS, fieldValue } from '../fields.js';
 
 export interface AuditRow {
@@ -14,40 +15,6 @@ export interface AuditRow {
   subject: { code?: string; name?: string; logbookType?: string; entryId?: number; username?: string; version?: number } | null;
 }
 
-// LB-18: the audit trail in words. The complete stored values are in the CSV and PDF copies.
-const ACTION: Record<string, string> = {
-  'entry.created': 'Entry made',
-  'entry.completed': 'Activity ended',
-  'entry.corrected': 'Entry corrected',
-  'login': 'Logged in',
-  'logout': 'Logged out',
-  'login.failed': 'Failed login',
-  'password.changed': 'Password changed',
-  'signature.failed': 'Signature refused',
-  'user.created': 'User created',
-  'user.updated': 'User changed',
-  'user.locked': 'Account locked (too many wrong passwords)',
-  'password.change_failed': 'Password change refused',
-  'user.password_reset': 'Temporary password issued',
-  'equipment.created': 'Item created',
-  'equipment.updated': 'Master data changed',
-  'equipment.details_updated': 'Equipment details changed',
-  'product.created': 'Product created',
-  'product.updated': 'Product changed',
-  'settings.drafted': 'Logbook settings drafted',
-  'settings.edited': 'Logbook settings draft changed',
-  'review.created': 'Period review prepared',
-  'site.created': 'Site created',
-  'site.updated': 'Site changed',
-  'voice_note.created': 'Voice note recorded',
-  'voice_note.confirmed': 'Voice note text confirmed',
-  'integrity.passed': 'Integrity check passed',
-  'integrity.failed': 'Integrity check found problems',
-  'alert.acknowledged': 'Security alert acknowledged',
-  'breakdown_advice.generated': 'AI breakdown suggestion shown',
-};
-const actionText = (a: string) =>
-  ACTION[a] ?? (a.startsWith('signed.') ? `Signed: ${MEANING_LABEL[a.slice(7)] ?? a.slice(7)}` : a.replaceAll(/[._]/g, ' ').replace(/^\w/, (c) => c.toUpperCase()));
 const SITE_SETTING: Record<string, string> = { voice_notes: 'Voice notes', breakdown_advice: 'Breakdown suggestions' };
 const signed = (a: string) => a.startsWith('signed.');
 

@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { audit } from '../audit.js';
@@ -158,8 +158,8 @@ export function authRoutes(app: FastifyInstance, sql: Sql, signOn: SignOn) {
     });
   });
 
-  app.get('/api/me', { preHandler: requirePermission() }, async (req) => {
-    const u = req.user!;
-    return { id: u.id, username: u.username, fullName: u.fullName, permissions: u.permissions };
-  });
+  const meOf = (u: NonNullable<FastifyRequest['user']>) => ({ id: u.id, username: u.username, fullName: u.fullName, permissions: u.permissions });
+  app.get('/api/me', { preHandler: requirePermission() }, async (req) => meOf(req.user!));
+  // The first screen asks here: signed out is an answer (200, null), not a 401 in the browser console (as core's /api/session).
+  app.get('/api/session', async (req) => ({ me: req.user ? meOf(req.user) : null }));
 }

@@ -111,3 +111,42 @@ export const ITEM_ACTION_LABEL: Record<string, string> = {
   'equipment.details_updated': 'Equipment details changed', 'overdue.recorded': 'Overdue recorded',
   'exception.closed': 'Missed limit closed in the Logbook', 'exception.sent': 'Missed limit sent to Deviations',
 };
+
+// LB-18: the audit trail in words, on the screen and in the PDF copy (the CSV keeps the stored codes).
+export const AUDIT_ACTION_LABEL: Record<string, string> = {
+  'entry.created': 'Entry made',
+  'entry.completed': 'Activity ended',
+  'entry.corrected': 'Entry corrected',
+  'login': 'Logged in',
+  'logout': 'Logged out',
+  'login.failed': 'Failed login',
+  'password.changed': 'Password changed',
+  'signature.failed': 'Signature refused',
+  'user.created': 'User created',
+  'user.updated': 'User changed',
+  'user.locked': 'Account locked (too many wrong passwords)',
+  'password.change_failed': 'Password change refused',
+  'user.password_reset': 'Temporary password issued',
+  'equipment.created': 'Item created',
+  'equipment.updated': 'Master data changed',
+  'equipment.details_updated': 'Equipment details changed',
+  'product.created': 'Product created',
+  'product.updated': 'Product changed',
+  'settings.drafted': 'Logbook settings drafted',
+  'settings.edited': 'Logbook settings draft changed',
+  'review.created': 'Period review prepared',
+  'site.created': 'Site created',
+  'site.updated': 'Site changed',
+  'voice_note.created': 'Voice note recorded',
+  'voice_note.confirmed': 'Voice note text confirmed',
+  'integrity.passed': 'Integrity check passed',
+  'integrity.failed': 'Integrity check found problems',
+  'alert.acknowledged': 'Security alert acknowledged',
+  'breakdown_advice.generated': 'AI breakdown suggestion shown',
+  'equipment.added': 'Item added from master data',
+  'overdue.recorded': 'Overdue recorded',
+  'exception.closed': 'Missed limit closed in the Logbook',
+  'exception.sent': 'Missed limit sent to Deviations',
+};
+export const auditActionText = (a: string) =>
+  AUDIT_ACTION_LABEL[a] ?? (a.startsWith('signed.') ? `Signed: ${MEANING_LABEL[a.slice(7)] ?? a.slice(7)}` : a.replaceAll(/[._]/g, ' ').replace(/^\w/, (c) => c.toUpperCase()));

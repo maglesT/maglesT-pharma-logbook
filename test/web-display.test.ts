@@ -134,3 +134,14 @@ describe('sterile validity on the item page (D-64)', () => {
     ] }))).toEqual(['Decontamination valid until 23 Nov 2026', 'Glove test due by 20 Nov 2026']);
   });
 });
+
+describe('the audit trail in words on the PDF copy (display round 21 Nov)', () => {
+  it('LB-22: action codes print as the screen words, never the stored key', async () => {
+    const { auditActionText } = await import('../server/labels.js');
+    expect(auditActionText('entry.created')).toBe('Entry made');
+    expect(auditActionText('review.created')).toBe('Period review prepared');
+    expect(auditActionText('overdue.recorded')).toBe('Overdue recorded');
+    expect(auditActionText('signed.verified')).toBe('Signed: Verified');
+    expect(auditActionText('something.new_kind')).toBe('Something new kind');
+  });
+});

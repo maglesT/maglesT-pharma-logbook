@@ -10,7 +10,7 @@ import type { Sql } from '../db.js';
 import { logbookItem, type Master } from '../master.js';
 import { parseId, requirePermission } from '../auth.js';
 import { entryLines, recordLines } from '../changes.js';
-import { MEANING_LABEL, PERFORMER_SIGNS, TYPE_LABEL } from '../labels.js';
+import { auditActionText, MEANING_LABEL, PERFORMER_SIGNS, TYPE_LABEL } from '../labels.js';
 import { plantDay, plantTime } from '../status.js';
 import { present, type EntryRow } from './entries.js';
 import { auditFor, batchVersions, periodQuery, periodVersions, plantRange, reviewsFor, type AuditRow } from './review.js';
@@ -51,6 +51,14 @@ const cellText = (text: string, extra: Record<string, unknown> = {}): Content =>
 
 export const plant = (d: Date | string | null) =>
   d ? plantTime(new Date(d)) : '';
+// The audit row's subject in words, as the screen shows it ("EQ-CMP-03 · Equipment cleaning #307"), never stored codes.
+const auditSubject = (a: AuditRow) => {
+  const s = a.subject;
+  if (a.objectType === 'review') return `Period review${s?.code ? ` · ${s.code}` : ''}`;
+  if (!s?.code) return `${a.objectType.replaceAll('_', ' ').replace(/^\w/, (c) => c.toUpperCase())} ${a.objectId ?? ''}`.trim();
+  const what = s.logbookType ? ` · ${TYPE_LABEL[s.logbookType] ?? s.logbookType}${s.entryId ? ` #${s.entryId}` : ''}` : '';
+  return `${s.code}${what}`;
+};
 const json = (v: unknown) => (v === null || v === undefined ? '' : JSON.stringify(v));
 // For the PDF: spaces after separators so long values wrap inside the table column.
 
@@ -183,7 +191,7 @@ async function pdf(r: Report, site: { name: string; code: string } | undefined, 
   const auditRows: Content[][] = r.audit.map((a) => [
     cellText(plant(a.at)),
     cellText(a.actor ?? 'system'),
-    cellText(`${a.action} ${a.objectType} ${a.objectId ?? ''}`),
+    cellText(`${auditActionText(a.action)}\n${auditSubject(a)}`),
     cellText(`${a.reason ? `Reason: ${a.reason}\n` : ''}${a.oldValue ? `Before:\n${recordLines(a.oldValue, '  ').join('\n')}\n` : ''}${a.newValue ? `${a.oldValue ? 'After' : 'Recorded'}:\n${recordLines(a.newValue, '  ').join('\n')}` : ''}`),
   ]);
   const heading = (text: string) => ({ text, fontSize: 8, bold: true });
