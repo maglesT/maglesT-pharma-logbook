@@ -16,6 +16,7 @@ import {
   type Breakdown,
 } from '../breakdowns.js';
 import { present, type EntryRow } from './entries.js';
+import { exceptionsOf, type Exception } from './overdue.js';
 import { csvText, plant, sendCopy, tablesPdf, voiceNoteText, type PdfTable } from './exports.js';
 import { periodVersions, plantRange, reviewsFor } from './review.js';
 
@@ -59,7 +60,9 @@ type Event =
   | { kind: 'masterdata'; at: Date; actor: string | null; action: string; old: unknown; new: unknown; reason: string | null; lines: string[] }
   | { kind: 'truebatch'; at: Date; use: { batch: string; productCode: string | null; step: string; startedAt: Date; endedAt: Date | null; source: TrueBatchUse['source'] } }
   // D-78: a sterilisation cycle recorded in TrueBatch Injectables for one of its batches, read only.
-  | { kind: 'cycle'; at: Date; cycle: SterileCycle & { lines: string[] } };
+  | { kind: 'cycle'; at: Date; cycle: SterileCycle & { lines: string[] } }
+  // D-80: a missed limit (exception) of the item, with its decision: closed here (reason, signature) or sent to Deviations.
+  | { kind: 'exception'; at: Date; exception: Exception };
 
 /** D-72: what a TrueBatch product that does not answer leaves out of the history card. */
 export const usesOffHistoryNote = (source: string) => `Connection to ${source} is off: its uses of this item are not shown.`;
@@ -128,10 +131,14 @@ async function history(sql: Sql, master: Master, id: number, fromDay: string, to
       select a.at, u.full_name as actor, a.action, a.old_value, a.new_value, a.reason
       from audit_log a left join users u on u.id = a.actor_id
       where a.object_type = 'equipment' and a.object_id = ${String(id)} and a.at >= ${from} and a.at < ${to}
+        and a.action not like 'exception.%'
       order by a.at, a.id`;
     for (const r of rows) {
       events.push({ kind: 'masterdata', at: r.at, actor: r.actor, action: r.action, old: r.old_value, new: r.new_value, reason: r.reason, lines: changeLines(r.old_value, r.new_value, r.action) });
     }
+  }
+  if (!types || types.has('exception')) {
+    for (const x of await exceptionsOf(sql, id, from, to)) events.push({ kind: 'exception', at: x.dueAt, exception: x });
   }
   const notes: string[] = [];
   if (!types || types.has('equipment_use')) {
@@ -197,6 +204,13 @@ function eventRow(ev: Event): { at: Date; kind: string; type: string; what: stri
     return { at: ev.at, kind: 'truebatch cycle', type: `Sterilisation cycle (${c.source})`, what: `From ${c.source}, batch ${c.batchNumber}`,
       detail: [...c.lines, `Started ${plant(c.startedAt)}`, c.endedAt ? `Ended ${plant(c.endedAt)}` : '', `From ${c.source}: read only, recorded there`].filter(Boolean).join('\n'),
       who: c.source, signatures: `Signed in ${c.source} (${c.signed.join(', ') || 'not signed'})`, breakdown: '', highlight: c.result === 'fail', grey: false };
+  }
+  if (ev.kind === 'exception') {
+    const x = ev.exception;
+    const d = x.decision;
+    return { at: ev.at, kind: 'exception', type: 'Missed limit (exception)', what: `${x.label}: ${x.title}`,
+      detail: [d ? `${d.label} by ${d.by ?? ''}, ${plant(d.at)}` : 'Waiting for a decision: close it here or send it to Deviations', d?.reason ? `Reason: ${d.reason}` : ''].filter(Boolean).join('\n'),
+      who: d?.by ?? 'Logbook', signatures: d?.signedBy && d.at ? `closed: ${d.signedBy}, ${plant(d.at)}` : '', breakdown: '', highlight: !d, grey: false };
   }
   return { at: ev.at, kind: 'master data', type: 'Master data', what: ITEM_ACTION_LABEL[ev.action] ?? ev.action, detail: [ev.reason ? `Reason: ${ev.reason}` : '', ...ev.lines].filter(Boolean).join('\n'), who: ev.actor ?? 'system', signatures: '', breakdown: '', highlight: false, grey: false };
 }

@@ -86,6 +86,7 @@ export function HistoryCard({ me, equipment }: { me: Me; equipment: Equipment })
             {Object.entries(TYPE_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
             <option value="review">QA reviews</option>
             <option value="masterdata">Master-data changes</option>
+            <option value="exception">Missed limits (exceptions)</option>
           </select>
         </label>
         <button className="primary" onClick={load}>Show</button>
@@ -161,6 +162,21 @@ function EventRow({ ev, onVoice }: { ev: HistoryEvent; onVoice: (id: number) => 
         <td><div>{useOf(u.source) === 'analysis' ? 'Analysis' : 'Batch'} {u.batch}{u.productCode && ` · ${u.productCode}`}</div>{u.step && <div>{u.step}</div>}</td>
         <td>{u.source}</td>
         <td className="muted">Signed in {u.source}</td>
+      </tr>
+    );
+  }
+  if (ev.kind === 'exception') {
+    const x = ev.exception;
+    const d = x.decision;
+    return (
+      <tr className={d ? 'exception' : 'exception breakdown'}>
+        <td>{plantTime(x.dueAt)}</td>
+        <td>Missed limit (exception)<br /><span className="muted">{x.label}</span></td>
+        <td><div>{x.title}</div>
+          <div>{d ? `${d.label} by ${d.by ?? ''}, ${plantTime(d.at)}` : 'Waiting for a decision: close it here or send it to Deviations (Home)'}</div>
+          {d?.reason && <div><strong>Reason:</strong> {d.reason}</div>}</td>
+        <td>{d?.by ?? 'Logbook'}</td>
+        <td>{d?.signedBy && <div>{MEANING_LABEL.closed}: {d.signedBy}, {plantTime(d.at)}</div>}</td>
       </tr>
     );
   }

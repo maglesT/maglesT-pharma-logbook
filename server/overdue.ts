@@ -7,6 +7,9 @@ import { allStatuses, PLANT_TZ, plantDay, plantTime, statusContext, type Equipme
 import { saveStatuses } from './item-status.js';
 import { useOf, type TrueBatchUses } from './batches.js';
 
+// D-80 (owner decision, 20 Nov 2026; replaces the automatic deviation of D-37): a missed limit is an EXCEPTION in the
+// Logbook. A person holding logbook.exception.decide closes it here (reason and e-signature) or sends it to
+// Deviations (overdue_decisions, migration 0028); Deviations files only the ones sent (overdue_v1.sent_at).
 // Owner 2026-11-12 (D-37): a missed limit raises a deviation on its own. The Logbook records each overdue cleaning
 // (dirty hold, clean hold, scheduled cleaning), preventive maintenance, calibration and requalification once, with the
 // report Deviations files for it (report.overdue_v1). Deviations reads the records through its platform link and files
@@ -20,7 +23,7 @@ interface Report { title: string; description: string; immediateAction: string; 
 const plant = plantTime;
 const what = (i: LogbookItem) => (i.kind === 'area' ? 'Room' : i.kind === 'instrument' ? 'Instrument' : 'Equipment');
 const named = (i: LogbookItem) => `${what(i)} ${i.code} (${i.name}${i.room ? `, ${i.room}` : ''})`;
-const AUTO = 'Raised automatically by the Logbook.';
+const AUTO = 'Recorded automatically by the Logbook.';
 
 /** The end of a plant day (YYYY-MM-DD): the moment a date due is passed. */
 const endOfPlantDay = async (sql: Sql, day: string) =>
@@ -50,7 +53,7 @@ async function report(sql: Sql, kind: OverdueKind, i: LogbookItem, s: EquipmentS
         description: `${named(i)} was not cleaned within its dirty hold of ${c.dirtyHoldHours ?? '?'} hours after use. `
           + `The use ended ${u?.ended ? plant(u.ended) : '(not recorded)'}${u?.batch ? `, ${what} ${u.batch}${u.product ? ` of ${u.product}` : ''}` : ''}. `
           + `The dirty hold ran out ${plant(at)} with no verified cleaning on record. ${AUTO}`,
-        immediateAction: `${blocks} a cleaning is recorded and verified. No action recorded yet: this report was raised when the dirty hold ran out.`,
+        immediateAction: `${blocks} a cleaning is recorded and verified. No action recorded yet: this report was made when the dirty hold ran out.`,
         impactNotes: 'Automatic report from the Logbook: QA to assess the impact (cleaning validation of the dirty hold time, residue and microbial risk, the batch last made).',
       };
     }
@@ -59,7 +62,7 @@ async function report(sql: Sql, kind: OverdueKind, i: LogbookItem, s: EquipmentS
         title: `Clean hold expired: ${i.code} not used within ${c.cleanHoldHours ?? '?'} h of cleaning`,
         description: `${named(i)} was cleaned but not used within its clean hold of ${c.cleanHoldHours ?? '?'} hours. `
           + `The clean hold ran out ${plant(at)}. ${AUTO}`,
-        immediateAction: `${blocks} it is cleaned again and the cleaning verified. No action recorded yet: this report was raised when the clean hold ran out.`,
+        immediateAction: `${blocks} it is cleaned again and the cleaning verified. No action recorded yet: this report was made when the clean hold ran out.`,
         impactNotes: 'Automatic report from the Logbook: QA to assess the impact (validated clean hold time, microbial risk, whether the item was used after the clean hold ran out).',
       };
     case 'frequency':
@@ -67,28 +70,28 @@ async function report(sql: Sql, kind: OverdueKind, i: LogbookItem, s: EquipmentS
         title: `Scheduled cleaning missed: ${i.code} (every ${c.cleaningFrequencyHours ?? '?'} h)`,
         description: `${named(i)} is cleaned on a schedule, every ${c.cleaningFrequencyHours ?? '?'} hours. `
           + `Its next cleaning was due ${plant(at)} and no verified cleaning was recorded by then. ${AUTO}`,
-        immediateAction: `${blocks} a cleaning is recorded and verified. No action recorded yet: this report was raised when the cleaning became overdue.`,
+        immediateAction: `${blocks} a cleaning is recorded and verified. No action recorded yet: this report was made when the cleaning became overdue.`,
         impactNotes: 'Automatic report from the Logbook: QA to assess the impact of the missed scheduled cleaning (area status, activities in the room since).',
       };
     case 'pm':
       return {
         title: `Preventive maintenance overdue: ${i.code} (due ${plantDay(due!)})`,
         description: `${named(i)} has preventive maintenance every ${c.pmFrequencyDays ?? '?'} days. It was due ${plantDay(due!)} and no verified preventive maintenance was recorded by then. ${AUTO}`,
-        immediateAction: `${blocks} its preventive maintenance is recorded and verified. No action recorded yet: this report was raised when the preventive maintenance became overdue.`,
+        immediateAction: `${blocks} its preventive maintenance is recorded and verified. No action recorded yet: this report was made when the preventive maintenance became overdue.`,
         impactNotes: 'Automatic report from the Logbook: QA and engineering to assess the impact (condition of the item, batches made since the due date).',
       };
     case 'calibration':
       return {
         title: `Calibration overdue: ${i.code} (due ${plantDay(due!)})`,
         description: `${named(i)} needs calibration${c.calibrationFrequencyDays ? ` every ${c.calibrationFrequencyDays} days` : ''}. It was due ${plantDay(due!)} and no passed calibration was recorded by then. ${AUTO}`,
-        immediateAction: `${blocks} a passed calibration is recorded and verified. No action recorded yet: this report was raised when the calibration became overdue.`,
+        immediateAction: `${blocks} a passed calibration is recorded and verified. No action recorded yet: this report was made when the calibration became overdue.`,
         impactNotes: 'Automatic report from the Logbook: QA to assess the impact (results and batches that relied on the instrument after the due date).',
       };
     case 'requalification':
       return {
         title: `Requalification overdue: ${i.code} (due ${plantDay(due!)})`,
         description: `${named(i)} is requalified${c.requalificationFrequencyMonths ? ` every ${c.requalificationFrequencyMonths} months` : ''}. Its requalification was due ${plantDay(due!)} and none was completed by then. ${AUTO}`,
-        immediateAction: `${blocks} it is requalified. No action recorded yet: this report was raised when the requalification became overdue.`,
+        immediateAction: `${blocks} it is requalified. No action recorded yet: this report was made when the requalification became overdue.`,
         impactNotes: 'Automatic report from the Logbook: QA to assess the impact (qualified state of the item, batches made since the due date).',
       };
   }
@@ -147,7 +150,7 @@ export function scheduleOverdue(sql: Sql, master: Master, qualification: Qualifi
     running = true;
     try {
       const n = await recordOverdue(sql, master, qualification, trueBatch);
-      if (n) log(`overdue: ${n} new missed limit(s) recorded for Deviations`);
+      if (n) log(`overdue: ${n} new missed limit(s) recorded as exceptions`);
     } catch (e) {
       log(`overdue check could not run: ${(e as Error).message}`);
     } finally {
@@ -176,3 +179,12 @@ export function sqlDeviations(q: Sql): Deviations {
 }
 
 export const SOURCE_PREFIX = 'logbook:overdue:';
+
+// ---- D-80: the decision on a missed limit (an exception): closed here or sent to Deviations.
+
+export type Decision = 'closed' | 'sent';
+export interface ExceptionRow { id: number; equipment_id: number; code: string; name: string; kind: OverdueKind; due_at: Date; title: string }
+/** What the person closing an exception signs: the missed limit as the Logbook recorded it (the reason is kept with the decision). */
+export const exceptionContent = (e: ExceptionRow) =>
+  ({ event: e.id, equipment: e.code, kind: e.kind, dueAt: new Date(e.due_at).toISOString(), title: e.title, decision: 'closed' });
+export const DECISION_LABEL: Record<Decision | 'open', string> = { open: 'Waiting for a decision', closed: 'Closed in the Logbook', sent: 'Sent to Deviations' };

@@ -218,6 +218,7 @@ history card needs any Logbook permission (sign-on itself needs one).
 | `logbook.site.manage` | Edit the site record, item settings and equipment details | /site, /equipment PATCH, /details: admin |
 | `logbook.voice_note.record` | Record voice notes | /voice-notes: operator, supervisor, engineering |
 | `logbook.advice.ask` | Ask for breakdown suggestions | /advice: operator, supervisor, engineering, qa |
+| `logbook.exception.decide` | Decide a missed limit: close it in the Logbook (reason and e-signature) or send it to Deviations (D-80) | new: per person, no old role |
 
 Old role → permissions (for the B1-5 data move; each moved user gets exactly these):
 

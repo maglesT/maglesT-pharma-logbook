@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { Exceptions, type Overdue } from '../components/Exceptions.js';
 import { api, useOf, daysLeft, DEADLINE_LABEL, plantDay, plantTime, timeLeft, timeText, TYPE_LABEL, type Due, type Entry, type Equipment, type EquipmentStatus, type Me } from '../api.js';
 
 // Owner 2026-11-13 (D-41): the home dashboard.
@@ -16,7 +17,6 @@ interface Pending { kind: 'verify' | 'release' | 'approve'; id: number; equipmen
   byMe: boolean; since: string; ageHours: number; late: boolean; department: string }
 interface PendingData { lateAfterHours: number; total: number; forMe: Pending[]; mine: Pending[]; others: Pending[] | null;
   byDepartment: { department: string; normal: number; late: number }[] | null }
-interface Overdue { linked: boolean; events: { id: number; equipmentId: number; code: string; name: string; label: string; dueAt: string; deviation: { number: string; status: string } | null }[] }
 
 const C = { ready: '#17803d', dirty: '#b7791f', due: '#f0b429', over: '#c0352b', life: '#a3195b', co: '#6b4fbb', use: '#1f63b8', grey: '#8a8f96' };
 const shortTime = (iso: string) => timeText(iso, { withYear: false, zone: '' });
@@ -314,8 +314,6 @@ function Review({ d, onOpen }: { d: PendingData | null; onOpen: (id: number) => 
   );
 }
 
-const DEV_STEP: Record<string, string> = { classification: 'awaiting QA classification', approval: 'awaiting approval', investigation: 'under investigation',
-  closure: 'awaiting closure', closed: 'closed', rejected: 'rejected' };
 
 export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => void }) {
   const [tab, setTab] = useState<Tab>('compliance');
@@ -375,19 +373,8 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
           <OnTime c={compliance} />
           <DueColumns items={items} onOpen={onOpen} />
           <StatusGraph items={items} onOpen={onOpen} />
-          {raised && raised.events.length > 0 && (
-            <section className="dash-panel" aria-label="Deviations raised">
-              <div className="panel-head"><h2>Deviations raised for missed limits</h2><span className="pill bad">{raised.events.length}</span></div>
-              <table className="plain-table">
-                <thead><tr><th>Item</th><th>Missed limit</th><th>Ran out</th><th>Deviation</th></tr></thead>
-                <tbody>{raised.events.map((e) => (
-                  <tr key={e.id} className="clickable" onClick={() => onOpen(e.equipmentId)}>
-                    <td><strong>{e.code}</strong> {e.name}</td><td>{e.label}</td><td>{plantTime(e.dueAt)}</td>
-                    <td>{e.deviation ? <><strong>{e.deviation.number}</strong> · {DEV_STEP[e.deviation.status] ?? e.deviation.status}</> : raised.linked ? <span className="muted">being raised in Deviations…</span> : <span className="muted">Deviations not linked</span>}</td>
-                  </tr>))}</tbody>
-              </table>
-            </section>
-          )}
+          {/* D-80: missed limits are exceptions, closed here or sent to Deviations. */}
+          {raised && raised.events.length > 0 && <Exceptions data={raised} onOpen={onOpen} onChanged={() => void load()} />}
           <section className="dash-panel" aria-label="In use">
             <div className="panel-head"><h2>In use</h2><span className="pill">{inProgress.length}</span></div>
             {inProgress.length === 0 ? <p className="all-good"><span aria-hidden="true">✓</span> Nothing in use: no use, change over or repair in progress.</p> : (

@@ -168,6 +168,7 @@ export const MEANING_LABEL: Record<string, string> = {
   approved: 'Approved',
   corrected: 'Corrected',
   voice_confirmed: 'Voice note confirmed',
+  closed: 'Closed',
 };
 
 // Value for a datetime-local input, in the browser's local time.
@@ -379,7 +380,10 @@ export type HistoryEvent =
   // D-72: a use recorded in a TrueBatch product, read only.
   | { kind: 'truebatch'; at: string; use: { batch: string; productCode: string | null; step: string; startedAt: string; endedAt: string | null; source: string } }
   // D-78: a sterilisation cycle recorded in TrueBatch Injectables for one of its batches, read only.
-  | { kind: 'cycle'; at: string; cycle: { cycleId: string; batchNumber: string; result: string; startedAt: string; endedAt: string | null; source: string; signed: string[]; lines: string[] } };
+  | { kind: 'cycle'; at: string; cycle: { cycleId: string; batchNumber: string; result: string; startedAt: string; endedAt: string | null; source: string; signed: string[]; lines: string[] } }
+  // D-80: a missed limit (exception) with its decision.
+  | { kind: 'exception'; at: string; exception: { id: number; label: string; title: string; dueAt: string;
+      decision: { kind: 'closed' | 'sent'; label: string; reason: string | null; by: string | null; at: string; signedBy: string | null } | null } };
 
 // S10 voice notes (D-26).
 export const VOICE_LANGUAGE_LABEL: Record<string, string> = {

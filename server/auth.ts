@@ -24,6 +24,8 @@ export const PERMISSIONS = {
   'logbook.site.manage': 'Edit the site record, item settings and equipment details',
   'logbook.voice_note.record': 'Record voice notes',
   'logbook.advice.ask': 'Ask for breakdown suggestions',
+  // D-80 (owner, 20 Nov 2026): per employee in the platform permission register, given to no old role.
+  'logbook.exception.decide': 'Decide a missed limit: close it in the Logbook (reason and e-signature) or send it to Deviations',
 } as const;
 export type Permission = keyof typeof PERMISSIONS;
 const CODES = Object.keys(PERMISSIONS) as Permission[];
