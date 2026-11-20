@@ -103,7 +103,7 @@ test('LB-07: once the dirty hold ran out, the cleaning form asks why the cleanin
 
   await logIn(page, 'op1');
   await openLogbook(page, code);
-  await expect(statusBar(page)).toContainText(/Dirty-hold time expired at \d{1,2} [A-Z][a-z]{2} \d{4}, \d{1,2}:\d\d [ap]m IST: the cleaning is late; clean, verify and record why\./);
+  await expect(statusBar(page)).toContainText(/Dirty-hold time expired at \d{1,2} [A-Z][a-z]{2} \d{4}, \d\d:\d\d IST: the cleaning is late; clean, verify and record why\./);
   await newEntry(page, 'Cleaning');
   const form = page.getByRole('dialog');
   const why = form.getByLabel(/Why the cleaning is late/);

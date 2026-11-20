@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import {
-  api, useOf, can, ApiError, EMPTY_DETAILS, MEANING_LABEL, plantDay, plantTime, QUALIFICATION_LABEL, TYPE_LABEL,
-  type Details, type Equipment, type EquipmentCard, type HistoryEvent, type Me,
+  api, useOf, can, ApiError, EMPTY_DETAILS, MEANING_LABEL, plantDay, plantTime, QUALIFICATION_LABEL, refusalLines, TYPE_LABEL, UNSIGNED_OLDER, unsignedOlder,
+  type Details, type Equipment, type EquipmentCard, type HistoryEvent, type Me, type Product,
 } from '../api.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { ITEM_ACTION_LABEL } from '../../../server/labels.js';
@@ -16,7 +16,7 @@ const day = (offset: number) => {
 };
 
 // Equipment history card (S9, D-25): the details, current status and the full life history of one item.
-export function HistoryCard({ me, equipment }: { me: Me; equipment: Equipment }) {
+export function HistoryCard({ me, equipment, products = [] }: { me: Me; equipment: Equipment; products?: Product[] }) {
   const [fromDay, setFromDay] = useState(day(-365));
   const [toDay, setToDay] = useState(day(0));
   const [type, setType] = useState('');
@@ -101,7 +101,7 @@ export function HistoryCard({ me, equipment }: { me: Me; equipment: Equipment })
           <thead><tr><th>When</th><th>What</th><th>Details</th><th>By</th><th>Signatures</th></tr></thead>
           <tbody>
             {data.events.length === 0 && <tr><td colSpan={5} className="muted">Nothing in this period.</td></tr>}
-            {data.events.map((ev, i) => <EventRow key={i} ev={ev} onVoice={setListening} />)}
+            {data.events.map((ev, i) => <EventRow key={i} ev={ev} onVoice={setListening} products={products} />)}
           </tbody>
         </table>
       )}
@@ -121,7 +121,7 @@ export function HistoryCard({ me, equipment }: { me: Me; equipment: Equipment })
   );
 }
 
-function EventRow({ ev, onVoice }: { ev: HistoryEvent; onVoice: (id: number) => void }) {
+function EventRow({ ev, onVoice, products }: { ev: HistoryEvent; onVoice: (id: number) => void; products: Product[] }) {
   if (ev.kind === 'entry') {
     const e = ev.entry;
     return (
@@ -134,10 +134,11 @@ function EventRow({ ev, onVoice }: { ev: HistoryEvent; onVoice: (id: number) => 
         </td>
         <td>
           {ev.breakdown && <div><strong>Downtime {ev.breakdown.downtime}</strong> · parts: {ev.breakdown.parts || '—'} · {ev.breakdown.status}</div>}
-          {e.batch && <div>Batch {e.batch}</div>}<Summary e={e} /> <VoiceLinks e={e} onOpen={onVoice} />
+          {e.batch && <div>Batch {e.batch}</div>}<Summary e={e} products={products} /> <VoiceLinks e={e} onOpen={onVoice} />
         </td>
         <td>{e.enteredBy}<br /><span className="muted">{plantTime(e.enteredAt)}</span></td>
-        <td>{e.signatures.map((s) => <div key={s.meaning}>{MEANING_LABEL[s.meaning]}: {s.printedName}, {plantTime(s.signedAt)}{!s.valid && ' (INVALID)'}{s.training && ` (${s.training})`}</div>)}</td>
+        <td>{e.signatures.map((s) => <div key={s.meaning}>{MEANING_LABEL[s.meaning]}: {s.printedName}, {plantTime(s.signedAt)}{!s.valid && ' (INVALID)'}{s.training && ` (${s.training})`}</div>)}
+          {unsignedOlder(e) && <div className="muted">{UNSIGNED_OLDER}</div>}</td>
       </tr>
     );
   }
@@ -236,7 +237,7 @@ function DetailsDialog({ equipmentId, current, onCancel, onDone }: {
       onDone();
     } catch (err) {
       const msg: Record<string, string> = { no_change: 'Nothing was changed.', changed_meanwhile: 'Someone changed the details meanwhile: close and reopen.' };
-      setProblems([msg[(err as ApiError).code] ?? (err as Error).message, ...(err instanceof ApiError ? err.problems : [])]);
+      setProblems(refusalLines(err, msg));
     }
   };
   return (

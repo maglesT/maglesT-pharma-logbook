@@ -55,6 +55,7 @@ test('LB-12: a cycle recorded in TrueBatch Injectables shows read only in the hi
   await form.getByLabel('Controller printout / record reference').fill('PRN-0101');
   await sign(form, 'op1', 'Sign and save');
   await expect(form.locator('.error')).toContainText('Batch TI260007: a sterilisation cycle for a batch is recorded in its batch record');
+  await expect(form.locator('.error')).not.toContainText('check_failed');   // never the raw code (display round 1120)
   await form.getByRole('textbox', { name: 'Load', exact: true }).fill('Empty chamber');
   await sign(form, 'op1', 'Sign and save');
   await expect(form).toHaveCount(0);

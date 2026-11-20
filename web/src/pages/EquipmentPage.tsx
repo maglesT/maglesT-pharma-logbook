@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { api, useOf, cleaningText, daysLeft, joinParts, type Due, can, ApiError, MEANING_LABEL, plantDay, plantTime, sterileLines, mediaFillLine, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
+import { api, useOf, UNSIGNED_OLDER, unsignedOlder, cleaningText, daysLeft, joinParts, type Due, can, ApiError, MEANING_LABEL, plantDay, plantTime, sterileLines, mediaFillLine, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
@@ -121,7 +121,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
   const mayRecord = (k: string) => types.find((t) => t.key === k)?.mayRecord ?? false;
   const available = switchedOn.filter(mayRecord);
   const activities = ACTIVITIES.filter((a) => available.includes(a.type));
-  const productName = (id: number | null) => products.find((p) => p.id === id)?.code ?? '';
+  const productName = (id: number | null) => { const p = products.find((x) => x.id === id); return p ? `${p.code} · ${p.name}` : ''; };
   const isVerifier = can(me, 'entry.verify');
 
   // Ends a use (D-49: with its reason, from its dialog, which shows a refusal) or a change over (at once).
@@ -172,7 +172,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
         <button className={tab === 'log' ? 'on' : ''} onClick={() => setTab('log')}>Logbook</button>
         <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>History card</button>
       </div>
-      {tab === 'history' && <HistoryCard me={me} equipment={equipment} />}
+      {tab === 'history' && <HistoryCard me={me} equipment={equipment} products={products} />}
       {tab === 'log' && <>
       <div className="row">
         {activities.length > 0 && (
@@ -189,6 +189,8 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
         {switchedOn.length === 0 && <p className="muted">No logbook types are switched on for this item yet.</p>}
       </div>
       {error && <p className="error">{error}</p>}
+      <p className="muted">This list shows the entries made in the Logbook. Uses recorded in TrueBatch and other products, master data
+        changes, reviews and missed limits are on the History card tab above.</p>
 
       <table>
         <thead><tr><th>When</th><th>Type</th><th>Details</th><th>By</th><th>Signatures</th><th /></tr></thead>
@@ -203,7 +205,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
               <td>{TYPE_LABEL[e.logbookType]}{e.late && <><br /><span className="chip chip-warn" title={e.lateReason ?? ''}>Late entry</span></>}</td>
               <td>
                 {e.batch && <>{joinParts([productName(e.productId), `batch ${e.batch}`])}<br /></>}
-                <Summary e={e} />
+                <Summary e={e} products={products} />
                 <VoiceLinks e={e} onOpen={setListening} />
                 {e.change === 'corrected' && <><br /><span className="muted">Corrected (version {e.version}): {e.correctionReason}</span></>}
               </td>
@@ -216,6 +218,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
                     {s.training && <div className={s.trainingTyped ? 'reason' : 'muted'}>{s.training}</div>}
                   </div>
                 ))}
+                {unsignedOlder(e) && <div className="muted">{UNSIGNED_OLDER}</div>}
                 {e.awaitingVerification && <span className="chip chip-warn">Awaiting verification</span>}
               </td>
               <td className="actions-cell">
@@ -276,7 +279,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
             await load();
           }}
         >
-          <div className="summary-box"><Summary e={verifying} full /></div>
+          <div className="summary-box"><Summary e={verifying} full products={products} /></div>
         </SignDialog>
       )}
       {releasing && (
@@ -290,7 +293,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
             await load();
           }}
         >
-          <div className="summary-box"><Summary e={releasing} full /></div>
+          <div className="summary-box"><Summary e={releasing} full products={products} /></div>
         </SignDialog>
       )}
       {listening !== null && <VoiceNoteDialog id={listening} onClose={() => setListening(null)} />}
@@ -303,7 +306,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
               <div key={v.id} className="version">
                 <strong>Version {v.version}</strong> · {v.change} by {v.enteredBy}, entered {plantTime(v.enteredAt)}
                 {v.correctionReason && <> · reason: {v.correctionReason}</>}
-                <div><Summary e={v} full /> <VoiceLinks e={v} onOpen={setListening} /></div>
+                <div><Summary e={v} full products={products} /> <VoiceLinks e={v} onOpen={setListening} /></div>
                 <div className="muted">{v.signatures.map((s) => `${MEANING_LABEL[s.meaning]}: ${s.printedName}, ${plantTime(s.signedAt)}${s.training ? ` (${s.training})` : ''}`).join(' · ')}</div>
               </div>
             ))}
@@ -369,9 +372,9 @@ export function EndUseDialog({ entry, what, onEnd, onCancel }: { entry: Entry; w
   );
 }
 
-export function Summary({ e, full = false }: { e: Entry; full?: boolean }) {
+export function Summary({ e, full = false, products }: { e: Entry; full?: boolean; products?: Product[] }) {
   const checklist = Object.entries((e.data.checklist ?? {}) as Record<string, boolean>).filter(([, v]) => v).map(([k]) => k);
-  return <Fields data={e.data} extra={full && checklist.length ? [['Checklist confirmed', checklist.join('; ')]] : []} />;
+  return <Fields data={e.data} products={products} extra={full && checklist.length ? [['Checklist confirmed', checklist.join('; ')]] : []} />;
 }
 
 // Owner 2026-11-12 (slide 4): what is checked before use, when the item is scanned or opened.

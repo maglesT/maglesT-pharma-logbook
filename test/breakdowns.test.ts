@@ -472,6 +472,6 @@ describe('printed records (S13)', () => {
     expect(entryLines({ partsNone: true, cleaningType: 'batch_to_batch' })).toEqual(['No parts used', 'Cleaning: Batch to batch']);
     // An overdue record in words, no record number or stored time.
     expect(changeLines(null, { event: 22, kind: 'clean_hold', dueAt: '2026-11-15T20:08:00.000Z' }, 'overdue.recorded'))
-      .toEqual(['Clean hold expired, due 16 Nov 2026, 1:38 am IST']);
+      .toEqual(['Clean hold expired, due 16 Nov 2026, 01:38 IST']);
   });
 });

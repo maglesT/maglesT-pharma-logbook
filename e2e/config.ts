@@ -1,4 +1,5 @@
-export const E2E_PORT = 4173;
+// Another run on the same machine may hold the default port: E2E_PORT moves it.
+export const E2E_PORT = Number(process.env.E2E_PORT ?? 4173);
 export const E2E_SCHEMA = 'e2e';
 export const USERS = {
   admin: ['admin'],

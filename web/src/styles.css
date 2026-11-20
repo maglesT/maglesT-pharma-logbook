@@ -129,6 +129,10 @@ table.register td, table.register th { padding: 10px 10px; }
 .dialog { width: 100%; max-width: 480px; max-height: 92vh; overflow: auto; box-shadow: 0 20px 50px rgba(15, 23, 42, 0.3); padding: 22px; }
 .wide { max-width: 760px; max-height: 92vh; overflow: auto; }
 .dialog.wider { max-width: 1140px; }
+/* A long choice (a product name) never widens a dialog past its edge: fields shrink to the dialog's width. */
+.dialog { grid-template-columns: minmax(0, 1fr); }
+.dialog label:not(.check) { grid-template-columns: minmax(0, 1fr); }
+.dialog input:not([type='checkbox']):not([type='radio']), .dialog select, .dialog textarea { max-width: 100%; min-width: 0; }
 .signbox { border: 2px solid var(--brand); background: var(--brand-soft); border-radius: 10px; padding: 14px; display: grid; gap: 8px; }
 .signbox p { margin: 0; }
 .summary-box { background: #f7f9fc; border: 1px solid var(--line); padding: 12px; border-radius: 10px; max-height: 40vh; overflow: auto; }

@@ -10,7 +10,7 @@ import type { Sql } from '../db.js';
 import { logbookItem, type Master } from '../master.js';
 import { parseId, requirePermission } from '../auth.js';
 import { entryLines, recordLines } from '../changes.js';
-import { TYPE_LABEL } from '../labels.js';
+import { MEANING_LABEL, PERFORMER_SIGNS, TYPE_LABEL } from '../labels.js';
 import { plantDay, plantTime } from '../status.js';
 import { present, type EntryRow } from './entries.js';
 import { auditFor, batchVersions, periodQuery, periodVersions, plantRange, reviewsFor, type AuditRow } from './review.js';
@@ -62,6 +62,8 @@ interface Report {
   audit: AuditRow[];
   reviews: Review[];
   codes: Map<number, string>;
+  // D-55: product code → name, so an older change over's bare code prints with its name.
+  productNames: Map<string, string>;
 }
 
 // D-26: the signed English text is the record; the copy says that original voice data exists.
@@ -76,8 +78,9 @@ function versionNote(e: Presented, all: EntryRow[]) {
   return [note, voice].filter(Boolean).join('\n');
 }
 
-const signatureText = (e: Presented) =>
-  e.signatures.map((s) => `${s.meaning}: ${s.printedName}, ${plant(s.signedAt)}${s.valid ? '' : ' [INVALID: content changed]'}${s.training ? ` · ${s.training}` : ''}`).join('\n');
+const signatureText = (e: Presented) => (e.signatures.length === 0 && e.version === 1 && PERFORMER_SIGNS.has(e.logbookType)
+  ? 'No signature: recorded before this kind of entry was signed in the Logbook.'
+  : e.signatures.map((s) => `${MEANING_LABEL[s.meaning] ?? s.meaning}: ${s.printedName}, ${plant(s.signedAt)}${s.valid ? '' : ' [INVALID: content changed]'}${s.training ? ` · ${s.training}` : ''}`).join('\n'));
 const reviewText = (r: Review) =>
   `Reviewed by ${r.reviewedBy ?? '—'}, ${plant(r.reviewedAt)} · period ${plant(r.periodFrom)} to ${plant(r.periodTo)}` +
   `${r.superseded ? ' · SUPERSEDED: entries changed after the review' : ''}${r.valid ? '' : ' · INVALID: review content changed'}`;
@@ -172,7 +175,7 @@ async function pdf(r: Report, site: { name: string; code: string } | undefined, 
       cellText(`${r.codes.get(e.equipmentId) ?? ''}\n#${e.entryId} v${e.version}`, grey),
       cellText(`${TYPE_LABEL[e.logbookType] ?? e.logbookType}\n${versionNote(e, r.versions)}`, grey),
       cellText(`${plant(e.activityStart)}${e.activityEnd ? `\nto ${plant(e.activityEnd)}` : ''}${e.late ? `\nLATE: ${e.lateReason}` : ''}`, grey),
-      cellText(`${e.batch ? `Batch ${e.batch}\n` : ''}${entryLines(e.data).join('\n')}`, grey),
+      cellText(`${e.batch ? `Batch ${e.batch}\n` : ''}${entryLines(e.data, r.productNames).join('\n')}`, grey),
       cellText(`${e.enteredBy}\n${plant(e.enteredAt)}`, grey),
       cellText(signatureText(e), grey),
     ];
@@ -214,6 +217,7 @@ async function build(sql: Sql, master: Master, title: string, subtitle: string, 
     audit: await auditFor(sql, master, versions, reviews.map((v) => v.id)),
     reviews,
     codes,
+    productNames: new Map((await sql<{ code: string; name: string }[]>`select code, name from products`).map((p) => [p.code, p.name])),
   };
 }
 
