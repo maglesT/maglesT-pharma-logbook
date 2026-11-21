@@ -9,10 +9,10 @@ import { CyclesOff, batchWords } from '../cycles.js';
 import { parseId, requirePermission, type SessionUser } from '../auth.js';
 import { LOGBOOK_TYPES, typeByKey, type LogbookSettings } from '../logbook-types.js';
 import { DATA_SCHEMAS, REPORTED_FIELDS, checkData, correctCodes, mayCorrect, mayRecord, recordCode, performerSigns, verificationNeeded, type EntryContext, type EquipmentInfo } from '../entries.js';
-import { logbookItem, logbookProducts, type Master } from '../master.js';
+import { logbookItem, logbookProducts, type LogbookItem, type Master } from '../master.js';
 import { SignError, authenticateSigner, contentHash, proofOnly, sign, signBody } from '../signatures.js';
 import { settingsInForce } from './settings.js';
-import { allStatuses, antibioticBlocker, plantTime, statusOf, type EquipmentStatus } from '../status.js';
+import { allStatuses, antibioticBlocker, plantTime, reservationText, statusOf, type EquipmentStatus } from '../status.js';
 import { VoiceError, confirmVoiceNotes, unsignedDrafts, voiceNotesFor, type VoiceUse } from '../voice.js';
 import { recordTraining, skillName, trainingNeeded, trainingState, type TrainingResult } from '../training.js';
 
@@ -269,6 +269,19 @@ async function notForBatch(app: FastifyInstance, type: string, batch: string | n
   }
 }
 
+/**
+ * D-84 (fix round 21 Nov 2026): a move to another room. The room moved to is an active room of master data (picked, never
+ * typed); the room moved from is where the Logbook has the item now (its last move here, else master data's room), set
+ * here, never by the form. A correction keeps the room moved from.
+ */
+async function roomMove(app: FastifyInstance, item: LogbookItem, data: Record<string, unknown>, fromRoom: string | null) {
+  const to = String(data.toRoom ?? '').trim();
+  const room = (await app.master.items()).find((i) => i.kind === 'area' && i.active && i.code.toLowerCase() === to.toLowerCase());
+  if (!room) throw new EntryError(400, 'check_failed', [`${to || 'The room'} is not an active room in master data: choose the room from the list.`]);
+  if (fromRoom && room.code.toLowerCase() === fromRoom.toLowerCase()) throw new EntryError(400, 'check_failed', [`${item.code} is in ${room.code} already.`]);
+  return { toRoom: room.code, fromRoom: fromRoom ?? '' };
+}
+
 async function dbNow(tx: Tx): Promise<Date> {
   const [r] = await tx<{ now: Date }[]>`select now() as now`;
   return r!.now;
@@ -296,7 +309,7 @@ const isOpenable = (type: string, data: Record<string, unknown>) =>
 // Owner 2026-11-12 ("one activity at a time"): the activities that occupy an item. While one is in progress (a use, a
 // change over, a repair not finished) nothing else is recorded on the item except reporting a breakdown or a note, and
 // no two of them may overlap in time. A breakdown may happen during another activity, so it is not checked for overlap.
-const ACTIVITIES = ['equipment_use', 'equipment_cleaning', 'area_cleaning', 'change_over', 'maintenance', 'calibration', 'requalification'];
+const ACTIVITIES = ['equipment_use', 'equipment_cleaning', 'area_cleaning', 'change_over', 'maintenance', 'calibration', 'requalification', 'room_move'];
 const ACTIVITY_LABEL: Record<string, string> = { equipment_use: 'in use', change_over: 'in change over', maintenance: 'under repair' };
 async function oneActivityAtATime(tx: Tx, equipmentId: number, type: string, data: Record<string, unknown>, start: Date, end: Date | null,
   ignoreEntryId: number | null = null, checkOpen = true) {
@@ -470,6 +483,11 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         // D-70 (G15): a use while Qualification is linked but down is not checked against it; the entry says so.
         if (isUse && ctx.qualDown) flags.qualNotChecked = 'Qualification was not reachable';
         if (isUse && (!b.productId || !b.batch)) throw new EntryError(400, 'check_failed', ['Product and batch are required.']);
+        // D-85: an item reserved now for a batch is used for that batch only (a reservation without a batch only warns).
+        const held = status.reservation;
+        if (isUse && held?.now && held.batch && held.batch.toLowerCase() !== b.batch!.toLowerCase()) {
+          throw new EntryError(409, 'reserved', [`${reservationText(held)}. Use it for batch ${held.batch}, or ask for the reservation to be cancelled.`]);
+        }
         // D-67: a product change to or from an antibiotic needs a product-changeover cleaning after the last use.
         if (isUse && status.schedule !== null && status.lastUseEnd) {
           const products = await logbookProducts(tx, app.master);
@@ -488,6 +506,11 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         const openChangeOver = b.logbookType === 'change_over' && !b.activityEnd;
         const end = isUse || openBreakdown || openChangeOver ? null : (b.activityEnd ?? b.activityStart);
         if (b.logbookType === 'change_over' && status.inUse) throw new EntryError(409, 'busy', ['End the use first: a change over follows the use.']);
+        // D-84: an item in use (here or in a linked product) is not moved.
+        if (b.logbookType === 'room_move') {
+          if (status.inUse) throw new EntryError(409, 'busy', [`${item.code} is in use${status.inUse.batch ? ` by batch ${status.inUse.batch}` : ''}: move it once the use has ended.`]);
+          Object.assign(b.data, await roomMove(app, item, b.data, item.room));
+        }
         await oneActivityAtATime(tx, equipmentId, b.logbookType, b.data, b.activityStart, end);
         // Owner 2026-11-12: a requalification from a protocol takes its stage, result and next due date from the
         // Qualification product (the approved report); nothing is typed again.
@@ -650,6 +673,12 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         const lateReason = late ? (b.lateReason?.trim() || prev.late_reason) : null;
         if (late && !lateReason) {
           throw new EntryError(400, 'late_reason_required', [`The corrected time is more than ${LATE_MINUTES} minutes before the entry was made: give a reason.`]);
+        }
+        // D-84: a corrected move keeps the room it was moved from; the room moved to is checked again.
+        if (prev.logbook_type === 'room_move') {
+          const item = await logbookItem(tx, app.master, prev.equipment_id);
+          if (!item) throw new EntryError(409, 'equipment_unknown', ['No such equipment in master data.']);
+          Object.assign(b.data, await roomMove(app, item, b.data, String(prev.data.fromRoom ?? '') || null));
         }
         const breakdownEntry = prev.logbook_type === 'maintenance' && prev.data.kind === 'breakdown';
         const data = { ...validate(prev.logbook_type, b.data, s!.settings, eq, b.activityStart, { end, legacy: breakdownEntry && await isLegacyBreakdown(tx, prev.entry_id) }), ...flags };

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, ApiError, can, localInputValue, plantTime, type LogbookTypeInfo, type Me, type Settings, type SettingsVersion, type TrainingSkills, VOICE_LANGUAGE_LABEL } from '../api.js';
+import { api, ApiError, can, LEAK_UNITS, localInputValue, plantTime, type LogbookTypeInfo, type Me, type Settings, type SettingsVersion, type TrainingSkills, VOICE_LANGUAGE_LABEL } from '../api.js';
 
 // D-71: the site settings that are not a logbook take no training.
 const SITE_SETTINGS = ['voice_notes', 'breakdown_advice'];
@@ -104,6 +104,9 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
   const [s, setS] = useState<Settings>(start?.settings ?? blank);
   const [checklist, setChecklist] = useState(s.checklist.join('\n'));
   const [points, setPoints] = useState(pointsToText(s));
+  // D-83: the steriliser leak-test limit (largest allowed leak rate and its unit); empty: no limit.
+  const [leakMax, setLeakMax] = useState(s.leakLimit ? String(s.leakLimit.max) : '');
+  const [leakUnit, setLeakUnit] = useState(s.leakLimit?.unit ?? LEAK_UNITS[0]!);
   // Editing a draft keeps its planned date; a new version starts at now (local time).
   const draft = type.versions.find((v) => v.id === draftId);
   const [effective, setEffective] = useState(localInputValue(draft?.effectiveFrom ?? new Date()));
@@ -120,8 +123,11 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
     if (pressurePoints.some((p) => !p.ccsRef || !Number.isFinite(p.min) || !Number.isFinite(p.max) || p.min > p.max)) {
       return setError('Each pressure point needs: name; CCS reference; min; max (min not above max).');
     }
-    const { training, ...rest } = s;
+    const max = leakMax.trim() === '' ? null : Number(leakMax.trim().replace(',', '.'));
+    if (type.key === 'steriliser_test' && max !== null && !(Number.isFinite(max) && max > 0)) return setError('The leak limit must be a number above 0.');
+    const { training, leakLimit: _old, ...rest } = s;
     const settings = {
+      ...(type.key === 'steriliser_test' && max !== null ? { leakLimit: { max, unit: leakUnit } } : {}),
       ...rest,
       ...(training?.code.trim() ? { training: { code: training.code.trim(), title: training.title.trim() } } : {}),
       checklist: checklist.split('\n').map((l) => l.trim()).filter(Boolean),
@@ -173,6 +179,17 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
         {type.key === 'pressure_reading' && (
           <label>Non-critical pressure points (one per line: name; CCS reference; min Pa; max Pa)<textarea value={points} onChange={(e) => setPoints(e.target.value)} /></label>
         )}
+        {type.key === 'steriliser_test' && (
+          <fieldset>
+            <legend>Vacuum leak test limit (leave empty for none: the person then records pass or fail)</legend>
+            <label>Largest allowed leak rate<input inputMode="decimal" value={leakMax} onChange={(e) => setLeakMax(e.target.value)} /></label>
+            <label>Unit (the reading is taken in this unit)
+              <select value={leakUnit} onChange={(e) => setLeakUnit(e.target.value)}>
+                {LEAK_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+              </select>
+            </label>
+          </fieldset>
+        )}
         {skills && (skills.linked ? (
           <label>Training needed to sign (Recruitment)
             <select value={s.training?.code ?? ''} onChange={(e) => {
@@ -211,6 +228,7 @@ function SettingsSummary({ v }: { v: SettingsVersion }) {
       <dt>SOP</dt><dd>{s.sopRef || '—'}</dd>
       <dt>Effective from</dt><dd>{plantTime(v.effectiveFrom)} (or the approval time, if later)</dd>
       <dt>Second-person verification</dt><dd>{s.verificationRequired ? 'Required' : 'As the rules require'}</dd>
+      {s.leakLimit && (<><dt>Leak test limit</dt><dd>not more than {s.leakLimit.max} {s.leakLimit.unit}</dd></>)}
       {s.training && (<><dt>Training needed to sign</dt><dd>{skillName(s.training)}</dd></>)}
       {s.checklist.length > 0 && (<><dt>Checklist</dt><dd><ul>{s.checklist.map((c) => <li key={c}>{c}</li>)}</ul></dd></>)}
       {(s.voiceLanguages ?? []).length > 0 && (

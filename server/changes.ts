@@ -11,6 +11,8 @@ const LABEL: Record<string, string> = {
   assetNumber: 'Asset no.', manufacturer: 'Manufacturer', model: 'Model', serialNumber: 'Serial no.', capacity: 'Capacity',
   installationDate: 'Installed', supplier: 'Supplier', qualificationStatus: 'Qualification', iq: 'IQ', oq: 'OQ', pq: 'PQ',
   lastRequalification: 'Last requalification', productContactMoc: 'Product contact / MOC', sopRefs: 'SOPs',
+  // D-85: a reservation.
+  from: 'From', until: 'Until', batch: 'Batch', purpose: 'Why',
 };
 const HIDDEN = new Set(['id', 'version', 'createdAt', 'created_at', 'itemId']);
 // Fields in the order people read them; unknown fields last.
@@ -44,6 +46,12 @@ export function changeLines(old: unknown, next: unknown, action = ''): string[] 
   if (action === 'overdue.recorded' && isObj(next)) {
     const kind = String(next.kind ?? '');
     return [`${OVERDUE_LABEL[kind] ?? text(kind)}${next.dueAt ? `, due ${plantTime(new Date(String(next.dueAt)))}` : ''}`];
+  }
+  // D-85: a reservation made or cancelled reads as the reservation itself (the cancellation's reason is the event's reason).
+  if (action.startsWith('reservation.')) {
+    const v = fields(next ?? old);
+    return Object.keys(v).filter((k) => !HIDDEN.has(k) && k !== 'batchTyped' && !empty(v[k])).sort((a, b) => rank(a) - rank(b))
+      .map((k) => `${LABEL[k] ?? k}: ${text(v[k])}${k === 'batch' && v.batchTyped ? ' (typed by hand)' : ''}`);
   }
   const before = old == null ? null : fields(old);
   const after = fields(next);

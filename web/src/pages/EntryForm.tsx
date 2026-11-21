@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { api, ApiError, refusalLines, getSignProof, joinParts, plantDay, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type BatchChoice, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
+import { api, ApiError, LEAK_UNITS, refusalLines, getSignProof, joinParts, plantDay, FAILURE_CATEGORIES, localInputValue, PERFORMER_SIGNS, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type Entry, type Equipment, type Part, type BatchChoice, type Product, type Settings, type VoiceConfig, type VoiceDraft } from '../api.js';
 import { TrainingLine } from '../components/TrainingLine.js';
 import { VoiceButton } from '../components/VoiceNote.js';
 import { OUTCOME_LABEL, STAGE_LABEL } from '../fields.js';
@@ -22,7 +22,8 @@ const EMPTY: Record<string, Data> = {
   change_over: { fromProduct: '', fromBatch: '', toProduct: '', toBatch: '', checklist: {}, remarks: '' },
   requalification: { source: 'protocol', protocolNumber: '', stage: '', outcome: 'pass', nextDue: '', doneBy: 'in_house', vendorName: '', reportRef: '', remarks: '', comment: '', deviationRef: '' },
   steriliser_cycle: { cycleType: 'steam', cycleId: '', programme: '', load: '', result: 'pass', controllerRecordRef: '', indicators: '', remarks: '', comment: '', deviationRef: '' },
-  steriliser_test: { test: 'air_removal', result: 'pass', remarks: '', comment: '', deviationRef: '' },
+  steriliser_test: { test: 'air_removal', result: 'pass', cycleId: '', controllerRecordRef: '', testPackLot: '', leakRate: '', remarks: '', comment: '', deviationRef: '' },
+  room_move: { toRoom: '', reason: '' },
   glove_integrity: { port: '', method: '', result: 'pass', remarks: '', comment: '', deviationRef: '' },
   pressure_reading: { point: '', value: '', comment: '', deviationRef: '' },
 };
@@ -50,7 +51,8 @@ const TEXT_FIELDS: Record<string, [string, string, boolean?][]> = {
   // Requalification has its own field layout (RequalificationFields).
   requalification: [['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
   steriliser_cycle: [['cycleId', 'Cycle number'], ['programme', 'Programme'], ['load', 'Load', true], ['controllerRecordRef', 'Controller printout / record reference'], ['indicators', 'Indicators (BI/CI) used'], ['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
-  steriliser_test: [['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
+  steriliser_test: [['cycleId', 'Test cycle number'], ['controllerRecordRef', 'Controller printout / record reference'], ['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
+  room_move: [['reason', 'Why it is moved', true]],
   glove_integrity: [['port', 'Glove port'], ['method', 'Test method'], ['remarks', 'Remarks', true], ['comment', 'Comment (needed if failed)', true], ['deviationRef', 'Deviation reference (needed if failed)']],
   pressure_reading: [['comment', 'Comment (needed if out of limits)', true], ['deviationRef', 'Deviation reference (needed if out of limits)']],
 };
@@ -61,6 +63,17 @@ const HAS_CHECKLIST = new Set(['equipment_cleaning', 'area_cleaning', 'general_l
 const HAS_END = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'steriliser_cycle']);
 
 const BREAKDOWN_ONLY = ['occurredAt', 'reportedBy', 'failureCategory', 'rootCause'];
+
+// D-83: a steriliser test as the server takes it: the leak rate as a number (decimal comma accepted), only for a leak
+// test; the unit only where no approved limit fixes it; the server works out the result against the limit.
+function sterileTestPayload(data: Data, settings: Settings): Data {
+  const { leakMax: _limit, ...out } = data;
+  const raw = String(out.leakRate ?? '').trim();
+  if (out.test === 'leak' && raw !== '') out.leakRate = Number(raw.replace(',', '.')); else delete out.leakRate;
+  if (out.test !== 'leak' || settings.leakLimit || out.leakRate === undefined) delete out.leakUnit;
+  if (out.test === 'leak') out.testPackLot = '';
+  return out;
+}
 
 // Maintenance data as the server takes it: empty choices left out, quantities as numbers. An
 // occurrence time the user did not touch is sent exactly as stored (review S9).
@@ -129,6 +142,11 @@ export function EntryForm({
       .then(setBatchList)
       .catch((e) => setBatchList({ linked: true, batches: [], error: e instanceof Error ? e.message : String(e) }));
   }, [type, equipment.id]);
+  // D-84: the active rooms of master data, for a move.
+  const [rooms, setRooms] = useState<{ code: string; name: string }[]>([]);
+  useEffect(() => {
+    if (type === 'room_move') void api<{ code: string; name: string }[]>('GET', '/api/rooms').then(setRooms).catch(() => setRooms([]));
+  }, [type]);
   // D-78: with TrueBatch Injectables linked, cycles for its batches are recorded there; this form is for the others.
   const [cyclesFrom, setCyclesFrom] = useState<string | null>(null);
   useEffect(() => {
@@ -198,7 +216,7 @@ export function EntryForm({
             comment: data.comment,
             deviationRef: data.deviationRef,
           }
-        : data,
+        : type === 'steriliser_test' ? sterileTestPayload(data, settings) : data,
     };
     // Completing with the end left as offered means "now", to the second, as "End use" does (review S9).
     if (showEnd) body.activityEnd = completing && end === initialEnd ? new Date().toISOString() : new Date(end).toISOString();
@@ -308,7 +326,9 @@ export function EntryForm({
           </>
         )}
 
-        {Object.entries(type === 'maintenance' ? {} : (OPTIONS[type] ?? {})).map(([k, opts]) => (
+        {Object.entries(type === 'maintenance' ? {} : (OPTIONS[type] ?? {}))
+          // D-83: a leak test against an approved limit: the server works out the result from the reading.
+          .filter(([k]) => !(type === 'steriliser_test' && k === 'result' && data.test === 'leak' && settings.leakLimit)).map(([k, opts]) => (
           <label key={k}>
             {OPTION_LABEL[k] ?? k}
             <select value={String(data[k])} onChange={(e) => set(k, e.target.value)}>
@@ -320,6 +340,37 @@ export function EntryForm({
           <label>Next due<input type="date" value={String(data.nextDue ?? '').slice(0, 10)} onChange={(e) => set('nextDue', e.target.value)} /></label>
         )}
         {type === 'requalification' && <RequalificationFields data={data} setData={setData} equipment={equipment} />}
+        {type === 'steriliser_test' && data.test === 'leak' && (
+          <>
+            <label>Leak rate{settings.leakLimit ? ` (${settings.leakLimit.unit})` : ''}
+              <input inputMode="decimal" value={String(data.leakRate ?? '')} onChange={(e) => set('leakRate', e.target.value)} />
+            </label>
+            {settings.leakLimit
+              ? <p className="muted">Limit: not more than {settings.leakLimit.max} {settings.leakLimit.unit} (approved settings). The result is worked out from the reading.</p>
+              : (
+                <label>Unit of the leak rate
+                  <select value={String(data.leakUnit ?? '')} onChange={(e) => set('leakUnit', e.target.value || undefined)}>
+                    <option value="">Choose…</option>
+                    {LEAK_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </label>
+              )}
+          </>
+        )}
+        {type === 'steriliser_test' && data.test === 'air_removal' && (
+          <label>Test pack / sheet lot<input value={String(data.testPackLot ?? '')} onChange={(e) => set('testPackLot', e.target.value)} /></label>
+        )}
+        {type === 'room_move' && (
+          <>
+            <p className="muted">From room: <strong>{(correcting ? String(correcting.data.fromRoom ?? '') : equipment.location) || 'no room'}</strong></p>
+            <label>To room (from master data)
+              <select value={String(data.toRoom ?? '')} onChange={(e) => set('toRoom', e.target.value)}>
+                <option value="">Choose the room…</option>
+                {rooms.filter((r) => correcting || r.code !== equipment.location).map((r) => <option key={r.code} value={r.code}>{r.code} · {r.name}</option>)}
+              </select>
+            </label>
+          </>
+        )}
         {type === 'pressure_reading' && (
           <>
             <label>
@@ -567,7 +618,7 @@ function RequalificationFields({ data, setData, equipment }: { data: Data; setDa
 }
 
 // Owner 2026-11-12: a batch is chosen from the batch records; batches using this item come first.
-function BatchSelect({ label, value, onChange, batches, inProductionOnly = false }: {
+export function BatchSelect({ label, value, onChange, batches, inProductionOnly = false }: {
   label: string; value: string; onChange: (v: string) => void; batches: BatchChoice[]; inProductionOnly?: boolean;
 }) {
   const shown = batches.filter((b) => !inProductionOnly || b.inProduction);

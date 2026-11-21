@@ -7,9 +7,10 @@ import { HistoryCard } from './HistoryCard.js';
 import { VoiceNoteDialog } from '../components/VoiceNote.js';
 import { AdviceDialog } from '../components/AdviceDialog.js';
 import { Fields } from '../fields.js';
+import { Reservations, reservationLine } from '../components/Reservations.js';
 
 const CORE_TYPES = ['equipment_use', 'equipment_cleaning', 'change_over', 'maintenance', 'calibration', 'requalification', 'area_cleaning', 'general_log',
-  'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading'];
+  'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading', 'room_move'];
 // Owner 2026-11-12 (slide 3): one "New entry" with an Activity dropdown. Breakdown and preventive maintenance are both
 // the maintenance logbook, opened with the kind chosen.
 const ACTIVITIES: { key: string; label: string; type: string; preset?: Record<string, unknown> }[] = [
@@ -23,9 +24,11 @@ const ACTIVITIES: { key: string; label: string; type: string; preset?: Record<st
   { key: 'requalification', label: 'Requalification', type: 'requalification' },
   { key: 'others', label: 'Others (general log)', type: 'general_log' },
   { key: 'steriliser_cycle', label: 'Sterilisation cycle', type: 'steriliser_cycle' },
-  { key: 'steriliser_test', label: 'Steriliser test', type: 'steriliser_test' },
+  { key: 'steriliser_test', label: 'Steriliser test (vacuum leak / Bowie-Dick)', type: 'steriliser_test' },
   { key: 'glove_integrity', label: 'Glove integrity', type: 'glove_integrity' },
   { key: 'pressure_reading', label: 'Pressure reading', type: 'pressure_reading' },
+  // D-84: a move to another room (reason and e-signature).
+  { key: 'room_move', label: 'Move to another room', type: 'room_move' },
 ];
 const STERILE_TYPES = new Set(['steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading']);
 const APPLIES: Record<string, Equipment['kind'][]> = {
@@ -41,6 +44,7 @@ const APPLIES: Record<string, Equipment['kind'][]> = {
   steriliser_test: ['equipment'],
   glove_integrity: ['equipment'],
   pressure_reading: ['area'],
+  room_move: ['equipment', 'instrument'],
 };
 
 // Equipment list, then one equipment item's logbook (FRS screen 2).
@@ -84,7 +88,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
   const [products, setProducts] = useState<Product[]>([]);
   const [form, setForm] = useState<{ type: string; correcting?: Entry; completing?: Entry; preset?: Record<string, unknown> } | null>(null);
   const [activity, setActivity] = useState('');
-  const [tab, setTab] = useState<'log' | 'history'>('log');
+  const [tab, setTab] = useState<'log' | 'history' | 'reservations'>('log');
   const [verifying, setVerifying] = useState<Entry | null>(null);
   const [releasing, setReleasing] = useState<Entry | null>(null);
   const [status, setStatus] = useState<EquipmentStatus | null>(null);
@@ -164,6 +168,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
           {sterileLines(status).map((l) => <span key={l}>{l}</span>)}
           {mediaFillLine(status) && <span>{mediaFillLine(status)}</span>}
           {status.calibrationDue && <span>Calibration due {plantDay(status.calibrationDue)}</span>}
+          {status.reservation && !status.reservation.now && <span>{reservationLine(status.reservation, 'Next reservation')}</span>}
           {[...status.blockers, ...status.warnings].map((b) => <span key={b} className="reason">{b}</span>)}
         </div>
       )}
@@ -171,8 +176,10 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
       <div className="subtabs">
         <button className={tab === 'log' ? 'on' : ''} onClick={() => setTab('log')}>Logbook</button>
         <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>History card</button>
+        <button className={tab === 'reservations' ? 'on' : ''} onClick={() => setTab('reservations')}>Reservations</button>
       </div>
       {tab === 'history' && <HistoryCard me={me} equipment={equipment} products={products} />}
+      {tab === 'reservations' && <Reservations me={me} equipment={equipment} onChange={load} />}
       {tab === 'log' && <>
       <div className="row">
         {activities.length > 0 && (

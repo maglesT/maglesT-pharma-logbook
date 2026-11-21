@@ -38,22 +38,31 @@ export async function saveStatuses(q: Sql | Tx, statuses: EquipmentStatus[], ctx
       clean_until: s.cleanUntil, calibration_due: s.calibrationDue, qualification: s.qualification, checked_at: s.checkedAt,
       last_decontamination: s.lastDecontamination, sterile_valid_until: s.sterileValidUntil, last_glove_test: s.lastGloveTest,
       only_product: s.onlyProduct,
+      // D-84, D-85: the Logbook's room and the reservation in force or next.
+      room_code: s.room, moved_at: s.movedAt,
+      reserved_from: s.reservation?.from ?? null, reserved_until: s.reservation?.until ?? null, reserved_for_batch: s.reservation?.batch ?? null,
+      reserved_by: s.reservation?.by ?? null, reserved_purpose: s.reservation?.purpose ?? null,
     };
   });
   await q`
     insert into item_status (equipment_id, state, fit_for_use, blockers, warnings, in_use_batch, cleaned_at, cleaned_by, clean_until,
-      calibration_due, qualification, checked_at, last_decontamination, sterile_valid_until, last_glove_test, only_product)
+      calibration_due, qualification, checked_at, last_decontamination, sterile_valid_until, last_glove_test, only_product,
+      room_code, moved_at, reserved_from, reserved_until, reserved_for_batch, reserved_by, reserved_purpose)
     select r.equipment_id, r.state, r.fit_for_use, r.blockers, r.warnings, r.in_use_batch, r.cleaned_at, r.cleaned_by, r.clean_until,
-      r.calibration_due, r.qualification, r.checked_at, r.last_decontamination, r.sterile_valid_until, r.last_glove_test, r.only_product
+      r.calibration_due, r.qualification, r.checked_at, r.last_decontamination, r.sterile_valid_until, r.last_glove_test, r.only_product,
+      r.room_code, r.moved_at, r.reserved_from, r.reserved_until, r.reserved_for_batch, r.reserved_by, r.reserved_purpose
     from jsonb_to_recordset(${q.json(rows as never)}) as r(equipment_id bigint, state text, fit_for_use boolean, blockers text[], warnings text[],
       in_use_batch text, cleaned_at timestamptz, cleaned_by text, clean_until timestamptz, calibration_due date, qualification text, checked_at timestamptz,
-      last_decontamination timestamptz, sterile_valid_until date, last_glove_test timestamptz, only_product text)
+      last_decontamination timestamptz, sterile_valid_until date, last_glove_test timestamptz, only_product text,
+      room_code text, moved_at timestamptz, reserved_from timestamptz, reserved_until timestamptz, reserved_for_batch text, reserved_by text, reserved_purpose text)
     on conflict (equipment_id) do update set state = excluded.state, fit_for_use = excluded.fit_for_use, blockers = excluded.blockers,
       warnings = excluded.warnings, in_use_batch = excluded.in_use_batch, cleaned_at = excluded.cleaned_at, cleaned_by = excluded.cleaned_by,
       clean_until = excluded.clean_until, calibration_due = excluded.calibration_due, qualification = excluded.qualification,
       checked_at = excluded.checked_at, last_decontamination = excluded.last_decontamination,
       sterile_valid_until = excluded.sterile_valid_until, last_glove_test = excluded.last_glove_test,
-      only_product = excluded.only_product
+      only_product = excluded.only_product, room_code = excluded.room_code, moved_at = excluded.moved_at,
+      reserved_from = excluded.reserved_from, reserved_until = excluded.reserved_until, reserved_for_batch = excluded.reserved_for_batch,
+      reserved_by = excluded.reserved_by, reserved_purpose = excluded.reserved_purpose
     where item_status.checked_at <= excluded.checked_at`;
 }
 

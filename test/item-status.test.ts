@@ -16,7 +16,7 @@ const sig = (u: string) => ({ proof: proofFor(u) });
 const now = () => new Date().toISOString();
 const COLUMNS = ['master_id', 'code', 'kind', 'state', 'fit_for_use', 'blockers', 'warnings', 'in_use_batch', 'cleaned_at', 'cleaned_by',
   'clean_until', 'calibration_due', 'qualification', 'checked_at', 'read_at', 'data_as_of', 'last_decontamination', 'sterile_valid_until',
-  'last_glove_test', 'only_product'];
+  'last_glove_test', 'only_product', 'room_code', 'moved_at', 'reserved_from', 'reserved_until', 'reserved_for_batch', 'reserved_by', 'reserved_purpose'];
 
 async function approve(type: string) {
   const id = (await call(t.app, c.admin!, 'POST', '/api/settings', { logbookType: type, settings: { enabled: true, sopRef: '', checklist: [], verificationRequired: false }, effectiveFrom: now() })).json().id;

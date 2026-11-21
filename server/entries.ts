@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Permission } from './auth.js';
-import { typeByKey, type LogbookSettings } from './logbook-types.js';
+import { LEAK_UNITS, typeByKey, type LogbookSettings } from './logbook-types.js';
 import { PERFORMER_SIGNS } from './labels.js';
 
 // Product default (LB-04): an activity time older than this makes the entry a late entry.
@@ -123,6 +123,16 @@ export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
   steriliser_test: z.object({
     test: z.enum(['leak', 'air_removal']),
     result: z.enum(['pass', 'fail']),
+    // D-83: the test cycle's number on the controller and its printout (optional).
+    cycleId: z.string().trim().max(40).default(''),
+    controllerRecordRef: z.string().trim().max(100).default(''),
+    // D-83: a vacuum leak test's reading, in the unit of the approved limit (leakUnit and leakMax are set by the server
+    // from that limit; without a limit the person picks the unit).
+    leakRate: z.number().finite().min(0).optional(),
+    leakUnit: z.enum(LEAK_UNITS).optional(),
+    leakMax: z.number().finite().optional(),
+    // D-83: an air-removal (Bowie-Dick) test: the test pack or sheet lot used.
+    testPackLot: z.string().trim().max(60).default(''),
     remarks: z.string().trim().max(1000).default(''),
     ...outOfLimit,
   }),
@@ -132,6 +142,13 @@ export const DATA_SCHEMAS: Record<string, z.ZodTypeAny> = {
     result: z.enum(['pass', 'fail']),
     remarks: z.string().trim().max(1000).default(''),
     ...outOfLimit,
+  }),
+  // D-84: a move to another room. fromRoom is set by the server (the room the Logbook has the item in now); toRoom is a
+  // room picked from master data.
+  room_move: z.object({
+    fromRoom: z.string().trim().max(40).default(''),
+    toRoom: z.string().trim().min(1).max(40),
+    reason: z.string().trim().min(1).max(1000),
   }),
   pressure_reading: z.object({
     point: z.string().trim().min(1).max(80),
@@ -164,6 +181,7 @@ const RECORD_CODE: Record<string, Permission> = {
   steriliser_test: 'logbook.entry.record_steriliser_test',
   glove_integrity: 'logbook.entry.record_sterile',
   pressure_reading: 'logbook.entry.record_sterile',
+  room_move: 'logbook.equipment.move',
 };
 export const recordCode = (type: string): Permission | undefined => RECORD_CODE[type];
 export const mayRecord = (type: string, held: Permission[]) => { const c = RECORD_CODE[type]; return !!c && held.includes(c); };
@@ -238,6 +256,25 @@ export function checkData(
     if (data.result === 'fail' && (!String(data.comment ?? '').trim() || !String(data.deviationRef ?? '').trim())) {
       problems.push('A failed calibration needs a comment and a deviation reference.');
     }
+  }
+  // D-83 (A11/D4): a leak test against an approved limit is read in the limit's unit, and the result follows from the
+  // reading (rules checked once, here). The limit is kept with the entry so the record reads on its own.
+  if (type === 'steriliser_test') {
+    const leak = data.test === 'leak';
+    const limit = settings.leakLimit;
+    if (!leak && (data.leakRate !== undefined || data.leakUnit !== undefined)) problems.push('A leak rate is for a leak test only.');
+    if (leak && data.testPackLot) problems.push('A test pack lot is for an air-removal (Bowie-Dick) test only.');
+    delete data.leakMax;
+    if (leak && limit) {
+      if (data.leakRate === undefined) problems.push(`Give the leak rate in ${limit.unit} (limit: not more than ${limit.max} ${limit.unit}).`);
+      else if (data.leakUnit !== undefined && data.leakUnit !== limit.unit) {
+        problems.push(`The leak limit is in ${limit.unit}: give the reading in ${limit.unit}, not ${String(data.leakUnit)}.`);
+      } else {
+        data.leakUnit = limit.unit;
+        data.leakMax = limit.max;
+        data.result = (data.leakRate as number) <= limit.max ? 'pass' : 'fail';
+      }
+    } else if (leak && data.leakRate !== undefined && data.leakUnit === undefined) problems.push('Choose the unit of the leak rate.');
   }
   // A failed sterile check needs a comment and a deviation reference (A1 3.2 non-conformities).
   if (['steriliser_cycle', 'steriliser_test', 'glove_integrity'].includes(type) && data.result === 'fail'

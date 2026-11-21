@@ -29,13 +29,15 @@ import type { Training } from './training.js';
 import type { Sops } from './sops.js';
 import { trainingRoutes } from './routes/training.js';
 import { batchRoutes } from './routes/batches.js';
+import { reservationRoutes } from './routes/reservations.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { overdueRoutes } from './routes/overdue.js';
 import { statusContext, type StatusContext } from './status.js';
 import { refreshStatus } from './item-status.js';
 
 // D-45: a write that can change an item's status (a new entry, completing, correcting, verifying or releasing one).
-const STATUS_WRITE = /^\/api\/(?:equipment\/(\d+)\/entries|entries\/(\d+)\/(?:complete|correct|verify|release))(?:\?|$)/;
+// D-85: a reservation made or cancelled is published at once too.
+const STATUS_WRITE = /^\/api\/(?:equipment\/(\d+)\/(?:entries|reservations(?:\/\d+\/cancel)?)|entries\/(\d+)\/(?:complete|correct|verify|release))(?:\?|$)/;
 
 export const VERSION = '0.5.0';
 
@@ -134,6 +136,7 @@ export async function buildApp({ sql, signOn, master, qualification = null, devi
   adviceRoutes(app, sql, advisor);
   overdueRoutes(app, sql);
   batchRoutes(app, sql);
+  reservationRoutes(app, sql);
   dashboardRoutes(app, sql);
   trainingRoutes(app, sql);
 

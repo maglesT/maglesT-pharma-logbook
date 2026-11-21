@@ -136,7 +136,11 @@ export interface Settings {
   voiceLanguages?: string[];
   // D-71: the training a signer needs (a Recruitment skill); none when left out.
   training?: Skill;
+  // D-83: steriliser test settings: the largest allowed vacuum leak rate and its unit.
+  leakLimit?: { max: number; unit: string };
 }
+// D-83: the units a leak test is read in (server/logbook-types.ts LEAK_UNITS).
+export const LEAK_UNITS = ['mbar/min', 'kPa/min'];
 
 // D-71: Recruitment's skills, and what signing asks of the signed-in person.
 export interface Skill { code: string; title: string }
@@ -252,7 +256,15 @@ export interface EquipmentStatus {
   qualification: string | null;
   // D-73: a sterile barrier's newest approved media fill (of it or its room), from Qualification.
   mediaFill?: { number: string; itemCode: string; outcome: string | null; approvedAt: string; nextDue: string | null; overdue: boolean } | null;
+  // D-84: the room the Logbook has the item in (its last move here, else master data's) and that move's time.
+  room?: string | null;
+  movedAt?: string | null;
+  // D-85: the reservation in force now (now: true), else the next one.
+  reservation?: { id: number; from: string; until: string; batch: string | null; by: string; purpose: string; now: boolean } | null;
 }
+// D-85: a reservation of an item, with its cancellation.
+export interface Reservation { id: number; from: string; until: string; batch: string | null; purpose: string; by: string; createdAt: string;
+  cancelled: { at: string; by: string; reason: string } | null }
 // D-73: "Media fill: passed 17 Nov 2026, due 17 May 2027" (the overdue or failed case is in the warnings).
 const MEDIA_FILL_OUTCOME: Record<string, string> = { pass: 'passed', pass_conditions: 'passed with conditions', fail: 'failed' };
 export const mediaFillLine = (status: Pick<EquipmentStatus, 'mediaFill'>) => {

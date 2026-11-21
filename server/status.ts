@@ -58,8 +58,15 @@ export interface EquipmentStatus {
   // D-73: a sterile barrier's newest approved media fill (of it or its room), from Qualification; null: not a barrier,
   // Qualification not linked or down, or none approved (then a warning says so).
   mediaFill: { number: string; itemCode: string; outcome: string | null; approvedAt: string; nextDue: string | null; overdue: boolean } | null;
+  // D-84: the room the Logbook has the item in now (its last move here, else master data's room) and that move's time.
+  room: string | null;
+  movedAt: Date | null;
+  // D-85: the reservation in force now, else the next one (null: none).
+  reservation: Reservation | null;
   checkedAt: Date;
 }
+
+export interface Reservation { id: number; from: Date; until: Date; batch: string | null; by: string; purpose: string; now: boolean }
 
 export interface SterileDue {
   kind: 'steriliser_test' | 'decontamination' | 'glove_test' | 'sip';
@@ -214,8 +221,10 @@ export const QUAL_DOWN_WARNING = 'Qualification not reachable: qualification not
 interface Facts {
   id: number;
   kind: 'equipment' | 'instrument' | 'area';
-  // From master data (platform D-24), merged in after the query.
-  care: Care & { needsCalibration: boolean; addedAt: Date };
+  // From master data (platform D-24), merged in after the query; D-84: with the Logbook's room.
+  care: Care & { needsCalibration: boolean; addedAt: Date; room?: string | null; masterRoom?: string | null; movedAt?: Date | null };
+  // D-85: the reservation in force now or the next one, as JSON from the query.
+  reservation: { id: number; from: string; until: string; batch: string | null; by: string; purpose: string } | null;
   qual: QualStatus | null;
   hasQual: boolean;
   tb: { open: TrueBatchUse | null; last: TrueBatchUse | null } | null;
@@ -381,6 +390,11 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
          select distinct on (l.data->>'point') l.data->>'point' as point, (l.data->>'outOfLimit')::boolean as oos
          from latest l where l.equipment_id = q.id and l.logbook_type = 'pressure_reading'
          order by l.data->>'point', l.activity_start desc) p where p.oos) as pressure_out_of_limit,
+      -- D-85: the reservation in force now, else the next one (not cancelled).
+      (select jsonb_build_object('id', r.id, 'from', r.starts_at, 'until', r.ends_at, 'batch', r.batch, 'by', r.reserved_by_name, 'purpose', r.purpose)
+         from reservations r where r.equipment_id = q.id and r.ends_at > now()
+           and not exists (select 1 from reservation_cancellations x where x.reservation_id = r.id)
+         order by r.starts_at limit 1) as reservation,
       to_char((now() at time zone ${PLANT_TZ})::date, 'YYYY-MM-DD') as today,
       now() as now
     from equipment q
@@ -512,6 +526,18 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     if (until < f.today) { blockers.push(`${what} overdue since ${plantDay(addDays(until, 1))}: ${todo} before use.`); sterileState = 'sterile_expired'; }
   }
   for (const point of f.pressure_out_of_limit ?? []) warnings.push(`Last pressure reading out of limits: ${point}.`);
+
+  // D-84: moved here to another room than master data shows: the Logbook's room counts; master data should follow.
+  const room = f.care.room ?? null;
+  const movedAt = f.care.movedAt ?? null;
+  if (movedAt && f.kind !== 'area' && room !== (f.care.masterRoom ?? null)) {
+    warnings.push(`Moved to ${room} on ${plantTime(movedAt)}; master data still shows ${f.care.masterRoom ?? 'no room'}: ask the master data editor to update it.`);
+  }
+  // D-85: a reservation in force now is a warning (the use for its batch goes on; the Logbook refuses another batch).
+  const r = f.reservation;
+  const reservation: Reservation | null = r ? { id: r.id, from: new Date(r.from), until: new Date(r.until), batch: r.batch, by: r.by, purpose: r.purpose,
+    now: new Date(r.from).getTime() <= now } : null;
+  if (reservation?.now) warnings.push(reservationText(reservation));
 
   // LB-07: cleaning status, where the site tracks cleaning for this kind of item. A frequency-based room is due its
   // cleaning every cleaning_frequency_hours; everything else is cleaned after use, within its dirty hold, and stays clean
@@ -660,10 +686,17 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     lastUseProductCode,
     onlyProduct,
     mediaFill,
+    room,
+    movedAt,
+    reservation,
     changeoverCleaned: f.last_changeover_clean_end !== null,
     checkedAt: f.now,
   };
 }
+
+/** D-85: a reservation in words. */
+export const reservationText = (r: Pick<Reservation, 'from' | 'until' | 'batch' | 'by' | 'purpose'>) =>
+  `Reserved${r.batch ? ` for batch ${r.batch}` : ''} from ${plantTime(r.from)} to ${plantTime(r.until)} by ${r.by}: ${r.purpose}`;
 
 export async function statusOf(q: Sql | Tx, equipmentId: number, ctx: StatusContext): Promise<EquipmentStatus | null> {
   const [f] = await facts(q, [equipmentId], ctx);

@@ -15,10 +15,11 @@ export const TYPE_LABEL: Record<string, string> = {
   steriliser_test: 'Steriliser test',
   glove_integrity: 'Glove integrity',
   pressure_reading: 'Pressure reading',
+  room_move: 'Move to another room',
 };
 
 // D-16: these types are signed by the performer (one list for the server and the pages).
-export const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading', 'change_over', 'requalification']);
+export const PERFORMER_SIGNS = new Set(['equipment_cleaning', 'maintenance', 'area_cleaning', 'calibration', 'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading', 'change_over', 'requalification', 'room_move']);
 
 // Signature meanings in words (screens and printed copies).
 export const MEANING_LABEL: Record<string, string> = {
@@ -42,7 +43,9 @@ export const ENTRY_FIELD_LABEL: Record<string, string> = {
   postRepairChecks: 'Post-repair checks', recalibrationNeeded: 'Re-calibration needed',
   source: 'Recorded from', protocolNumber: 'Protocol', stage: 'Stage', outcome: 'Result', reportRef: 'Report', cleaningType: 'Cleaning', agent: 'Agent', sporicidal: 'Sporicidal', disinfectantLot: 'Disinfectant lot',
   cycleType: 'Cycle', cycleId: 'Cycle no.', programme: 'Programme', load: 'Load', controllerRecordRef: 'Controller record', indicators: 'Indicators',
-  test: 'Test', port: 'Port', method: 'Method', point: 'Point', value: 'Reading', outOfLimit: 'OUT OF LIMITS',
+  // D-84: a move to another room.
+  fromRoom: 'From room', toRoom: 'To room', reason: 'Why moved',
+  test: 'Test', leakRate: 'Leak rate', leakUnit: 'Unit', leakMax: 'Limit (not more than)', testPackLot: 'Test pack lot', port: 'Port', method: 'Method', point: 'Point', value: 'Reading', outOfLimit: 'OUT OF LIMITS',
   result: 'Result', certificateRef: 'Certificate', nextDue: 'Next due', notes: 'Notes', remarks: 'Remarks', comment: 'Comment', deviationRef: 'Deviation',
   // D-46: why a cleaning ended after its dirty hold ran out.
   delayReason: 'Why late',
@@ -110,6 +113,7 @@ export const ITEM_ACTION_LABEL: Record<string, string> = {
   'equipment.created': 'Item created', 'equipment.added': 'Item added from master data', 'equipment.updated': 'Master data changed',
   'equipment.details_updated': 'Equipment details changed', 'overdue.recorded': 'Overdue recorded',
   'exception.closed': 'Missed limit closed in the Logbook', 'exception.sent': 'Missed limit sent to Deviations',
+  'reservation.created': 'Equipment reserved', 'reservation.cancelled': 'Reservation cancelled',
 };
 
 // LB-18: the audit trail in words, on the screen and in the PDF copy (the CSV keeps the stored codes).
@@ -147,6 +151,8 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'overdue.recorded': 'Overdue recorded',
   'exception.closed': 'Missed limit closed in the Logbook',
   'exception.sent': 'Missed limit sent to Deviations',
+  'reservation.created': 'Equipment reserved',
+  'reservation.cancelled': 'Reservation cancelled',
 };
 export const auditActionText = (a: string) =>
   AUDIT_ACTION_LABEL[a] ?? (a.startsWith('signed.') ? `Signed: ${MEANING_LABEL[a.slice(7)] ?? a.slice(7)}` : a.replaceAll(/[._]/g, ' ').replace(/^\w/, (c) => c.toUpperCase()));

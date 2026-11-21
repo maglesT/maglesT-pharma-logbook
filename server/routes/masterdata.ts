@@ -48,6 +48,9 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
     make: i.make, model: i.model, serial: i.serial, version: i.version, active: i.active, sterile: i.sterile, classified: i.classified,
     ...i.care, needsCalibration: needsCalibrationOf(i) });
   app.get('/api/equipment', anyUser, async () => (await logbookItems(sql, app.master)).map(view));
+  // D-84: the active rooms of master data, for a move to another room (picked, never typed).
+  app.get('/api/rooms', anyUser, async () => (await app.master.items()).filter((i) => i.kind === 'area' && i.active)
+    .map((i) => ({ code: i.code, name: i.name })).sort((a, b) => a.code.localeCompare(b.code)));
 
   // The master items that can be added: not in the Logbook yet, active, and (with the Qualification link) qualified.
   // D-53: an instrument is calibrated, not qualified (the Qualification product holds equipment and rooms only): it is

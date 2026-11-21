@@ -10,6 +10,10 @@ const limit = z
 // Languages a speaker may use for voice notes (S10, D-26): Sarvam BCP-47 codes.
 export const VOICE_LANGUAGES = ['hi-IN', 'mr-IN', 'gu-IN', 'ta-IN', 'te-IN', 'kn-IN', 'ml-IN', 'bn-IN', 'pa-IN', 'od-IN', 'en-IN'] as const;
 
+// D-83 (fix round 21 Nov 2026, A11/D4): the units a steriliser leak test is read in. The approved limit names one, and the
+// reading is taken in that unit only (never a limit in kPa and a reading in mbar).
+export const LEAK_UNITS = ['mbar/min', 'kPa/min'] as const;
+
 export const settingsSchema = z.object({
   enabled: z.boolean(),
   sopRef: z.string().trim().max(100).default(''),
@@ -38,6 +42,9 @@ export const settingsSchema = z.object({
   // D-71: the training a person needs to sign "performed" or "verified" (a skill of the Recruitment product). Left out:
   // none, as before.
   training: z.object({ code: z.string().trim().min(1).max(60), title: z.string().trim().max(200).default('') }).optional(),
+  // D-83: steriliser test settings only: the largest allowed vacuum leak rate and its unit. Set: a leak test gives its
+  // reading in this unit and the result is worked out from it. Left out: the person records pass or fail as before.
+  leakLimit: z.object({ max: z.number().finite().positive(), unit: z.enum(LEAK_UNITS) }).optional(),
 });
 export type LogbookSettings = z.infer<typeof settingsSchema>;
 
@@ -64,6 +71,8 @@ export const LOGBOOK_TYPES: LogbookType[] = [
   { key: 'steriliser_test', label: 'Steriliser test (leak, air removal)', appliesTo: ['equipment'], sterile: true, alwaysVerified: true },
   { key: 'glove_integrity', label: 'Glove integrity (isolator/RABS)', appliesTo: ['equipment'], sterile: true, alwaysVerified: false },
   { key: 'pressure_reading', label: 'Pressure reading (non-critical points)', appliesTo: ['area'], sterile: true, alwaysVerified: false },
+  // D-84 (fix round 21 Nov 2026): moving an item to another room, with the reason and the performer's e-signature.
+  { key: 'room_move', label: 'Move to another room', appliesTo: ['equipment', 'instrument'], sterile: false, alwaysVerified: false },
   // A site setting, not a logbook: switches voice notes on and selects the languages (D-26).
   { key: 'voice_notes', label: 'Voice notes (site setting)', appliesTo: [], sterile: false, alwaysVerified: false },
   // A site setting: lets a language model suggest from breakdown history (D-27).

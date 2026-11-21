@@ -104,6 +104,10 @@ export interface LogbookItem extends MasterItem {
   sterile: boolean;
   classified: boolean;
   addedAt: Date;                // when the item was added to the Logbook (the start of its PM schedule if none is on record)
+  // D-84: `room` is where the Logbook has the item now: the room of its last move recorded here, else master data's room
+  // (masterRoom). movedAt: when that move was made (null: never moved in the Logbook).
+  masterRoom: string | null;
+  movedAt: Date | null;
 }
 
 /**
@@ -116,9 +120,18 @@ export async function logbookItems(sql: Sql | Tx, master: Master): Promise<Logbo
   const local = new Map((await sql<{ id: number; item_id: string; sterile: boolean; classified: boolean; created_at: Date }[]>`
     select id::int, item_id::text, sterile, classified, created_at from equipment where item_id is not null`)
     .map((r) => [r.item_id, r]));
+  // D-84: the last move of each item recorded in the Logbook (latest versions only: a corrected move counts as corrected).
+  const moves = new Map((await sql<{ id: number; to_room: string; at: Date }[]>`
+    select distinct on (e.equipment_id) e.equipment_id::int as id, e.data->>'toRoom' as to_room, e.activity_start as at
+    from entries e
+    where e.logbook_type = 'room_move' and not exists (select 1 from entries x where x.supersedes = e.id)
+    order by e.equipment_id, e.activity_start desc, e.id desc`).map((r) => [r.id, r]));
   return items.flatMap((m) => {
     const l = local.get(m.itemId);
-    return l ? [{ ...m, id: l.id, sterile: l.sterile, classified: l.classified, addedAt: l.created_at }] : [];
+    if (!l) return [];
+    const mv = m.kind === 'area' ? undefined : moves.get(l.id);
+    return [{ ...m, id: l.id, sterile: l.sterile, classified: l.classified, addedAt: l.created_at,
+      room: mv ? mv.to_room : m.room, masterRoom: m.room, movedAt: mv?.at ?? null }];
   }).sort((a, b) => a.code.localeCompare(b.code));
 }
 
@@ -134,7 +147,8 @@ export async function addToLogbook(sql: Sql | Tx, m: MasterItem, settings: { ste
 
 /** The parameters the status needs, by local id (platform D-24). */
 export const needsCalibrationOf = (i: MasterItem) => i.kind !== 'area' && (i.needsCalibration || i.care.calibrationFrequencyDays !== null);
-export async function careByLocalId(sql: Sql | Tx, master: Master): Promise<Map<number, Care & { needsCalibration: boolean; addedAt: Date; active: boolean }>> {
+export type ItemCare = Care & { needsCalibration: boolean; addedAt: Date; active: boolean; room?: string | null; masterRoom?: string | null; movedAt?: Date | null };
+export async function careByLocalId(sql: Sql | Tx, master: Master): Promise<Map<number, ItemCare>> {
   const items = await logbookItems(sql, master);
   // Calibrated when master data says so: marked "needs calibration", or with a calibration frequency. The Logbook's own
   // column only follows master data, for its published equipment_v1 (read by Deviations, D-28); it is never the source.
@@ -143,7 +157,8 @@ export async function careByLocalId(sql: Sql | Tx, master: Master): Promise<Map<
     await sql`update equipment e set needs_calibration = f.nc
       from jsonb_to_recordset(${sql.json(flags as never)}) as f(id bigint, nc boolean) where e.id = f.id and e.needs_calibration <> f.nc`;
   }
-  return new Map(items.map((i) => [i.id, { ...i.care, addedAt: i.addedAt, needsCalibration: needsCalibrationOf(i), active: i.active }]));
+  return new Map(items.map((i) => [i.id, { ...i.care, addedAt: i.addedAt, needsCalibration: needsCalibrationOf(i), active: i.active,
+    room: i.room, masterRoom: i.masterRoom, movedAt: i.movedAt }]));
 }
 
 /** One item by local id, read live; undefined if unknown. */
