@@ -91,7 +91,7 @@ export function Breakdowns({ onOpen }: { onOpen: (equipmentId: number) => void }
                     <td>{b.workDone || '—'}</td>
                     <td>{b.partsText || '—'}</td>
                     <td>{b.doneBy || '—'}</td>
-                    <td>{b.workOrderRef}</td>
+                    <td>{b.workOrder ? <>{b.workOrder.number}<br /><span className="muted">{b.workOrder.status === 'closed' ? 'Closed' : b.workOrder.status === 'done' ? 'Done' : b.workOrder.status === 'in_progress' ? 'In progress' : 'Open'}</span></> : b.workOrderRef}</td>
                     <td><span className={`chip ${cls}`}>{label}</span></td>
                   </tr>
                 );

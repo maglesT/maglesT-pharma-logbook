@@ -51,6 +51,10 @@ await migrate(schemaOwner);
 for (const [username, roles] of Object.entries(USERS)) await seedUser(schemaOwner, username, [...roles]);
 // D-80: the exception permission is per person: qa1 holds it.
 directory.get('qa1')!.permissions.push('logbook.exception.decide');
+// Work orders (22 Nov 2026): per person. sup1 raises, eng1 does, qa1 closes.
+directory.get('sup1')!.permissions.push('logbook.workorder.raise');
+directory.get('eng1')!.permissions.push('logbook.workorder.do');
+directory.get('qa1')!.permissions.push('logbook.workorder.close');
 await schemaOwner.end();
 
 const sql = connect(TEST_DATABASE_URL, { role: 'logbook_app', searchPath: E2E_SCHEMA });

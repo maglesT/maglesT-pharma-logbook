@@ -9,6 +9,7 @@ import { VoiceNoteDialog } from '../components/VoiceNote.js';
 import { AdviceDialog } from '../components/AdviceDialog.js';
 import { Fields } from '../fields.js';
 import { Reservations, reservationLine } from '../components/Reservations.js';
+import { RaiseDialog, WorkOrderPage, WorkOrdersTab, type WorkOrder } from './WorkOrders.js';
 
 const CORE_TYPES = ['equipment_use', 'equipment_cleaning', 'change_over', 'maintenance', 'calibration', 'requalification', 'area_cleaning', 'general_log',
   'steriliser_cycle', 'steriliser_test', 'glove_integrity', 'pressure_reading', 'room_move'];
@@ -89,7 +90,10 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
   const [products, setProducts] = useState<Product[]>([]);
   const [form, setForm] = useState<{ type: string; correcting?: Entry; completing?: Entry; preset?: Record<string, unknown> } | null>(null);
   const [activity, setActivity] = useState('');
-  const [tab, setTab] = useState<'log' | 'history' | 'reservations'>('log');
+  const [tab, setTab] = useState<'log' | 'history' | 'reservations' | 'workorders'>('log');
+  const [woOpen, setWoOpen] = useState<number | null>(null);
+  const [wos, setWos] = useState<WorkOrder[]>([]);
+  const [raisingFor, setRaisingFor] = useState<Entry | null>(null);
   const [verifying, setVerifying] = useState<Entry | null>(null);
   const [releasing, setReleasing] = useState<Entry | null>(null);
   const [status, setStatus] = useState<EquipmentStatus | null>(null);
@@ -106,6 +110,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
   const load = async () => {
     setEntries(await api<Entry[]>('GET', `/api/equipment/${equipment.id}/entries`));
     setStatus(await api<EquipmentStatus>('GET', `/api/equipment/${equipment.id}/status`));
+    setWos((await api<{ items: WorkOrder[] }>('GET', `/api/workorders?equipmentId=${equipment.id}`)).items);
   };
   useEffect(() => {
     void load();
@@ -185,9 +190,13 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
         <button className={tab === 'log' ? 'on' : ''} onClick={() => setTab('log')}>Logbook</button>
         <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>History card</button>
         <button className={tab === 'reservations' ? 'on' : ''} onClick={() => setTab('reservations')}>Reservations</button>
+        <button className={tab === 'workorders' ? 'on' : ''} onClick={() => { setWoOpen(null); setTab('workorders'); }}>Work orders{wos.some((w) => w.status !== 'closed') ? ` (${wos.filter((w) => w.status !== 'closed').length} open)` : ''}</button>
       </div>
       {tab === 'history' && <HistoryCard me={me} equipment={equipment} products={products} />}
       {tab === 'reservations' && <Reservations me={me} equipment={equipment} onChange={load} />}
+      {tab === 'workorders' && (woOpen !== null
+        ? <WorkOrderPage me={me} id={woOpen} onBack={() => { setWoOpen(null); void load(); }} onOpenItem={() => { setWoOpen(null); setTab('log'); }} />
+        : <WorkOrdersTab me={me} equipment={equipment} dues={status?.dues ?? []} onOpen={setWoOpen} />)}
       {tab === 'log' && <>
       <div className="row">
         {activities.length > 0 && (
@@ -245,6 +254,11 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
                 {e.logbookType === 'maintenance' && e.data.kind === 'breakdown' && can(me, 'advice.ask') && (
                   <button onClick={() => setAdvising(e.id)}>💡 Suggest from history</button>
                 )}
+                {e.logbookType === 'maintenance' && e.data.kind === 'breakdown' && can(me, 'workorder.raise') && (() => {
+                  const wo = wos.find((w) => w.entryId === e.entryId);
+                  return wo ? <button onClick={() => { setWoOpen(wo.id); setTab('workorders'); }}>Work order {wo.number}</button>
+                    : <button onClick={() => setRaisingFor(e)}>Raise work order</button>;
+                })()}
                 {e.awaitingVerification && isVerifier && !e.inProgress && <button onClick={() => setVerifying(e)}>Verify</button>}
                 {e.logbookType === 'maintenance' && e.data.kind === 'breakdown' && can(me, 'breakdown.release') &&
                   e.signatures.some((g) => g.meaning === 'verified') && !e.signatures.some((g) => g.meaning === 'released') && (
@@ -279,6 +293,12 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
         />
       )}
       {late && <ReasonDialog title="This is a late entry" label="Reason" onSubmit={endLate} onCancel={() => setLate(null)} />}
+      {raisingFor && (
+        <RaiseDialog equipment={[equipment]} onCancel={() => setRaisingFor(null)}
+          preset={{ equipmentId: equipment.id, kind: 'breakdown', entryId: raisingFor.entryId, title: String(raisingFor.data.description ?? '').slice(0, 120) || 'Breakdown',
+            description: [raisingFor.data.description, raisingFor.data.rootCause && `Root cause: ${String(raisingFor.data.rootCause)}`].filter(Boolean).join('. ') }}
+          onDone={(id) => { setRaisingFor(null); setWoOpen(id); setTab('workorders'); void load(); }} />
+      )}
       {ending && (
         <EndUseDialog entry={ending} what={`${equipment.code} · batch ${ending.batch}, in use since ${plantTime(ending.activityStart)}`}
           onEnd={(reason) => endUse(ending, reason)} onCancel={() => setEnding(null)} />

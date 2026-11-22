@@ -26,7 +26,6 @@ test('LB-06: a breakdown with parts is verified and released, then shows in the 
   await form.getByLabel('Part 1 lot or serial').fill('LOT-B771');
   await form.getByLabel('Tools, consumables or lubricants used').fill('Bearing puller, grease EP2');
   await form.getByLabel('Done by').selectOption('in_house');
-  await form.getByLabel('Work order reference (e.g. CMMS WO number)').fill('WO-55120');
   await form.getByLabel('Post-repair checks done (e.g. test run)').fill('Test run 15 min, vibration normal');
   await sign(form, 'eng1', 'Sign and save');
   await expect(form).toHaveCount(0);
@@ -58,7 +57,6 @@ test('LB-06: a breakdown with parts is verified and released, then shows in the 
   await expect(row).not.toContainText('so far');
   await expect(row).toContainText('2 × Deep groove ball bearing (P/N 6205-2RS), lot/SN LOT-B771');
   await expect(row).toContainText('In-house');
-  await expect(row).toContainText('WO-55120');
   await expect(row).toContainText('Released');
   await expect(page.locator('table').nth(1)).toContainText(`${code} · Fluid bed dryer`);
 
@@ -113,7 +111,7 @@ test('LB-18: Admin records equipment details with a reason; the change shows on 
   await logIn(page, 'admin');
   await openLogbook(page, code);
   await page.getByRole('button', { name: 'History card' }).click();
-  await expect(page.getByText('No equipment details recorded yet.')).toBeVisible();
+  await expect(page.getByText('Asset number, capacity, qualification and SOPs are not entered yet.')).toBeVisible();
   await page.getByRole('button', { name: 'Edit details' }).click();
   const dialog = page.getByRole('dialog');
   await dialog.getByLabel('Asset number').fill('AST-3301');

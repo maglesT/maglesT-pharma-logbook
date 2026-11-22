@@ -104,6 +104,8 @@ export interface Breakdown {
   partsText: string;
   doneBy: string;
   workOrderRef: string;
+  // The work order raised from this breakdown (D: engineering work orders), if any.
+  workOrder: { id: number; number: string; status: string } | null;
   deviationRef: string;
   status: BreakdownStatus;
 }
@@ -146,6 +148,8 @@ export async function breakdowns(q: Sql | Tx, items: LogbookItem[], from: Date, 
       and ${f.entryIds ? q`e.entry_id = any(${f.entryIds}::bigint[])` : q`true`}
     order by occurred_at desc, e.entry_id desc`;
   const located = f.location ? rows.filter((r) => (byId.get(r.equipment_id)?.room ?? '').toLowerCase() === f.location!.toLowerCase()) : rows;
+  const wos = new Map((located.length ? await q<{ id: number; number: string; status: string; entry_id: number }[]>`
+    select id::int, number, status, entry_id::int from work_orders where entry_id = any(${located.map((r) => r.entry_id)}::bigint[])` : []).map((w) => [w.entry_id, w]));
   const list = located.map((r): Breakdown => {
     const status: BreakdownStatus = !r.activity_end ? 'open' : !r.verified_at ? 'awaiting_verification' : !r.released_at ? 'awaiting_release' : 'released';
     // D-58: first recorded more than the late-entry time after its repair had ended: a past breakdown, down until its repair end.
@@ -174,7 +178,8 @@ export async function breakdowns(q: Sql | Tx, items: LogbookItem[], from: Date, 
       partsNone: Boolean(r.data.partsNone),
       partsText: partsText(r.data),
       doneBy: doneByText(r.data),
-      workOrderRef: String(r.data.workOrderRef ?? ''),
+      workOrderRef: wos.get(r.entry_id)?.number ?? String(r.data.workOrderRef ?? ''),
+      workOrder: wos.has(r.entry_id) ? { id: wos.get(r.entry_id)!.id, number: wos.get(r.entry_id)!.number, status: wos.get(r.entry_id)!.status } : null,
       deviationRef: String(r.data.deviationRef ?? ''),
       status,
     };

@@ -542,7 +542,8 @@ function MaintenanceFields({
         </select>
       </label>
       {data.doneBy === 'vendor' && <>{text('vendorName', 'Vendor name')}{text('serviceReportRef', 'Service report reference')}</>}
-      {text('workOrderRef', 'Work order reference (e.g. CMMS WO number)')}
+      {/* Work orders are raised in the Logbook now; a reference typed earlier stays visible. */}
+      {Boolean(data.workOrderRef) && text('workOrderRef', 'Work order reference (typed earlier)')}
       {text('deviationRef', 'Deviation reference')}
       {text('postRepairChecks', 'Post-repair checks done (e.g. test run)', true)}
       {equipment.kind !== 'area' && (

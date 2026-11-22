@@ -102,7 +102,7 @@ export interface SignRequest {
   signer: AuthenticatedSigner;
   // The hash the signer was shown (from SignInput); must equal the hash of `content`.
   shownHash: string;
-  objectType: 'entry' | 'settings' | 'review' | 'voice_note' | 'exception';
+  objectType: 'entry' | 'settings' | 'review' | 'voice_note' | 'exception' | 'work_order';
   objectId: number;
   meaning: Meaning;
   content: unknown;

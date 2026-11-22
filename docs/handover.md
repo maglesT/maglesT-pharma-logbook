@@ -219,6 +219,9 @@ history card needs any Logbook permission (sign-on itself needs one).
 | `logbook.voice_note.record` | Record voice notes | /voice-notes: operator, supervisor, engineering |
 | `logbook.advice.ask` | Ask for breakdown suggestions | /advice: operator, supervisor, engineering, qa |
 | `logbook.exception.decide` | Decide a missed limit: close it in the Logbook (reason and e-signature) or send it to Deviations (D-80) | new: per person, no old role |
+| `logbook.workorder.raise` | Raise and assign engineering work orders (D-86) | new: per person, no old role |
+| `logbook.workorder.do` | Do engineering work orders: start, record the work, mark Done (e-signature) (D-86) | new: per person, no old role |
+| `logbook.workorder.close` | Close engineering work orders: second person, e-signature (D-86) | new: per person, no old role |
 
 Old role → permissions (for the B1-5 data move; each moved user gets exactly these):
 

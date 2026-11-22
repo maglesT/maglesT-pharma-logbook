@@ -153,6 +153,16 @@ export const AUDIT_ACTION_LABEL: Record<string, string> = {
   'exception.sent': 'Missed limit sent to Deviations',
   'reservation.created': 'Equipment reserved',
   'reservation.cancelled': 'Reservation cancelled',
+  'workorder.raised': 'Work order raised',
+  'workorder.assigned': 'Work order assigned',
+  'workorder.started': 'Work started',
+  'workorder.work_recorded': 'Work done recorded',
+  'workorder.done': 'Work order marked done',
+  'workorder.closed': 'Work order closed',
 };
 export const auditActionText = (a: string) =>
   AUDIT_ACTION_LABEL[a] ?? (a.startsWith('signed.') ? `Signed: ${MEANING_LABEL[a.slice(7)] ?? a.slice(7)}` : a.replaceAll(/[._]/g, ' ').replace(/^\w/, (c) => c.toUpperCase()));
+
+// Engineering work orders: kinds and statuses in words.
+export const WO_KIND_LABEL: Record<string, string> = { breakdown: 'Breakdown', preventive: 'Preventive maintenance', calibration: 'Calibration', other: 'Other' };
+export const WO_STATUS_LABEL: Record<string, string> = { open: 'Open', in_progress: 'In progress', done: 'Done', closed: 'Closed' };

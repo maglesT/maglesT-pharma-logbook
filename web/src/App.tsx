@@ -6,8 +6,9 @@ import { MasterData } from './pages/MasterData.js';
 import { LogbookSettings } from './pages/LogbookSettings.js';
 import { EquipmentPage } from './pages/EquipmentPage.js';
 import { Breakdowns } from './pages/Breakdowns.js';
+import { WorkOrders } from './pages/WorkOrders.js';
 
-type Page = 'home' | 'masterdata' | 'settings' | 'equipment' | 'breakdowns';
+type Page = 'home' | 'masterdata' | 'settings' | 'equipment' | 'breakdowns' | 'workorders';
 
 export function App() {
   const [me, setMe] = useState<Me | null | undefined>(undefined);
@@ -45,6 +46,7 @@ export function App() {
           <button className={page === 'home' ? 'tab on' : 'tab'} onClick={() => setPage('home')}>Home</button>
           <button className={page === 'equipment' ? 'tab on' : 'tab'} onClick={() => { setOpenId(undefined); setPage('equipment'); }}>Logbooks</button>
           <button className={page === 'breakdowns' ? 'tab on' : 'tab'} onClick={() => setPage('breakdowns')}>Breakdowns</button>
+          <button className={page === 'workorders' ? 'tab on' : 'tab'} onClick={() => setPage('workorders')}>Work orders</button>
           <button className={page === 'masterdata' ? 'tab on' : 'tab'} onClick={() => setPage('masterdata')}>Master data</button>
           {(can(me, 'settings.draft') || can(me, 'settings.approve')) && (
             <button className={page === 'settings' ? 'tab on' : 'tab'} onClick={() => setPage('settings')}>Logbook settings</button>
@@ -61,6 +63,7 @@ export function App() {
         {page === 'home' && <Home me={me} onOpen={(id) => { setOpenId(id); setPage('equipment'); }} />}
         {page === 'equipment' && <EquipmentPage me={me} openId={openId} />}
         {page === 'breakdowns' && <Breakdowns onOpen={(id) => { setOpenId(id); setPage('equipment'); }} />}
+        {page === 'workorders' && <WorkOrders me={me} onOpenItem={(id) => { setOpenId(id); setPage('equipment'); }} />}
         {page === 'masterdata' && <MasterData me={me} />}
         {page === 'settings' && <LogbookSettings me={me} />}
       </main>

@@ -29,6 +29,10 @@ export const PERMISSIONS = {
   // D-84, D-85 (fix round 21 Nov 2026): per employee in the platform permission register, given to no old role.
   'logbook.equipment.move': 'Move equipment or an instrument to another room (reason and e-signature)',
   'logbook.equipment.reserve': 'Reserve equipment for a batch or dates, and cancel a reservation',
+  // Engineering work orders (owner, 22 Nov 2026): per employee in the platform permission register, given to no old role.
+  'logbook.workorder.raise': 'Raise and assign engineering work orders',
+  'logbook.workorder.do': 'Do engineering work orders: start, record the work, mark Done (e-signature)',
+  'logbook.workorder.close': 'Close engineering work orders (second person, e-signature)',
 } as const;
 export type Permission = keyof typeof PERMISSIONS;
 const CODES = Object.keys(PERMISSIONS) as Permission[];

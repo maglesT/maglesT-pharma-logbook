@@ -347,6 +347,7 @@ export interface BreakdownItem {
   partsText: string;
   doneBy: string;
   workOrderRef: string;
+  workOrder: { id: number; number: string; status: string } | null;
   status: string;
 }
 

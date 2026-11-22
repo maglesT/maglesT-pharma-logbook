@@ -755,6 +755,9 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (row.logbook_type !== 'maintenance' || row.data.kind !== 'breakdown') throw new EntryError(409, 'not_a_breakdown');
         const [verified] = await tx`select 1 from signatures where object_type = 'entry' and object_id = ${row.id} and meaning = 'verified'`;
         if (!verified) throw new EntryError(409, 'not_verified', ['The breakdown entry must be verified before release.']);
+        // A work order raised from this breakdown must be closed first.
+        const [wo] = await tx<{ number: string }[]>`select number from work_orders where entry_id = ${row.entry_id} and status <> 'closed'`;
+        if (wo) throw new EntryError(409, 'work_order_open', [`Work order ${wo.number} of this breakdown is not closed yet: close it first.`]);
         await sign(tx, { signer, objectType: 'entry', objectId: row.id, meaning: 'released', content: entryContent(row), shownHash: body.data.contentHash });
       });
       return { ok: true };

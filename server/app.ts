@@ -32,6 +32,7 @@ import { batchRoutes } from './routes/batches.js';
 import { reservationRoutes } from './routes/reservations.js';
 import { dashboardRoutes } from './routes/dashboard.js';
 import { overdueRoutes } from './routes/overdue.js';
+import { workOrderRoutes } from './routes/workorders.js';
 import { statusContext, type StatusContext } from './status.js';
 import { refreshStatus } from './item-status.js';
 
@@ -137,6 +138,7 @@ export async function buildApp({ sql, signOn, master, qualification = null, devi
   overdueRoutes(app, sql);
   batchRoutes(app, sql);
   reservationRoutes(app, sql);
+  workOrderRoutes(app, sql);
   dashboardRoutes(app, sql);
   trainingRoutes(app, sql);
 
