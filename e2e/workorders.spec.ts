@@ -44,7 +44,7 @@ test('LB-06: raise, assign, start, record the work, mark done and close a work o
   await sign(page.getByRole('dialog'), 'qa1');
   await expect(page.getByText('Closed: QA1')).toBeVisible();
   await expect(page.getByText('Work order closed')).toBeVisible();
-  await page.screenshot({ path: '/root/screenshots/fix-1122/logbook/wo-page.png', fullPage: true });
+  await page.screenshot({ path: 'test-results/workorders-page.png', fullPage: true });
   await page.getByRole('link', { name: 'PDF' }).waitFor();
 
   // The item's Work orders tab lists it too.
