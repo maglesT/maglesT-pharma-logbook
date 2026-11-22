@@ -505,3 +505,10 @@ table.register td:last-child { overflow-wrap: normal; }
 .due-col-head h3 { font-size: .95rem; }
 .home-head h1 { margin-bottom: 2px; }
 .due-row { grid-template-columns: auto minmax(0, 1fr); } .due-row .due-name { min-width: 0; }
+
+/* Work orders on a phone: filters and selects stay inside the card, tables scroll inside theirs. */
+.card.row label { min-width: 0; max-width: 100%; }
+.card.row select, .card.row input, dl.details dd select { max-width: 100%; min-width: 0; }
+.actions { flex-wrap: wrap; }
+.table-wrap { max-width: 100%; background: linear-gradient(to right, var(--surface, #fff) 30%, transparent), linear-gradient(to left, var(--surface, #fff) 30%, transparent) 100% 0, linear-gradient(to right, rgba(0,0,0,.12), transparent 8px), linear-gradient(to left, rgba(0,0,0,.12), transparent 8px) 100% 0; background-repeat: no-repeat; background-size: 30px 100%, 30px 100%, 8px 100%, 8px 100%; background-attachment: local, local, scroll, scroll; }
+@media (max-width: 640px) { dl.details { grid-template-columns: minmax(0, 1fr); } dl.details dd { overflow-wrap: anywhere; } }

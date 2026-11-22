@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { api, plantDay, plantTime, refusalLines, type Equipment, type Me, type Due, DUE_LABEL } from '../api.js';
+import { api, plantDay, plantTime, refusalLines, type BreakdownItem, type Equipment, type Me, type Due, DUE_LABEL } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
 
 // Engineering work orders (owner decision, 22 Nov 2026): a list, a page per work order, a tab on the equipment page.
@@ -28,13 +28,28 @@ export function RaiseDialog({ preset, equipment, onDone, onCancel }: { preset: R
   const [f, setF] = useState({ equipmentId: String(preset.equipmentId ?? ''), kind: preset.kind ?? 'other', title: preset.title ?? '', description: preset.description ?? '', targetDate: '', assignedTo: '' });
   const [people, setPeople] = useState<Person[]>([]);
   const [error, setError] = useState('');
+  // Optional: link one of the item's open breakdowns that has no work order yet.
+  const [breakdowns, setBreakdowns] = useState<BreakdownItem[]>([]);
+  const [linked, setLinked] = useState<number | null>(preset.entryId ?? null);
   useEffect(() => { void api<Person[]>('GET', '/api/workorders/people').then(setPeople).catch(() => setPeople([])); }, []);
+  useEffect(() => {
+    setBreakdowns([]);
+    if (preset.entryId !== undefined || !f.equipmentId) return;
+    const day = (offset: number) => new Date(Date.now() + offset * 86_400_000).toLocaleDateString('en-CA');
+    void api<{ items: BreakdownItem[] }>('GET', `/api/breakdowns?fromDay=${day(-365)}&toDay=${day(1)}&equipmentId=${f.equipmentId}`)
+      .then((r) => setBreakdowns(r.items.filter((b) => !b.workOrder && b.status !== 'released'))).catch(() => setBreakdowns([]));
+  }, [f.equipmentId]);
+  const link = (v: string) => {
+    const b = breakdowns.find((x) => String(x.entryId) === v);
+    setLinked(b ? b.entryId : null);
+    if (b) setF({ ...f, kind: 'breakdown', title: f.title || b.description.slice(0, 120), description: f.description || b.description });
+  };
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     try {
       const r = await api<{ id: number }>('POST', '/api/workorders', { equipmentId: Number(f.equipmentId), kind: f.kind, title: f.title, description: f.description,
-        targetDate: f.targetDate || null, assignedTo: f.assignedTo ? Number(f.assignedTo) : null, entryId: preset.entryId ?? null });
+        targetDate: f.targetDate || null, assignedTo: f.assignedTo ? Number(f.assignedTo) : null, entryId: linked });
       onDone(r.id);
     } catch (err) { setError(problemsOf(err)); }
   };
@@ -49,8 +64,16 @@ export function RaiseDialog({ preset, equipment, onDone, onCancel }: { preset: R
             {equipment.filter((q) => q.active).map((q) => <option key={q.id} value={q.id}>{q.code} · {q.name}</option>)}
           </select>
         </label>
+        {preset.entryId === undefined && breakdowns.length > 0 && (
+          <label>For a breakdown (optional)
+            <select value={linked ?? ''} onChange={(e) => link(e.target.value)}>
+              <option value="">None</option>
+              {breakdowns.map((b) => <option key={b.entryId} value={b.entryId}>{plantTime(b.occurredAt)} · {b.description.slice(0, 60)}</option>)}
+            </select>
+          </label>
+        )}
         <label>Kind
-          <select value={f.kind} onChange={(e) => set('kind', e.target.value)} disabled={preset.entryId !== undefined}>{KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+          <select value={f.kind} onChange={(e) => set('kind', e.target.value)} disabled={linked !== null}>{KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
         </label>
         <label>Title<input value={f.title} onChange={(e) => set('title', e.target.value)} maxLength={200} required /></label>
         <label>What is to be done<textarea value={f.description} onChange={(e) => set('description', e.target.value)} maxLength={2000} /></label>

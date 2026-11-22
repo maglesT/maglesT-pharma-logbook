@@ -47,6 +47,14 @@ test('LB-06: raise, assign, start, record the work, mark done and close a work o
   await page.screenshot({ path: 'test-results/workorders-page.png', fullPage: true });
   await page.getByRole('link', { name: 'PDF' }).waitFor();
 
+  // On a phone nothing sticks out of the page.
+  await page.setViewportSize({ width: 390, height: 800 });
+  await page.getByRole('button', { name: 'Work orders' }).first().click();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.locator('tr', { hasText: 'Quarterly service' }).click();
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.setViewportSize({ width: 1280, height: 800 });
+
   // The item's Work orders tab lists it too.
   await page.getByRole('button', { name: 'Logbooks' }).click();
   await page.getByRole('button', { name: new RegExp(`^${code} `) }).click();
