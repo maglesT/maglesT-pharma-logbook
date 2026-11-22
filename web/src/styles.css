@@ -224,14 +224,14 @@ table.audit td { font-size: 0.92rem; }
 }
 /* The breakdown register uses the full screen width. */
 .page:has(table.register) { max-width: 1680px; }
-table.register { font-size: 0.8rem; table-layout: auto; width: 100%; min-width: 1180px; }
+table.register { font-size: 0.8rem; table-layout: auto; width: 100%; }
 table.register td, table.register th { padding: 8px 6px; overflow-wrap: break-word; vertical-align: top; }
 table.register th { white-space: normal; hyphens: none; line-height: 1.25; }
 table.register th:nth-child(1) { min-width: 7rem; }
 table.register th:nth-child(2), table.register th:nth-child(3) { min-width: 7.5rem; }
 table.register th:nth-child(4), table.register th:nth-child(11), table.register th:nth-child(12) { min-width: 5.5rem; }
-table.register th:nth-child(5), table.register th:nth-child(10) { min-width: 6rem; }
-table.register th:nth-child(6), table.register th:nth-child(7), table.register th:nth-child(8), table.register th:nth-child(9) { min-width: 8rem; }
+table.register th:nth-child(5), table.register th:nth-child(10) { min-width: 5.5rem; }
+table.register th:nth-child(6), table.register th:nth-child(7), table.register th:nth-child(8), table.register th:nth-child(9) { min-width: 6rem; }
 table.register td:last-child { white-space: nowrap; }
 
 /* Owner 2026-11-12: add an item by its ID */

@@ -1,15 +1,28 @@
 import { expect, test } from '@playwright/test';
-import { logIn, logOut, newEquipment, sign } from './helpers.js';
+import { approveSettings, logIn, logOut, newEquipment, recordAndVerify, sign } from './helpers.js';
 
 // Engineering work orders (22 Nov 2026): raised by hand, assigned from the people list, started, work recorded, Done
 // (the doer signs), Closed (a second person signs); the menu list finds it, the item has a Work orders tab, a PDF copy.
-test('LB-17: the breakdown register headers do not overlap at 1440 px', async ({ page }) => {
+test('LB-17: the breakdown register headers and Status cells are fully visible at 1440 px', async ({ page }) => {
+  await approveSettings('maintenance');
+  const { id } = await newEquipment({ name: 'Register item' });
+  const ago = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+  await recordAndVerify(id, { logbookType: 'maintenance', activityStart: ago(60), activityEnd: ago(10), lateReason: 'after the repair',
+    data: { kind: 'breakdown', description: 'Motor trips on start', occurredAt: ago(90), reportedBy: 'Shift A', failureCategory: 'electrical', rootCause: 'Contactor',
+      workDone: 'Replaced', partsNone: true, doneBy: 'in_house', postRepairChecks: 'ok' } }, 'eng1', 'sup1');
   await page.setViewportSize({ width: 1440, height: 900 });
   await logIn(page, 'qa1');
   await page.getByRole('button', { name: 'Breakdowns' }).click();
-  await expect(page.locator('table.register th').first()).toBeVisible();
+  await expect(page.locator('table.register tbody .chip').first()).toBeVisible();
   const clipped = await page.locator('table.register th').evaluateAll((ths) => ths.filter((t) => t.scrollWidth > t.clientWidth + 1).map((t) => t.textContent));
   expect(clipped).toEqual([]);
+  // Every Status chip lies inside the box that holds the table (not cut at its right edge).
+  const cut = await page.locator('table.register tbody tr').evaluateAll((rows) => rows.map((r) => {
+    const chip = r.querySelector('.chip')!.getBoundingClientRect();
+    const box = r.closest('.table-wrap')!.getBoundingClientRect();
+    return { right: Math.round(chip.right), boxRight: Math.round(box.right), page: document.documentElement.scrollWidth };
+  }).filter((x) => x.right > x.boxRight || x.page > 1440));
+  expect(cut).toEqual([]);
   await page.screenshot({ path: 'test-results/register-1440.png' });
 });
 
