@@ -92,11 +92,11 @@ export function sqlBatches(q: Sql, schema = 'report', source: BatchSource = 'Tru
  * when there is one, else by its key (`step`, "stage/step"). Read through the row as JSON, so a view without the column
  * (a product not yet updated) still answers.
  */
-export type UseSource = TrueBatchName | typeof LIMS;
+export type UseSource = TrueBatchName | typeof QLIMS;
 /** D-76: Medhanta LIMS (platform provider `lims`): its lab instrument uses (instrument_use_v1) count as TrueBatch's do. */
-export const LIMS = 'Medhanta LIMS';
+export const QLIMS = 'Medhanta QLIMS';
 /** D-76: what a use is for: a batch in a TrueBatch product, an analysis in LIMS (the analysis number is its batch_number). */
-export const useOf = (source: UseSource) => (source === LIMS ? 'analysis' : 'batch');
+export const useOf = (source: UseSource) => (source === QLIMS ? 'analysis' : 'batch');
 // D-67: productCode, the batch's product (from the batch view; null without one, e.g. packing).
 export interface TrueBatchUse { code: string; batchNumber: string; step: string; startedAt: Date; endedAt: Date | null; source: UseSource; productCode?: string | null }
 export interface TrueBatchUses {
@@ -109,7 +109,7 @@ export interface TrueBatchUses {
 }
 /** The uses of one product could not be read: its link is off. */
 export class UsesOff extends ConnectionOff {
-  constructor(readonly source: UseSource) { super(); this.message = `Connection to ${source} (${source === LIMS ? 'instrument' : 'machine and room'} uses) is off. Ask your administrator.`; }
+  constructor(readonly source: UseSource) { super(); this.message = `Connection to ${source} (${source === QLIMS ? 'instrument' : 'machine and room'} uses) is off. Ask your administrator.`; }
 }
 export function sqlTrueBatchUses(q: Sql, schema = 'report', source: UseSource = 'TrueBatch', batchView: string | null = 'batch_fact_v1',
   view = 'equipment_use_v1'): TrueBatchUses {
@@ -156,7 +156,7 @@ export function sqlTrueBatchUses(q: Sql, schema = 'report', source: UseSource = 
  * production" filter; LIMS ends a use itself (every step naming the instrument signed done, or the analysis stopped or
  * reviewed; a balance's use ends when the weighing is recorded).
  */
-export const sqlLabUses = (q: Sql, schema = 'report') => sqlTrueBatchUses(q, schema, LIMS, null, 'instrument_use_v1');
+export const sqlLabUses = (q: Sql, schema = 'report') => sqlTrueBatchUses(q, schema, QLIMS, null, 'instrument_use_v1');
 
 /** The batch records of every linked product, read each on its own (D-69): a product that does not answer is left out. */
 export interface BatchRecords {

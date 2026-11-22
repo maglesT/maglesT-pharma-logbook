@@ -21,7 +21,7 @@ test('PL-01: the sign-in page sends people to core; after sign-on Home shows the
 
 test('PL-01: a person without a Logbook role is refused', async ({ page }) => {
   await page.goto('/login?login_hint=norole');
-  await expect(page.getByText('You have no right to use the Pharma Logbook')).toBeVisible();
+  await expect(page.getByText('You have no right to use Medhanta LEAD')).toBeVisible();
   await page.goto('/');
   await expect(page.getByRole('link', { name: 'Sign in' })).toBeVisible();
 });

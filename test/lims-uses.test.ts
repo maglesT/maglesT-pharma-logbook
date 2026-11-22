@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { LIMS, sqlLabUses } from '../server/batches.js';
+import { QLIMS, sqlLabUses } from '../server/batches.js';
 import { loadConfig } from '../server/config.js';
 import { recordOverdue } from '../server/overdue.js';
 import { usesOffWarning } from '../server/status.js';
@@ -66,49 +66,49 @@ afterAll(async () => {
   await t.owner.unsafe(`drop schema if exists ${LS} cascade`).catch(() => {});
 });
 
-describe('lab instrument uses recorded in Medhanta LIMS (D-76)', () => {
-  it('LB-08: an HPLC is in use while its analysis step is open in LIMS: shown and published with the analysis; a Logbook use is refused', async () => {
+describe('lab instrument uses recorded in Medhanta QLIMS (D-76)', () => {
+  it('LB-08: an HPLC is in use while its analysis step is open in QLIMS: shown and published with the analysis; a Logbook use is refused', async () => {
     const a = await instrument();
     expect((await status(a.id)).inUse).toBeNull();
     await labUse('AN-2026-0012', a.code.toLowerCase(), { stepName: 'Assay › Inject the standard' });
     const s = await status(a.id);
-    expect(s).toMatchObject({ state: 'in_use', inUse: { batch: 'AN-2026-0012', stage: 'Assay › Inject the standard', source: LIMS, entryId: null } });
-    expect(s.blockers).toEqual(['In use by analysis AN-2026-0012 in Medhanta LIMS (Assay › Inject the standard): it ends when the analysis is done with it in Medhanta LIMS (every step naming it is signed done, or the analysis is stopped or reviewed).']);
+    expect(s).toMatchObject({ state: 'in_use', inUse: { batch: 'AN-2026-0012', stage: 'Assay › Inject the standard', source: QLIMS, entryId: null } });
+    expect(s.blockers).toEqual(['In use by analysis AN-2026-0012 in Medhanta QLIMS (Assay › Inject the standard): it ends when the analysis is done with it in Medhanta QLIMS (every step naming it is signed done, or the analysis is stopped or reviewed).']);
     const use = await call(t.app, c.op1!, 'POST', `/api/equipment/${a.id}/entries`, { logbookType: 'equipment_use', activityStart: now(), productId: product, batch: 'B-1', data: {} });
     expect(use.statusCode).toBe(409);
-    expect(use.json().problems[0]).toMatch(/^In use by analysis AN-2026-0012 in Medhanta LIMS/);
+    expect(use.json().problems[0]).toMatch(/^In use by analysis AN-2026-0012 in Medhanta QLIMS/);
     await tick();
     // As a batch use (D-45): the use itself does not count against fit for use; in_use_batch names the analysis.
     expect(await published(a.code)).toMatchObject({ state: 'in_use', in_use_batch: 'AN-2026-0012', fit_for_use: true, blockers: [] });
   });
 
-  it('LB-08: no "batch in production" filter: an open LIMS use holds the instrument; once LIMS ends it the instrument is free, not dirty (D-62)', async () => {
+  it('LB-08: no "batch in production" filter: an open QLIMS use holds the instrument; once QLIMS ends it the instrument is free, not dirty (D-62)', async () => {
     const a = await instrument();
     await labUse('AN-2026-0013', a.code, { startedMinutesAgo: 30, endedMinutesAgo: null });
-    expect((await status(a.id)).inUse).toMatchObject({ batch: 'AN-2026-0013', source: LIMS });
+    expect((await status(a.id)).inUse).toMatchObject({ batch: 'AN-2026-0013', source: QLIMS });
     await t.owner.unsafe(`update ${LS}.instrument_use_v1 set ended_at = now() - interval '1 minute' where equipment_code = $1`, [a.code]);
     const s = await status(a.id);
-    expect(s).toMatchObject({ inUse: null, blockers: [], lastTrueBatchUse: { batch: 'AN-2026-0013', source: LIMS } });
+    expect(s).toMatchObject({ inUse: null, blockers: [], lastTrueBatchUse: { batch: 'AN-2026-0013', source: QLIMS } });
     expect(s.state).not.toMatch(/dirty/);
   });
 
-  it('LB-01: each use recorded in LIMS is a read-only row of the instrument\'s history card, named by its analysis, and in the CSV', async () => {
+  it('LB-01: each use recorded in QLIMS is a read-only row of the instrument\'s history card, named by its analysis, and in the CSV', async () => {
     const a = await instrument();
     await labUse('AN-2026-0014', a.code, { startedMinutesAgo: 50, endedMinutesAgo: 40, stepName: 'Assay › Inject the samples' });
     await labUse('AN-2026-0015', a.code, { startedMinutesAgo: 5, endedMinutesAgo: null });
     const h = (await call(t.app, c.qa!, 'GET', `/api/equipment/${a.id}/history?${period()}`)).json();
     expect(h.notes).toEqual([]);
     expect(h.events.map((e: { use?: { batch: string } }) => e.use?.batch)).toEqual(['AN-2026-0014', 'AN-2026-0015']);
-    expect(h.events[0]).toMatchObject({ kind: 'truebatch', use: { batch: 'AN-2026-0014', productCode: null, step: 'Assay › Inject the samples', source: LIMS } });
+    expect(h.events[0]).toMatchObject({ kind: 'truebatch', use: { batch: 'AN-2026-0014', productCode: null, step: 'Assay › Inject the samples', source: QLIMS } });
     expect(h.events[1].use).toMatchObject({ step: 'assay/inject', endedAt: null });
     expect((await call(t.app, c.qa!, 'GET', `/api/equipment/${a.id}/history?${period()}&types=equipment_use`)).json().events).toHaveLength(2);
     const csv = await call(t.app, c.qa!, 'GET', `/api/export/history.csv?equipmentId=${a.id}&${period()}`);
     expect(csv.body).toContain('Analysis AN-2026-0014');
-    expect(csv.body).toContain('From Medhanta LIMS: read only, recorded there');
+    expect(csv.body).toContain('From Medhanta QLIMS: read only, recorded there');
     expect(csv.body).not.toContain('Batch AN-2026');
   });
 
-  it('PL-08: the configuration takes LIMS_DATABASE_URL from the platform link; absent or empty, LIMS is not read, without an error', () => {
+  it('PL-08: the configuration takes LIMS_DATABASE_URL from the platform link; absent or empty, QLIMS is not read, without an error', () => {
     const env = { LOGBOOK_DATABASE_URL: 'postgres://app:pw@db:5432/logbook', MASTER_DATA_DATABASE_URL: 'postgres://app:pw@db:5432/master_data',
       OIDC_ISSUER: 'https://site.test/oidc', OIDC_CLIENT_SECRET: 'x', OIDC_REDIRECT_URI: 'https://logbook.site.test/cb' };
     expect(loadConfig(env).LIMS_DATABASE_URL).toBeUndefined();
@@ -116,17 +116,17 @@ describe('lab instrument uses recorded in Medhanta LIMS (D-76)', () => {
     expect(loadConfig({ ...env, LIMS_DATABASE_URL: 'postgres://app:pw@db:5432/lims' }).LIMS_DATABASE_URL).toBe('postgres://app:pw@db:5432/lims');
   });
 
-  it('PL-08: with the LIMS link cut the status says so, still answers, and the history card names it in a note', async () => {
+  it('PL-08: with the QLIMS link cut the status says so, still answers, and the history card names it in a note', async () => {
     const a = await instrument();
     await t.owner.unsafe(`revoke select on all tables in schema ${LS} from logbook_app`);
     try {
-      expect((await status(a.id)).warnings).toContain(usesOffWarning(LIMS));
-      expect(usesOffWarning(LIMS)).toBe('Connection to Medhanta LIMS is off: instrument uses recorded in Medhanta LIMS (in use) are not shown. Ask your administrator.');
+      expect((await status(a.id)).warnings).toContain(usesOffWarning(QLIMS));
+      expect(usesOffWarning(QLIMS)).toBe('Connection to Medhanta QLIMS is off: instrument uses recorded in Medhanta QLIMS (in use) are not shown. Ask your administrator.');
       const h = (await call(t.app, c.qa!, 'GET', `/api/equipment/${a.id}/history?${period()}`)).json();
-      expect(h.notes).toEqual(['Connection to Medhanta LIMS is off: its uses of this item are not shown.']);
+      expect(h.notes).toEqual(['Connection to Medhanta QLIMS is off: its uses of this item are not shown.']);
     } finally {
       await t.owner.unsafe(`grant select on all tables in schema ${LS} to logbook_app`);
     }
-    expect((await status(a.id)).warnings).not.toContain(usesOffWarning(LIMS));
+    expect((await status(a.id)).warnings).not.toContain(usesOffWarning(QLIMS));
   });
 });

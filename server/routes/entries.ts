@@ -3,7 +3,7 @@ import { z } from 'zod';
 import type { Sql, Tx } from '../db.js';
 import { audit } from '../audit.js';
 import { batchWithProduct } from './batches.js';
-import { batchesOffNote, LIMS, useOf } from '../batches.js';
+import { batchesOffNote, QLIMS, useOf } from '../batches.js';
 import { QualificationOff } from '../qualification.js';
 import { CyclesOff, batchWords } from '../cycles.js';
 import { parseId, requirePermission, type SessionUser } from '../auth.js';
@@ -175,7 +175,7 @@ function timing(now: Date, times: (Date | null | undefined)[], lateReason: strin
 function cleaningFits(status: Pick<EquipmentStatus, 'inUse' | 'lastUseEnd'>, start: Date) {
   if (status.inUse && status.inUse.source !== 'Logbook') {
     const { batch, source } = status.inUse;
-    const what = useOf(source); // D-76: an analysis in LIMS
+    const what = useOf(source); // D-76: an analysis in QLIMS
     throw new EntryError(409, 'in_use', [`In use by ${what} ${batch} in ${source}: record the cleaning once the ${what} is done with it in ${source}.`]);
   }
   if (status.inUse) throw new EntryError(409, 'in_use', ['End the current use before recording a cleaning.']);
@@ -493,7 +493,7 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
           const products = await logbookProducts(tx, app.master);
           // The last use's product; for a TrueBatch use without one from its uses (packing), from the batch records.
           const lastCode = status.lastUseProductCode
-            ?? (status.lastTrueBatchUse && status.lastTrueBatchUse.source !== LIMS && app.batches ? (await app.batches.get(status.lastTrueBatchUse.batch)).batch?.productCode ?? null : null);
+            ?? (status.lastTrueBatchUse && status.lastTrueBatchUse.source !== QLIMS && app.batches ? (await app.batches.get(status.lastTrueBatchUse.batch)).batch?.productCode ?? null : null);
           const next = products.find((p) => p.id === b.productId);
           const last = lastCode ? products.find((p) => p.code === lastCode) ?? { code: lastCode, antibiotic: false } : undefined;
           const problem = next ? antibioticBlocker(last, next, status.changeoverCleaned) : null;
@@ -515,11 +515,11 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         // Owner 2026-11-12: a requalification from a protocol takes its stage, result and next due date from the
         // Qualification product (the approved report); nothing is typed again.
         if (b.logbookType === 'requalification' && b.data.source === 'protocol') {
-          if (!app.qualification) throw new EntryError(409, 'check_failed', ['The Qualification system is not linked: record the requalification by hand.']);
+          if (!app.qualification) throw new EntryError(409, 'check_failed', ['EQUIP is not linked: record the requalification by hand.']);
           const number = String(b.data.protocolNumber ?? '').trim();
           const p = (await app.qualification.protocols(item.itemId)).find((x) => x.number === number);
-          if (!p) throw new EntryError(400, 'check_failed', [`Protocol ${number || '(none)'} is not a protocol of ${item.code} in the Qualification system.`]);
-          if (!p.reportApprovedAt || !p.reportOutcome) throw new EntryError(409, 'check_failed', [`The report of ${p.number} is not approved yet in the Qualification system.`]);
+          if (!p) throw new EntryError(400, 'check_failed', [`Protocol ${number || '(none)'} is not a protocol of ${item.code} in EQUIP.`]);
+          if (!p.reportApprovedAt || !p.reportOutcome) throw new EntryError(409, 'check_failed', [`The report of ${p.number} is not approved yet in EQUIP.`]);
           Object.assign(b.data, { stage: p.stage, outcome: p.reportOutcome, nextDue: p.nextReviewDueDecided ?? '', reportRef: p.number });
         }
         if (end && end < b.activityStart) throw new EntryError(400, 'check_failed', ['The end cannot be before the start.']);

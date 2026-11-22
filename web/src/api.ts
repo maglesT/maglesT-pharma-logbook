@@ -104,7 +104,7 @@ export interface Candidate extends Care {
 }
 export const QUAL_LABEL: Record<string, string> = {
   qualified: 'Qualified', qualified_conditions: 'Qualified with conditions', requalification_needed: 'Requalification needed',
-  not_qualified: 'Not qualified', not_in_qualification: 'Not in the Qualification system',
+  not_qualified: 'Not qualified', not_in_qualification: 'Not in EQUIP',
 };
 // Cleaning in words: "Dirty hold 8 h · clean hold 72 h", "Every 24 h (frequency-based room)".
 export function cleaningText(c: Care & { kind: Equipment['kind'] }): string {
@@ -234,7 +234,7 @@ export const unsignedOlder = (e: { logbookType: string; version: number; signatu
 export const UNSIGNED_OLDER = 'No signature: recorded before this kind of entry was signed in the Logbook.';
 
 /** D-76: what a use is for, by where it was recorded: an analysis in Medhanta LIMS, else a batch. */
-export const useOf = (source: string) => (source === 'Medhanta LIMS' ? 'analysis' : 'batch');
+export const useOf = (source: string) => (source === 'Medhanta QLIMS' ? 'analysis' : 'batch');
 
 export interface EquipmentStatus {
   equipmentId: number;

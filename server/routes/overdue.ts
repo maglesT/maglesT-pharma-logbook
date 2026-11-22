@@ -88,7 +88,7 @@ export function overdueRoutes(app: FastifyInstance, sql: Sql) {
     const e = await event(id);
     if (!e) return reply.code(404).send({ error: 'not_found' });
     if (e.decision) return taken(reply);
-    if (!app.deviations) return reply.code(409).send({ error: 'not_linked', problems: ['Deviations is not linked: close it here.'] });
+    if (!app.deviations) return reply.code(409).send({ error: 'not_linked', problems: ['DIVE is not linked: close it here.'] });
     try {
       await sql.begin(async (tx) => {
         await tx`insert into overdue_decisions (event_id, decision, decided_by, decided_by_name) values (${id}, 'sent', ${req.user!.id}, ${req.user!.fullName})`;

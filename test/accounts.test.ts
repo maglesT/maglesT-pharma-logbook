@@ -64,7 +64,7 @@ describe('sign-on through core', () => {
     const id = await seedUser(t.owner, uniq('nobody'), []);
     const { res, cookie } = await login(t.app, `nobody${n}`);
     expect(res.statusCode).toBe(403);
-    expect(res.body).toContain('no right to use the Pharma Logbook');
+    expect(res.body).toContain('no right to use Medhanta LEAD');
     expect(cookie).toBe('');
     expect(await auditRows('login.failed', id)).toHaveLength(1);
   });

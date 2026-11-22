@@ -24,7 +24,7 @@ export function SopPicker({ label, value, onChange }: { label: string; value: st
             const s = of(r);
             return (
               <li key={r}>
-                {s ? sopName(s) : `${r}${qms.available ? ' (as recorded; not an effective SOP in QMS)' : ''}`}
+                {s ? sopName(s) : `${r}${qms.available ? ' (as recorded; not an effective SOP in ASSURE)' : ''}`}
                 {qms.available && <> <button type="button" onClick={() => onChange(refs.filter((x) => x !== r).join(', '))}>Remove {r}</button></>}
               </li>
             );
@@ -32,7 +32,7 @@ export function SopPicker({ label, value, onChange }: { label: string; value: st
         </ul>
       )}
       {qms.available && (
-        <label>Add an SOP from QMS
+        <label>Add an SOP from ASSURE
           <select value="" onChange={(e) => e.target.value && onChange([...refs, e.target.value].join(', '))}>
             <option value="">Pick an SOP</option>
             {left.map((s) => <option key={s.number} value={s.number}>{sopName(s)}</option>)}

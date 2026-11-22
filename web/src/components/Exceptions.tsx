@@ -18,9 +18,9 @@ function Outcome({ e, linked }: { e: Exception; linked: boolean }) {
   const d = e.decision;
   if (!d) return <span className="pill warn">Waiting for a decision</span>;
   if (d.kind === 'closed') return <>Closed here by {d.by}, {plantTime(d.at)}<br /><span className="muted">Reason: {d.reason}</span></>;
-  return <>Sent to Deviations by {d.by}{' · '}
+  return <>Sent to DIVE by {d.by}{' · '}
     {e.deviation ? <><strong>{e.deviation.number}</strong> · {DEV_STEP[e.deviation.status] ?? e.deviation.status}</>
-      : linked ? <span className="muted">being filed in Deviations…</span> : <span className="muted">Deviations not linked</span>}</>;
+      : linked ? <span className="muted">being filed in DIVE…</span> : <span className="muted">DIVE not linked</span>}</>;
 }
 
 export function Exceptions({ data, onOpen, onChanged }: { data: Overdue; onOpen: (equipmentId: number) => void; onChanged: () => void }) {
@@ -42,7 +42,7 @@ export function Exceptions({ data, onOpen, onChanged }: { data: Overdue; onOpen:
   return (
     <section className="dash-panel" aria-label="Missed limits">
       <div className="panel-head"><h2>Missed limits (exceptions)</h2>{waiting > 0 && <span className="pill bad">{waiting} waiting</span>}<span className="pill">{data.events.length}</span></div>
-      <p className="muted small">Each missed limit is closed here (reason and e-signature) or sent to Deviations{data.mayDecide ? '' : ', by a person who may decide exceptions'}.</p>
+      <p className="muted small">Each missed limit is closed here (reason and e-signature) or sent to DIVE{data.mayDecide ? '' : ', by a person who may decide exceptions'}.</p>
       {error && <p className="error">{error}</p>}
       <table className="plain-table">
         <thead><tr><th>Item</th><th>Missed limit</th><th>Ran out</th><th>Decision</th></tr></thead>
@@ -55,7 +55,7 @@ export function Exceptions({ data, onOpen, onChanged }: { data: Overdue; onOpen:
               {!e.decision && data.mayDecide && (
                 <div className="actions">
                   <button onClick={() => { setReason(''); setClosing(e); }}>Close here</button>
-                  <button disabled={!data.linked} title={data.linked ? '' : 'Deviations is not linked'} onClick={() => void send(e)}>Send to Deviations</button>
+                  <button disabled={!data.linked} title={data.linked ? '' : 'DIVE is not linked'} onClick={() => void send(e)}>Send to DIVE</button>
                 </div>
               )}
             </td>

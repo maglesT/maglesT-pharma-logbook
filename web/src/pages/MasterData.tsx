@@ -146,7 +146,7 @@ function AddItem({ onAdded }: { onAdded: () => Promise<void> }) {
             {row('Requalification', chosen.requalificationFrequencyMonths ? `every ${chosen.requalificationFrequencyMonths} months` : '')}
             {list?.qualificationLinked && row('Qualification', `${QUAL_LABEL[chosen.qualification ?? ''] ?? ''}${chosen.nextReviewDue ? ` · next review ${plantDay(chosen.nextReviewDue)}` : ''}`)}
           </dl>
-          <p className="muted">Pulled from master data and the Qualification system: nothing to type.</p>
+          <p className="muted">Pulled from master data and EQUIP: nothing to type.</p>
           <div className="row">
             {chosen.kind !== 'area' && <label className="check"><input type="checkbox" checked={settings.sterile} onChange={(e) => setSettings({ ...settings, sterile: e.target.checked })} />Sterile</label>}
             <label className="check"><input type="checkbox" checked={settings.classified} onChange={(e) => setSettings({ ...settings, classified: e.target.checked })} />Classified room</label>

@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Sql } from '../db.js';
-import { LIMS, UsesOff, useOf, type BatchRecords, type TrueBatchUse, type TrueBatchUses } from '../batches.js';
+import { QLIMS, UsesOff, useOf, type BatchRecords, type TrueBatchUse, type TrueBatchUses } from '../batches.js';
 import { audit } from '../audit.js';
 import { CyclesOff, cycleLines, cyclesOffHistoryNote, type SterileCycle, type SterileCycles } from '../cycles.js';
 import { needsCalibrationOf, logbookItem, logbookItems, type Master } from '../master.js';
@@ -81,7 +81,7 @@ async function trueBatchHistory(sql: Sql, uses: TrueBatchUses[], batches: BatchR
   const all = read.flatMap((r) => r ?? []);
   const products = new Map<string, string | null>();
   // D-76: a LIMS use is for an analysis, not a batch: no product looked up.
-  for (const b of new Set(all.filter((u) => !u.productCode && u.source !== LIMS).map((u) => u.batchNumber))) {
+  for (const b of new Set(all.filter((u) => !u.productCode && u.source !== QLIMS).map((u) => u.batchNumber))) {
     products.set(b, batches ? await batches.get(b).then((r) => r.batch?.productCode ?? null, () => null) : null);
   }
   const events: Event[] = all.map((u) => ({ kind: 'truebatch' as const, at: u.startedAt, use: { batch: u.batchNumber,
@@ -209,7 +209,7 @@ function eventRow(ev: Event): { at: Date; kind: string; type: string; what: stri
     const x = ev.exception;
     const d = x.decision;
     return { at: ev.at, kind: 'exception', type: 'Missed limit (exception)', what: `${x.label}: ${x.title}`,
-      detail: [d ? `${d.label} by ${d.by ?? ''}, ${plant(d.at)}` : 'Waiting for a decision: close it here or send it to Deviations', d?.reason ? `Reason: ${d.reason}` : ''].filter(Boolean).join('\n'),
+      detail: [d ? `${d.label} by ${d.by ?? ''}, ${plant(d.at)}` : 'Waiting for a decision: close it here or send it to DIVE', d?.reason ? `Reason: ${d.reason}` : ''].filter(Boolean).join('\n'),
       who: d?.by ?? 'Logbook', signatures: d?.signedBy && d.at ? `closed: ${d.signedBy}, ${plant(d.at)}` : '', breakdown: '', highlight: !d, grey: false };
   }
   return { at: ev.at, kind: 'master data', type: 'Master data', what: ITEM_ACTION_LABEL[ev.action] ?? ev.action, detail: [ev.reason ? `Reason: ${ev.reason}` : '', ...ev.lines].filter(Boolean).join('\n'), who: ev.actor ?? 'system', signatures: '', breakdown: '', highlight: false, grey: false };
@@ -334,7 +334,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
         ['Product contact / MOC', d.productContactMoc], ['SOPs', d.sopRefs], ['Details version', `${head.details!.version}, ${head.details!.changedBy}, ${plant(head.details!.changedAt)}`],
       ] as [string, string][]) : [['Further details', 'asset number, capacity, qualification and SOPs not entered yet']] as [string, string][]),
     ];
-    return sendCopy(reply, 'pdf', name, await tablesPdf(sql, `Equipment history card ${eq.code} · ${eq.name}`, `Period ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time). All versions; superseded versions grey, breakdowns shaded. Uses recorded in TrueBatch or Medhanta LIMS, and sterilisation cycles recorded in TrueBatch Injectables, are read from there (read only).${notes.length ? ` ${notes.join(' ')}` : ''}`, [
+    return sendCopy(reply, 'pdf', name, await tablesPdf(sql, `Equipment history card ${eq.code} · ${eq.name}`, `Period ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time). All versions; superseded versions grey, breakdowns shaded. Uses recorded in TrueBatch or Medhanta QLIMS, and sterilisation cycles recorded in TrueBatch Injectables, are read from there (read only).${notes.length ? ` ${notes.join(' ')}` : ''}`, [
       { heading: 'Equipment', columns: ['Field', 'Value'], widths: [120, '*'], rows: detailRows.map((r) => ({ cells: r })) },
       { heading: 'Location history', columns: ['When', 'By', 'From', 'To', 'Reason'], widths: [90, 90, 120, 120, '*'],
         rows: head.locationHistory.map((l) => ({ cells: [plant(l.at), l.by ?? '', l.from ?? '(created)', l.to, l.reason ?? ''] })) },

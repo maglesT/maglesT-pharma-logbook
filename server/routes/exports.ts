@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import { BRAND_MARK, BRAND_NAME } from '../brand.js';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -131,7 +132,7 @@ function render(site: { name: string; code: string } | undefined, title: string,
     pageSize: 'A4',
     pageMargins: [28, 50, 28, 36],
     defaultStyle: { font: 'Noto', fontSize: 9 },
-    header: { text: runs(pdfHeader(site, title)), margin: [28, 20, 28, 0], fontSize: 9, bold: true },
+    header: { columns: [{ image: BRAND_MARK, width: 15, margin: [0, -3, 5, 0] }, { text: BRAND_NAME, bold: true, color: '#e8500f', width: 'auto', margin: [0, 0, 10, 0] }, { text: runs(pdfHeader(site, title)) }], margin: [28, 20, 28, 0], fontSize: 9, bold: true },
     footer: (page, pages) => ({
       text: `Generated ${plant(new Date())} by ${by} · true copy of the electronic record · page ${page} of ${pages}`,
       margin: [28, 10, 28, 0],

@@ -170,7 +170,7 @@ describe('uses recorded in TrueBatch count in the status (D-46)', () => {
     expect(await status(a.id)).toMatchObject({ state: 'clean', blockers: [], lastTrueBatchUse: { batch: 'TB260001' } });
   });
 
-  it('LB-07: the dirty hold runs from the end of the TrueBatch use; once it ran out the cleaning says why, and the miss is recorded for Deviations', async () => {
+  it('LB-07: the dirty hold runs from the end of the TrueBatch use; once it ran out the cleaning says why, and the miss is recorded for DIVE', async () => {
     const a = await item({ dirtyHoldHours: 1 });
     await t.owner`update overdue_since set since = now() - interval '1 day'`;
     await tbUse('TB260002', a.code, { startedMinutesAgo: 200, endedMinutesAgo: 120 });

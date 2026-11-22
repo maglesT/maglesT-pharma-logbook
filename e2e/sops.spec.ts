@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { approveSettings, logIn, owner } from './helpers.js';
 
 // D-79: the test server links QMS. SOP references are picked from QMS' effective SOPs, never typed.
-test('D-79: with QMS linked, a logbook type\'s SOPs are picked from QMS, not typed', async ({ page }) => {
+test('D-79: with ASSURE linked, a logbook type\'s SOPs are picked from ASSURE, not typed', async ({ page }) => {
   await approveSettings('requalification', { sopRef: 'SOP-1' });
   await logIn(page, 'admin');
   await page.getByRole('button', { name: 'Logbook settings' }).click();
@@ -10,10 +10,10 @@ test('D-79: with QMS linked, a logbook type\'s SOPs are picked from QMS, not typ
   await expect(section).toContainText('SOP SOP-1');
   await section.getByRole('button', { name: 'New version' }).click();
   const form = page.getByRole('dialog');
-  await expect(form).toContainText('SOPs come from QMS');
+  await expect(form).toContainText('SOPs come from ASSURE');
   await expect(form.getByRole('textbox', { name: 'SOP reference' })).toHaveCount(0);
   await expect(form).toContainText('SOP-1 rev 01 · Logbook entries');
-  const add = form.getByLabel('Add an SOP from QMS');
+  const add = form.getByLabel('Add an SOP from ASSURE');
   // Only effective SOPs are offered.
   await expect(add.locator('option', { hasText: 'SOP-ENG-020' })).toHaveCount(0);
   await add.selectOption('SOP-ENG-010');
