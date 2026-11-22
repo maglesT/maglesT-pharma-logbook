@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { api, useOf, UNSIGNED_OLDER, unsignedOlder, cleaningText, daysLeft, joinParts, type Due, can, ApiError, MEANING_LABEL, plantDay, plantTime, sterileLines, mediaFillLine, TYPE_LABEL, VOICE_LANGUAGE_LABEL, type VoiceConfig, type Entry, type Equipment, type EquipmentStatus, type LogbookTypeInfo, type Me, type Product, type Settings } from '../api.js';
 import { SignDialog } from '../components/SignDialog.js';
+import { ReasonDialog } from '../components/ReasonDialog.js';
 import { StatusChip } from '../components/StatusChip.js';
 import { EntryForm } from './EntryForm.js';
 import { HistoryCard } from './HistoryCard.js';
@@ -24,7 +25,7 @@ const ACTIVITIES: { key: string; label: string; type: string; preset?: Record<st
   { key: 'requalification', label: 'Requalification', type: 'requalification' },
   { key: 'others', label: 'Others (general log)', type: 'general_log' },
   { key: 'steriliser_cycle', label: 'Sterilisation cycle', type: 'steriliser_cycle' },
-  { key: 'steriliser_test', label: 'Steriliser test (vacuum leak / Bowie-Dick)', type: 'steriliser_test' },
+  { key: 'steriliser_test', label: 'Steriliser test (leak, air removal)', type: 'steriliser_test' },
   { key: 'glove_integrity', label: 'Glove integrity', type: 'glove_integrity' },
   { key: 'pressure_reading', label: 'Pressure reading', type: 'pressure_reading' },
   // D-84: a move to another room (reason and e-signature).
@@ -136,9 +137,16 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
       await api('POST', `/api/entries/${e.id}/complete`, body);
     } catch (err) {
       if (!(err instanceof ApiError && err.code === 'late_reason_required')) throw err;
-      const reason = window.prompt('This is a late entry. Reason:')?.trim();
-      if (reason) await api('POST', `/api/entries/${e.id}/complete`, { ...body, lateReason: reason });
+      setLate({ entry: e, endReason });
     }
+  };
+  const [late, setLate] = useState<{ entry: Entry; endReason?: string } | null>(null);
+  const endLate = async (reason: string) => {
+    if (!late) return;
+    const body = { activityEnd: new Date().toISOString(), ...(late.endReason ? { endReason: late.endReason } : {}), lateReason: reason };
+    try { await api('POST', `/api/entries/${late.entry.id}/complete`, body); } catch (err) { throw new Error(err instanceof ApiError && err.problems.length ? err.problems.join(' ') : (err as Error).message); }
+    setLate(null);
+    await load();
   };
   const endChangeOver = async (e: Entry) => {
     await complete(e).catch((err: Error) => setError(err.message));
@@ -270,6 +278,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
           }}
         />
       )}
+      {late && <ReasonDialog title="This is a late entry" label="Reason" onSubmit={endLate} onCancel={() => setLate(null)} />}
       {ending && (
         <EndUseDialog entry={ending} what={`${equipment.code} · batch ${ending.batch}, in use since ${plantTime(ending.activityStart)}`}
           onEnd={(reason) => endUse(ending, reason)} onCancel={() => setEnding(null)} />

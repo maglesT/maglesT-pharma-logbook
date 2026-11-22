@@ -111,6 +111,7 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
   const draft = type.versions.find((v) => v.id === draftId);
   const [effective, setEffective] = useState(localInputValue(draft?.effectiveFrom ?? new Date()));
   const [error, setError] = useState('');
+  const [draftReason, setDraftReason] = useState('');
   // D-71: the training signers need, picked from Recruitment's skills (typed while Recruitment is not linked or not reachable).
   const [skills, setSkills] = useState<TrainingSkills | null>(null);
   useEffect(() => {
@@ -136,8 +137,8 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
     const effectiveFrom = new Date(effective).toISOString();
     try {
       if (draftId) {
-        const reason = window.prompt('Reason for editing the draft:')?.trim();
-        if (!reason) return;
+        const reason = draftReason.trim();
+        if (!reason) return setError('Give the reason for editing the draft.');
         await api('PATCH', `/api/settings/${draftId}`, { settings, effectiveFrom, reason });
       } else {
         await api('POST', '/api/settings', { logbookType: type.key, settings, effectiveFrom });
@@ -152,6 +153,7 @@ function SettingsEditor({ type, draftId, onClose }: { type: LogbookTypeInfo; dra
     <div className="overlay" role="dialog" aria-modal="true">
       <form className="card dialog" onSubmit={save}>
         <h2>{type.label}: {draftId ? 'edit draft' : 'new version'}</h2>
+        {draftId && <label>Reason for editing the draft<input value={draftReason} onChange={(e) => setDraftReason(e.target.value)} /></label>}
         <label className="check"><input type="checkbox" checked={s.enabled} onChange={(e) => setS({ ...s, enabled: e.target.checked })} />Switched on at this site</label>
         <SopPicker label="SOP reference" value={s.sopRef} onChange={(sopRef) => setS({ ...s, sopRef })} />
         <label>Checklist items (one per line)<textarea value={checklist} onChange={(e) => setChecklist(e.target.value)} /></label>

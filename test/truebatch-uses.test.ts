@@ -162,7 +162,7 @@ describe('uses recorded in TrueBatch count in the status (D-46)', () => {
     // A cleaning that started before the step was signed done does not count.
     const early = await entry(a.id, { logbookType: 'equipment_cleaning', activityStart: new Date(Date.now() - 20 * 60_000).toISOString(),
       data: { cleaningType: 'major', checklist: {} }, signature: sig('op1') });
-    expect(early.json().problems).toEqual(['A cleaning cannot start before the last use ended.']);
+    expect(early.json().problems).toEqual([expect.stringContaining('A cleaning cannot start before the last use ended (')]);
     const e = (await cleaning(a.id)).json().id;
     expect((await status(a.id)).state).toBe('dirty');
     await verify(e);

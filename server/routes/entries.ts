@@ -182,7 +182,7 @@ function cleaningFits(status: Pick<EquipmentStatus, 'inUse' | 'lastUseEnd'>, sta
   // Forms enter times to the minute, so compare at minute precision.
   const useEndMinute = status.lastUseEnd ? Math.floor(status.lastUseEnd.getTime() / 60_000) * 60_000 : null;
   if (useEndMinute !== null && start.getTime() < useEndMinute) {
-    throw new EntryError(400, 'check_failed', ['A cleaning cannot start before the last use ended.']);
+    throw new EntryError(400, 'check_failed', [`A cleaning cannot start before the last use ended (${plantTime(status.lastUseEnd!)}): enter a cleaning time after it.`]);
   }
 }
 

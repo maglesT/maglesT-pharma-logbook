@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { api, can, localInputValue, plantTime, refusalLines, type BatchChoice, type Equipment, type EquipmentStatus, type Me, type Reservation } from '../api.js';
 import { BatchSelect } from '../pages/EntryForm.js';
+import { ReasonDialog } from './ReasonDialog.js';
 
 // D-85 (fix round 21 Nov 2026): an item is reserved for a batch or for dates (from, to, why). The batch is picked from the
 // batch records when they are linked; a person holding logbook.equipment.reserve reserves and cancels (with a reason).
@@ -11,20 +12,19 @@ export const reservationLine = (r: NonNullable<EquipmentStatus['reservation']>, 
 export function Reservations({ me, equipment, onChange }: { me: Me; equipment: Equipment; onChange: () => Promise<void> | void }) {
   const [rows, setRows] = useState<Reservation[] | null>(null);
   const [adding, setAdding] = useState(false);
+  const [cancelling, setCancelling] = useState<Reservation | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
   const mayReserve = can(me, 'equipment.reserve');
   const load = async () => setRows(await api<Reservation[]>('GET', `/api/equipment/${equipment.id}/reservations`));
   useEffect(() => { void load(); }, [equipment.id]);
   const done = async () => { setAdding(false); await load(); await onChange(); };
 
-  const cancel = async (r: Reservation) => {
-    setProblems([]);
-    const reason = window.prompt('Reason for cancelling the reservation:')?.trim();
-    if (!reason) return;
+  const cancel = async (r: Reservation, reason: string) => {
     try {
       await api('POST', `/api/equipment/${equipment.id}/reservations/${r.id}/cancel`, { reason });
-      await done();
-    } catch (err) { setProblems(refusalLines(err, {})); }
+    } catch (err) { throw new Error(refusalLines(err, {}).join(' ')); }
+    setCancelling(null);
+    await done();
   };
   const now = Date.now();
   return (
@@ -50,13 +50,14 @@ export function Reservations({ me, equipment, onChange }: { me: Me; equipment: E
                   <td>{r.purpose}</td>
                   <td>{r.by}<br /><span className="muted">{plantTime(r.createdAt)}</span></td>
                   <td>{state}</td>
-                  <td className="actions-cell">{mayReserve && !r.cancelled && !ended && <button onClick={() => cancel(r)}>Cancel</button>}</td>
+                  <td className="actions-cell">{mayReserve && !r.cancelled && !ended && <button onClick={() => { setProblems([]); setCancelling(r); }}>Cancel</button>}</td>
                 </tr>
               );
             })}
           </tbody>
         </table>
       )}
+      {cancelling && <ReasonDialog title="Cancel the reservation" label="Reason for cancelling" onSubmit={(reason) => cancel(cancelling, reason)} onCancel={() => setCancelling(null)} />}
       {adding && <ReserveDialog equipment={equipment} onDone={done} onCancel={() => setAdding(false)} />}
     </>
   );

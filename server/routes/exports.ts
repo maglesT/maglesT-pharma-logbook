@@ -9,7 +9,7 @@ import { z } from 'zod';
 import type { Sql } from '../db.js';
 import { logbookItem, type Master } from '../master.js';
 import { parseId, requirePermission } from '../auth.js';
-import { entryLines, recordLines } from '../changes.js';
+import { changeLines, entryLines, recordLines } from '../changes.js';
 import { auditActionText, MEANING_LABEL, PERFORMER_SIGNS, TYPE_LABEL } from '../labels.js';
 import { plantDay, plantTime } from '../status.js';
 import { present, type EntryRow } from './entries.js';
@@ -59,6 +59,8 @@ const auditSubject = (a: AuditRow) => {
   const what = s.logbookType ? ` · ${TYPE_LABEL[s.logbookType] ?? s.logbookType}${s.entryId ? ` #${s.entryId}` : ''}` : '';
   return `${s.code}${what}`;
 };
+// Actions whose stored record is shown in words, as on the screen (no internal record numbers, stored times or keys).
+const WORDED = /^(overdue\.recorded|reservation\.)/;
 const json = (v: unknown) => (v === null || v === undefined ? '' : JSON.stringify(v));
 // For the PDF: spaces after separators so long values wrap inside the table column.
 
@@ -192,7 +194,7 @@ async function pdf(r: Report, site: { name: string; code: string } | undefined, 
     cellText(plant(a.at)),
     cellText(a.actor ?? 'system'),
     cellText(`${auditActionText(a.action)}\n${auditSubject(a)}`),
-    cellText(`${a.reason ? `Reason: ${a.reason}\n` : ''}${a.oldValue ? `Before:\n${recordLines(a.oldValue, '  ').join('\n')}\n` : ''}${a.newValue ? `${a.oldValue ? 'After' : 'Recorded'}:\n${recordLines(a.newValue, '  ').join('\n')}` : ''}`),
+    cellText(WORDED.test(a.action) ? `${a.reason ? `Reason: ${a.reason}\n` : ''}${changeLines(a.oldValue, a.newValue, a.action).join('\n')}` : `${a.reason ? `Reason: ${a.reason}\n` : ''}${a.oldValue ? `Before:\n${recordLines(a.oldValue, '  ').join('\n')}\n` : ''}${a.newValue ? `${a.oldValue ? 'After' : 'Recorded'}:\n${recordLines(a.newValue, '  ').join('\n')}` : ''}`),
   ]);
   const heading = (text: string) => ({ text, fontSize: 8, bold: true });
   return render(site, r.title, by, [

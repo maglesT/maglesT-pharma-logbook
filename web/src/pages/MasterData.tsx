@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
+import { ReasonDialog } from '../components/ReasonDialog.js';
 import { api, ApiError, can, cleaningText, plantDay, QUAL_LABEL, type Candidate, type Equipment, type Me, type Product } from '../api.js';
 
 const KIND_LABEL = { equipment: 'Equipment', instrument: 'Instrument', area: 'Area / room' } as const;
-const ask = (what: string) => window.prompt(`Reason for ${what}:`)?.trim();
 
 export function MasterData({ me }: { me: Me }) {
   const isAdmin = can(me, 'site.manage');
@@ -41,14 +41,16 @@ function EquipmentList({ isAdmin }: { isAdmin: boolean }) {
     void load();
   }, []);
 
-  const change = async (eq: Equipment, what: string, body: Partial<Equipment>) => {
-    const reason = ask(`${what} of ${eq.code}`);
-    if (!reason) return;
+  const [asking, setAsking] = useState<{ eq: Equipment; what: string; body: Partial<Equipment> } | null>(null);
+  const change = async (eq: Equipment, what: string, body: Partial<Equipment>) => setAsking({ eq, what, body });
+  const doChange = async (reason: string) => {
+    if (!asking) return;
     try {
-      await api('PATCH', `/api/equipment/${eq.id}`, { ...body, reason });
+      await api('PATCH', `/api/equipment/${asking.eq.id}`, { ...asking.body, reason });
     } catch (err) {
       setError((err as Error).message);
     }
+    setAsking(null);
     await load();
   };
   const flag = (eq: Equipment, key: 'sterile' | 'classified', label: string) =>
@@ -60,6 +62,7 @@ function EquipmentList({ isAdmin }: { isAdmin: boolean }) {
     <>
       {isAdmin && <AddItem onAdded={load} />}
       <p className="muted">Name, location, hold times, frequencies and calibration come from Medhanta master data; ask your master-data editor to change them or to retire an item. Only the Logbook settings (sterile, classified room) are this site's.</p>
+      {asking && <ReasonDialog title={`Reason for ${asking.what} of ${asking.eq.code}`} onSubmit={doChange} onCancel={() => setAsking(null)} />}
       {error && <p className="error">{error}</p>}
       <table>
         <thead><tr><th>ID</th><th>Name</th><th>Kind</th><th>Location</th><th>Cleaning</th><th>PM</th><th>Calibration</th><th>Requalification</th><th>Logbook settings</th><th>Status</th></tr></thead>
@@ -184,22 +187,30 @@ function ProductList() {
 function SiteForm() {
   const [form, setForm] = useState({ name: '', code: '' });
   const [saved, setSaved] = useState('');
+  const [why, setWhy] = useState('');
+  const [problem, setProblem] = useState('');
   useEffect(() => {
     void api<{ name: string; code: string } | null>('GET', '/api/site').then((s) => s && setForm(s));
   }, []);
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
-    const reason = ask('changing the site record');
-    if (!reason) return;
-    await api('PUT', '/api/site', { ...form, reason });
-    setSaved('Saved.');
+    setSaved('');
+    if (!why.trim()) return setProblem('Give the reason for the change.');
+    try {
+      await api('PUT', '/api/site', { ...form, reason: why.trim() });
+      setProblem('');
+      setWhy('');
+      setSaved('Saved.');
+    } catch (err) { setProblem((err as Error).message); }
   };
 
   return (
     <form className="card" onSubmit={save}>
       <label>Site name<input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
       <label>Site code<input value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value })} /></label>
+      <label>Reason for the change<input value={why} onChange={(e) => setWhy(e.target.value)} /></label>
+      {problem && <p className="error" role="alert">{problem}</p>}
       <button className="primary" type="submit">Save</button>
       {saved && <p className="notice">{saved}</p>}
     </form>
