@@ -332,7 +332,7 @@ export function historyRoutes(app: FastifyInstance, sql: Sql) {
         ['Asset number', d.assetNumber], ['Capacity / size', d.capacity],
         ['Installed / supplier', `${d.installationDate ? plantDay(d.installationDate) : ''} ${d.supplier}`.trim()], ['Qualification', `${d.qualificationStatus.replaceAll('_', ' ')} · IQ ${plantDay(d.iq.date)} ${d.iq.ref} · OQ ${plantDay(d.oq.date)} ${d.oq.ref} · PQ ${plantDay(d.pq.date)} ${d.pq.ref} · last requalification ${plantDay(d.lastRequalification)}`],
         ['Product contact / MOC', d.productContactMoc], ['SOPs', d.sopRefs], ['Details version', `${head.details!.version}, ${head.details!.changedBy}, ${plant(head.details!.changedAt)}`],
-      ] as [string, string][]) : [['Details', 'not recorded']] as [string, string][]),
+      ] as [string, string][]) : [['Further details', 'asset number, capacity, qualification and SOPs not entered yet']] as [string, string][]),
     ];
     return sendCopy(reply, 'pdf', name, await tablesPdf(sql, `Equipment history card ${eq.code} · ${eq.name}`, `Period ${plantDay(q.data.fromDay)} to ${plantDay(q.data.toDay)} (plant time). All versions; superseded versions grey, breakdowns shaded. Uses recorded in TrueBatch or Medhanta LIMS, and sterilisation cycles recorded in TrueBatch Injectables, are read from there (read only).${notes.length ? ` ${notes.join(' ')}` : ''}`, [
       { heading: 'Equipment', columns: ['Field', 'Value'], widths: [120, '*'], rows: detailRows.map((r) => ({ cells: r })) },

@@ -224,7 +224,12 @@ table.audit td { font-size: 0.92rem; }
 }
 /* The breakdown register uses the full screen width. */
 .page:has(table.register) { max-width: 1680px; }
-table.register { font-size: 0.86rem; }
+table.register { font-size: 0.8rem; table-layout: fixed; width: 100%; }
+table.register td, table.register th { padding: 8px 6px; overflow-wrap: anywhere; }
+table.register th:nth-child(2), table.register th:nth-child(3) { width: 7.5rem; }
+table.register th:nth-child(4), table.register th:nth-child(11) { width: 5rem; }
+table.register th:nth-child(12) { width: 6.5rem; }
+table.register td:last-child { overflow-wrap: normal; }
 
 /* Owner 2026-11-12: add an item by its ID */
 .add-item h2 { margin: 0; }

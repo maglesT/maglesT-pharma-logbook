@@ -61,7 +61,7 @@ export function HistoryCard({ me, equipment, products = [] }: { me: Me; equipmen
             <dt>Record</dt><dd className="muted">Version {data!.details!.version}, {data!.details!.changedBy}, {plantTime(data!.details!.changedAt)}: {data!.details!.reason}</dd>
           </>}
         </dl>
-        {!d && <p className="muted">No equipment details recorded yet.</p>}
+        {!d && <p className="muted">Asset number, capacity, qualification and SOPs are not entered yet.</p>}
         {can(me, 'site.manage') && <button onClick={() => setEditing(true)}>Edit details</button>}
         {data && data.locationHistory.length > 0 && (
           <>

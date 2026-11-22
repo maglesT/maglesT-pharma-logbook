@@ -26,7 +26,7 @@ function present(r: Row) {
   return {
     id: r.id, equipmentId: r.equipment_id, code: r.code, name: r.name, kind: r.kind, label: OVERDUE_LABEL[r.kind], dueAt: r.due_at, detectedAt: r.detected_at,
     title: r.title, contentHash: contentHash('exception', r.id, exceptionContent(r)),
-    decision: r.decision ? { kind: r.decision, label: DECISION_LABEL[r.decision], reason: r.reason, by: r.decided_by_name, at: r.decided_at, signedBy: r.signed_by } : null,
+    decision: r.decision ? { kind: r.decision, label: DECISION_LABEL[r.decision], reason: r.reason, by: r.decided_by_name?.replace(' before D-80)', ', before missed limits were decided here)') ?? null, at: r.decided_at, signedBy: r.signed_by } : null,
   };
 }
 
