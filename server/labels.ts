@@ -73,7 +73,7 @@ export const VALUE_LABEL: Record<string, Record<string, string>> = {
   test: { air_removal: 'Air removal (Bowie-Dick)', leak: 'Leak (vacuum) test' },
   failureCategory: FAILURE_CATEGORY_LABEL,
   doneBy: { in_house: 'In-house', vendor: 'External vendor' },
-  source: { protocol: 'Qualification protocol', manual: 'Written by hand' },
+  source: { protocol: 'EQUIP protocol', manual: 'Written by hand' },
   stage: STAGE_LABEL,
   outcome: OUTCOME_LABEL,
 };

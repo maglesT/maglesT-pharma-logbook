@@ -3,6 +3,16 @@ import { logIn, logOut, newEquipment, sign } from './helpers.js';
 
 // Engineering work orders (22 Nov 2026): raised by hand, assigned from the people list, started, work recorded, Done
 // (the doer signs), Closed (a second person signs); the menu list finds it, the item has a Work orders tab, a PDF copy.
+test('LB-17: the breakdown register headers do not overlap at 1440 px', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await logIn(page, 'qa1');
+  await page.getByRole('button', { name: 'Breakdowns' }).click();
+  await expect(page.locator('table.register th').first()).toBeVisible();
+  const clipped = await page.locator('table.register th').evaluateAll((ths) => ths.filter((t) => t.scrollWidth > t.clientWidth + 1).map((t) => t.textContent));
+  expect(clipped).toEqual([]);
+  await page.screenshot({ path: 'test-results/register-1440.png' });
+});
+
 test('LB-06: raise, assign, start, record the work, mark done and close a work order', async ({ page }) => {
   const { code } = await newEquipment({ name: 'WO item' });
   await logIn(page, 'sup1');

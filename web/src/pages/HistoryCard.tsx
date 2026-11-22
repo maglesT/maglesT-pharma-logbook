@@ -174,7 +174,7 @@ function EventRow({ ev, onVoice, products }: { ev: HistoryEvent; onVoice: (id: n
         <td>{plantTime(x.dueAt)}</td>
         <td>Missed limit (exception)<br /><span className="muted">{x.label}</span></td>
         <td><div>{x.title}</div>
-          <div>{d ? `${d.label} by ${d.by ?? ''}, ${plantTime(d.at)}` : 'Waiting for a decision: close it here or send it to DIVE (Home)'}</div>
+          <div>{d ? `${d.label} ${d.by ? `by ${d.by}` : 'automatically'}, ${plantTime(d.at)}` : 'Waiting for a decision: close it here or send it to DIVE (Home)'}</div>
           {d?.reason && <div><strong>Reason:</strong> {d.reason}</div>}</td>
         <td>{d?.by ?? 'Logbook'}</td>
         <td>{d?.signedBy && <div>{MEANING_LABEL.closed}: {d.signedBy}, {plantTime(d.at)}</div>}</td>

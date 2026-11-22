@@ -417,7 +417,7 @@ export function Summary({ e, full = false, products }: { e: Entry; full?: boolea
 export function UseCheck({ status: s }: { status: EquipmentStatus }) {
   const due = (k: Due['kind']) => s.dues.find((d) => d.kind === k);
   const has = (re: RegExp) => s.blockers.some((b) => re.test(b));
-  // Nothing to check (no schedule, not calibrated in the Logbook): a dash, never a green tick.
+  // Nothing to check (no schedule in master data): a dash, never a green tick.
   const line = (label: string, bad: boolean, warn: boolean, text: string, none = false) => {
     const k = bad ? 'bad' : warn ? 'warn' : none ? 'none' : 'ok';
     return <li className={k}><span aria-hidden="true">{{ bad: '✕', warn: '!', none: '–', ok: '✓' }[k]}</span><b>{label}</b><span>{text}</span></li>;
@@ -433,7 +433,7 @@ export function UseCheck({ status: s }: { status: EquipmentStatus }) {
       {line('Cleaning status', cleaningBad, Boolean(s.deadline?.soon), cleaningBad ? s.blockers.find((b) => /^(Dirty|Clean-hold|Cleaning overdue)/.test(b))!
         : s.deadline ? `${s.deadline.kind === 'dirty_hold' ? 'Dirty hold ends' : s.schedule === 'frequency' ? 'Next cleaning due' : 'Clean until'} ${plantTime(s.deadline.at)}` : 'Clean')}
       {line('Preventive maintenance', Boolean(pm?.overdue), Boolean(pm?.soon), dueText(pm, 'No PM schedule in master data'), !pm)}
-      {line('Calibration', calBad, Boolean(cal?.soon), calBad ? s.blockers.find((b) => /^(Calibration|Not calibrated|Re-calibration)/.test(b))! : dueText(cal, 'Not calibrated in the Logbook'), !calBad && !cal)}
+      {line('Calibration', calBad, Boolean(cal?.soon), calBad ? s.blockers.find((b) => /^(Calibration|Not calibrated|Re-calibration)/.test(b))! : dueText(cal, 'No calibration schedule in master data'), !calBad && !cal)}
       {line('Requalification', Boolean(rq?.overdue) || has(/^(Not qualified|Requalification needed)/), Boolean(rq?.soon),
         has(/^(Not qualified|Requalification needed)/) ? s.blockers.find((b) => /^(Not qualified|Requalification needed)/.test(b))! : dueText(rq, 'No requalification date'),
         !rq && !has(/^(Not qualified|Requalification needed)/))}

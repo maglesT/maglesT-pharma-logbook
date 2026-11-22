@@ -18,7 +18,7 @@ function Outcome({ e, linked }: { e: Exception; linked: boolean }) {
   const d = e.decision;
   if (!d) return <span className="pill warn">Waiting for a decision</span>;
   if (d.kind === 'closed') return <>Closed here by {d.by}, {plantTime(d.at)}<br /><span className="muted">Reason: {d.reason}</span></>;
-  return <>Sent to DIVE by {d.by}{' · '}
+  return <>Sent to DIVE{d.by ? ` by ${d.by}` : ' automatically'}{' · '}
     {e.deviation ? <><strong>{e.deviation.number}</strong> · {DEV_STEP[e.deviation.status] ?? e.deviation.status}</>
       : linked ? <span className="muted">being filed in DIVE…</span> : <span className="muted">DIVE not linked</span>}</>;
 }

@@ -16,10 +16,10 @@ const status = (over: Partial<EquipmentStatus> = {}): EquipmentStatus => ({
 const line = (html: string, label: string) => new RegExp(`<li class="(\\w+)"><span aria-hidden="true">([^<]*)</span><b>${label}</b>`).exec(html)?.slice(1);
 
 describe('the check before use and the entry details read in words', () => {
-  it('LB-05: "Not calibrated in the Logbook" has no green tick: an item with nothing to check shows a dash; a calibration in date keeps its tick', () => {
+  it('LB-05: "No calibration schedule in master data" has no green tick: an item with nothing to check shows a dash; a calibration in date keeps its tick', () => {
     const none = renderToStaticMarkup(createElement(UseCheck, { status: status() }));
     expect(line(none, 'Calibration')).toEqual(['none', '–']);
-    expect(text(none)).toContain('Calibration Not calibrated in the Logbook');
+    expect(text(none)).toContain('Calibration No calibration schedule in master data');
     expect(line(none, 'Preventive maintenance')).toEqual(['none', '–']);
     expect(line(none, 'Requalification')).toEqual(['none', '–']);
     expect(line(none, 'Cleaning status')).toEqual(['ok', '✓']);
@@ -34,7 +34,7 @@ describe('the check before use and the entry details read in words', () => {
       nextDue: '2027-05-16', doneBy: 'in_house', vendorName: '', reportRef: 'PRT-2026-0013', remarks: 'IQ/OQ of the new coater', comment: '', deviationRef: '' } }));
     const shown = text(html);
     for (const raw of ['source', 'outcome', 'reportRef', 'protocolNumber', 'iq oq', 'pass conditions']) expect(shown).not.toContain(raw);
-    expect(shown).toContain('Recorded from Qualification protocol');
+    expect(shown).toContain('Recorded from EQUIP protocol');
     expect(shown).toContain('Protocol PRT-2026-0013');
     expect(shown).toContain('Stage IQ/OQ');
     expect(shown).toContain('Result Pass with conditions');
