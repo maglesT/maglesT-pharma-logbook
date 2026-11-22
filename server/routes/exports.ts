@@ -163,7 +163,7 @@ export async function tablesPdf(sql: Sql, title: string, subtitle: string, table
   for (const t of tables) {
     content.push({ text: runs(t.heading), bold: true, margin: [0, 8, 0, 4] });
     content.push(t.rows.length
-      ? { table: { headerRows: 1, widths: t.widths, body: [t.columns.map((c) => ({ text: c, fontSize: 8, bold: true })),
+      ? { table: { headerRows: 1, widths: t.widths, dontBreakRows: true, body: [t.columns.map((c) => ({ text: c, fontSize: 8, bold: true })),
           ...t.rows.map((r) => r.cells.map((c) => cellText(c, r.grey ? { color: '#888888' } : r.highlight ? { fillColor: '#fdecea' } : {})))] }, layout: 'lightHorizontalLines' }
       : { text: 'None.', italics: true });
   }

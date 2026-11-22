@@ -276,14 +276,19 @@ export function workOrderRoutes(app: FastifyInstance, sql: Sql) {
     const { r } = d;
     const item = await logbookItem(sql, app.master, r.equipment_id);
     const day = (v: string | null) => (v ? dayText(v) : '');
-    const fields: [string, string][] = [
-      ['Work order', r.number], ['Item', `${r.code}${item ? ` · ${item.name}` : ''}`], ['Kind', WO_KIND_LABEL[r.kind]!], ['Title', r.title], ['Description', r.description],
-      ['Status', WO_STATUS_LABEL[r.status]!], ['Raised', `${plant(r.raised_at)} by ${r.raised_by_name}`], ['Assigned to', r.assigned_to_name ?? 'Nobody yet'],
-      ['Target date', day(r.target_date)], ['Started', r.started_at ? plant(r.started_at) : ''], ['Work done', r.work_done], ['Spare parts used', partsLine(r.parts) || (r.work_done ? 'None' : '')],
-      ['Time spent', timeLine(r.time_minutes)], ['Done', r.done_at ? `${plant(r.done_at)} by ${r.done_by_name}` : ''], ['Closed', r.closed_at ? `${plant(r.closed_at)} by ${r.closed_by_name}` : ''],
-    ];
+    const short: [string, string][] = [
+      ['Work order', r.number], ['Status', WO_STATUS_LABEL[r.status]!], ['Item', `${r.code}${item ? ` · ${item.name}` : ''}`], ['Kind', WO_KIND_LABEL[r.kind]!],
+      ['Raised', `${plant(r.raised_at)} by ${r.raised_by_name}`], ['Assigned to', r.assigned_to_name ?? 'Nobody yet'],
+      ['Target date', day(r.target_date)], ['Started', r.started_at ? plant(r.started_at) : ''],
+      ['Done', r.done_at ? `${plant(r.done_at)} by ${r.done_by_name}` : ''], ['Closed', r.closed_at ? `${plant(r.closed_at)} by ${r.closed_by_name}` : ''],
+      ['Time spent', timeLine(r.time_minutes)],
+    ].filter(([, v]) => v) as [string, string][];
+    const paired: string[][] = [];
+    for (let i = 0; i < short.length; i += 2) paired.push([...short[i]!, ...(short[i + 1] ?? ['', ''])]);
+    const long: [string, string][] = ([['Title', r.title], ['Description', r.description], ['Work done', r.work_done], ['Spare parts used', partsLine(r.parts) || (r.work_done ? 'None' : '')]] as [string, string][]).filter(([, v]) => v);
     const tables: PdfTable[] = [
-      { heading: 'Work order', columns: ['Field', 'Value'], widths: [110, '*'], rows: fields.filter(([, v]) => v).map((f) => ({ cells: f })) },
+      { heading: 'Work order', columns: ['Field', 'Value', 'Field', 'Value'], widths: [70, '*', 70, '*'], rows: paired.map((cells) => ({ cells })) },
+      { heading: 'Work', columns: ['Field', 'Value'], widths: [90, '*'], rows: long.map((f) => ({ cells: f })) },
       { heading: 'Signatures', columns: ['Meaning', 'Signed by', 'When'], widths: [110, 150, '*'], rows: d.sigs.map((s) => ({ cells: [MEANING_LABEL[s.meaning] ?? s.meaning, s.printed_name, plant(s.signed_at)] })) },
       { heading: 'Audit trail', columns: ['When', 'Who', 'What'], widths: [110, 110, '*'], rows: d.log.map((a) => ({ cells: [plant(a.at), a.actor ?? 'system', auditLine(a)] })) },
     ];

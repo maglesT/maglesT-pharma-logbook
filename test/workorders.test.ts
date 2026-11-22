@@ -86,6 +86,8 @@ describe('work orders (D-86)', () => {
     expect(res.statusCode).toBe(200);
     expect(res.headers['content-type']).toBe('application/pdf');
     expect(res.rawPayload.subarray(0, 4).toString()).toBe('%PDF');
+    // A closed work order with its whole audit trail fits one page.
+    expect((res.rawPayload.toString('latin1').match(/\/Type \/Page\b(?!s)/g) ?? []).length).toBe(1);
     expect((await call(t.app, c.op1!, 'GET', '/api/workorders.csv')).payload).toContain('Lubricate');
   });
 
