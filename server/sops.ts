@@ -20,11 +20,11 @@ export interface Sops {
   effective(): Promise<QmsSop[]>;
 }
 
-export const SOPS_OFF = 'Connection to QMS (SOPs) is off: SOPs cannot be picked now and none can be typed. Try again later or ask your administrator.';
+export const SOPS_OFF = 'Connection to ASSURE (SOPs) is off: SOPs cannot be picked now and none can be typed. Try again later or ask your administrator.';
 export class SopsOff extends ConnectionOff {
   constructor() { super(); this.message = SOPS_OFF; }
 }
-export const SOPS_FROM_QMS = 'SOPs come from QMS: pick them from the list.';
+export const SOPS_FROM_QMS = 'SOPs come from ASSURE: pick them from the list.';
 
 export function sqlSops(q: Sql, schema = 'report'): Sops {
   const read = async <T>(f: () => Promise<T>) => { try { return await f(); } catch (e) { if (isCut(e)) throw new SopsOff(); throw e; } };
@@ -55,7 +55,7 @@ export async function pullSops(sops: Sops | null, text: string, recorded: string
   let list: QmsSop[];
   try { list = await sops.effective(); } catch (e) { if (e instanceof SopsOff) return { text, problems: [SOPS_OFF], off: true }; throw e; }
   const byNumber = new Map(list.map((s) => [s.number.toUpperCase(), s.number]));
-  const problems = added.filter((r) => !byNumber.has(r.toUpperCase())).map((r) => `SOP ${r} is not an effective SOP in QMS: ${SOPS_FROM_QMS}`);
+  const problems = added.filter((r) => !byNumber.has(r.toUpperCase())).map((r) => `SOP ${r} is not an effective SOP in ASSURE: ${SOPS_FROM_QMS}`);
   const out = [...new Set(refs.map((r) => (known.has(r.toUpperCase()) ? r : byNumber.get(r.toUpperCase()) ?? r)))];
   return { text: out.join(', '), problems };
 }

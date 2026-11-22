@@ -373,7 +373,7 @@ export function Home({ me, onOpen }: { me: Me; onOpen: (equipmentId: number) => 
           <OnTime c={compliance} />
           <DueColumns items={items} onOpen={onOpen} />
           <StatusGraph items={items} onOpen={onOpen} />
-          {/* D-80: missed limits are exceptions, closed here or sent to Deviations. */}
+          {/* D-80: missed limits are exceptions, closed here or sent to DIVE. */}
           {raised && raised.events.length > 0 && <Exceptions data={raised} onOpen={onOpen} onChanged={() => void load()} />}
           <section className="dash-panel" aria-label="In use">
             <div className="panel-head"><h2>In use</h2><span className="pill">{inProgress.length}</span></div>

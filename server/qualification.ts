@@ -47,7 +47,7 @@ const isCut = (e: unknown) => {
   return ['42501', '42P01', '28000', '57P01', 'ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'EAI_AGAIN', 'CONNECT_TIMEOUT', 'CONNECTION_CLOSED',
     'CONNECTION_ENDED', 'CONNECTION_DESTROYED'].includes(code) || code.startsWith('08');
 };
-export const QUAL_OFF = 'Connection to the Qualification system is off. Ask your administrator.';
+export const QUAL_OFF = 'Connection to EQUIP is off. Ask your administrator.';
 export class QualificationOff extends ConnectionOff {
   constructor() { super(); this.message = QUAL_OFF; }
 }

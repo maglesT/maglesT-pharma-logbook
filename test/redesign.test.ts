@@ -268,7 +268,7 @@ describe('Qualification link down (D-70, owner 17 Nov 2026, G15)', () => {
       // Still waiting: adding an item and a requalification (by protocol or by hand).
       const add = await call(t.app, c.admin!, 'POST', '/api/equipment', { itemId: waiting.itemId, reason: 'New line' });
       expect(add.statusCode).toBe(503);
-      expect(add.json().message).toBe('Connection to the Qualification system is off. Ask your administrator.');
+      expect(add.json().message).toBe('Connection to EQUIP is off. Ask your administrator.');
       for (const data of [{ source: 'protocol', protocolNumber: 'PRT-2026-0042', outcome: 'pass' }, { source: 'manual', outcome: 'pass', reportRef: 'VR-1' }]) {
         const rq = await entry('eng1', id, { logbookType: 'requalification', activityStart: now(), signature: sig('eng1'), data });
         expect(rq.statusCode).toBe(503);

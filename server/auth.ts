@@ -25,7 +25,7 @@ export const PERMISSIONS = {
   'logbook.voice_note.record': 'Record voice notes',
   'logbook.advice.ask': 'Ask for breakdown suggestions',
   // D-80 (owner, 20 Nov 2026): per employee in the platform permission register, given to no old role.
-  'logbook.exception.decide': 'Decide a missed limit: close it in the Logbook (reason and e-signature) or send it to Deviations',
+  'logbook.exception.decide': 'Decide a missed limit: close it in the Logbook (reason and e-signature) or send it to DIVE',
   // D-84, D-85 (fix round 21 Nov 2026): per employee in the platform permission register, given to no old role.
   'logbook.equipment.move': 'Move equipment or an instrument to another room (reason and e-signature)',
   'logbook.equipment.reserve': 'Reserve equipment for a batch or dates, and cancel a reservation',

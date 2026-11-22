@@ -80,7 +80,7 @@ export function masterDataRoutes(app: FastifyInstance, sql: Sql) {
     if (app.qualification && m.kind !== 'instrument') {
       const q = (await app.qualification.statuses()).get(m.itemId);
       if (!q || !QUALIFIED.includes(q.status)) {
-        return reply.code(409).send({ error: 'not_qualified', message: `${m.code} is not qualified in the Qualification system${q ? ` (${q.status.replaceAll('_', ' ')})` : ''}: it cannot be added.` });
+        return reply.code(409).send({ error: 'not_qualified', message: `${m.code} is not qualified in EQUIP${q ? ` (${q.status.replaceAll('_', ' ')})` : ''}: it cannot be added.` });
       }
     }
     if (m.kind === 'area' && body.data.sterile) return reply.code(400).send({ error: 'invalid_request', message: 'A room is not a steriliser.' });

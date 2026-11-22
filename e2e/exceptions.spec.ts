@@ -11,7 +11,7 @@ async function missed(equipmentId: number, code: string, kind: 'pm' | 'calibrati
   await db.end();
 }
 
-test('LB-06: a missed limit is closed here with a reason and a signature, or sent to Deviations; it shows on the history card', async ({ page }) => {
+test('LB-06: a missed limit is closed here with a reason and a signature, or sent to DIVE; it shows on the history card', async ({ page }) => {
   const { id, code } = await newEquipment({ name: 'Exception item' });
   await missed(id, code, 'pm', 5);
   await missed(id, code, 'calibration', 3);
@@ -41,9 +41,9 @@ test('LB-06: a missed limit is closed here with a reason and a signature, or sen
   await expect(pmRow()).toContainText('Reason: PM done the next morning; no batch made meanwhile');
 
   const calRow = panelOf().locator('tr', { hasText: code }).filter({ hasText: 'Calibration overdue' });
-  await calRow.getByRole('button', { name: 'Send to Deviations' }).click();
-  await expect(calRow).toContainText('Sent to Deviations by QA1');
-  await expect(calRow).toContainText('being filed in Deviations');
+  await calRow.getByRole('button', { name: 'Send to DIVE' }).click();
+  await expect(calRow).toContainText('Sent to DIVE by QA1');
+  await expect(calRow).toContainText('being filed in DIVE');
   await expect(calRow.getByRole('button')).toHaveCount(1);   // only the item link: decided once
 
   // The equipment history card keeps both, the closed one with its reason and signature.
@@ -53,5 +53,5 @@ test('LB-06: a missed limit is closed here with a reason and a signature, or sen
   await expect(rows).toHaveCount(2);
   await expect(rows.filter({ hasText: 'Preventive maintenance overdue' })).toContainText('Closed in the Logbook by QA1');
   await expect(rows.filter({ hasText: 'Preventive maintenance overdue' })).toContainText('Closed: QA1');
-  await expect(rows.filter({ hasText: 'Calibration overdue' })).toContainText('Sent to Deviations by QA1');
+  await expect(rows.filter({ hasText: 'Calibration overdue' })).toContainText('Sent to DIVE by QA1');
 });

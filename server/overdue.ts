@@ -47,7 +47,7 @@ async function report(sql: Sql, kind: OverdueKind, i: LogbookItem, s: EquipmentS
       // D-46: the last use may be TrueBatch's (D-47: or TrueBatch Packing's).
       const tb = s.lastTrueBatchUse;
       const u = tb ? { ended: tb.endedAt, batch: `${tb.batch} in ${tb.source}${tb.step ? ` (${tb.step})` : ''}`, product: null } : await lastUse(sql, i.id);
-      const what = tb ? useOf(tb.source) : 'batch'; // D-76: an analysis in LIMS
+      const what = tb ? useOf(tb.source) : 'batch'; // D-76: an analysis in QLIMS
       return {
         title: `Dirty hold expired: ${i.code} not cleaned within ${c.dirtyHoldHours ?? '?'} h of use`,
         description: `${named(i)} was not cleaned within its dirty hold of ${c.dirtyHoldHours ?? '?'} hours after use. `
@@ -187,4 +187,4 @@ export interface ExceptionRow { id: number; equipment_id: number; code: string; 
 /** What the person closing an exception signs: the missed limit as the Logbook recorded it (the reason is kept with the decision). */
 export const exceptionContent = (e: ExceptionRow) =>
   ({ event: e.id, equipment: e.code, kind: e.kind, dueAt: new Date(e.due_at).toISOString(), title: e.title, decision: 'closed' });
-export const DECISION_LABEL: Record<Decision | 'open', string> = { open: 'Waiting for a decision', closed: 'Closed in the Logbook', sent: 'Sent to Deviations' };
+export const DECISION_LABEL: Record<Decision | 'open', string> = { open: 'Waiting for a decision', closed: 'Closed in the Logbook', sent: 'Sent to DIVE' };

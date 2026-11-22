@@ -32,7 +32,7 @@ const published = async (t: TestApp) =>
 const details = (t: TestApp, c: Record<string, string>, id: number, sopRefs: string, expectedVersion: number) =>
   call(t.app, c.admin!, 'PUT', `/api/equipment/${id}/details`, { details: { sopRefs }, reason: 'SOPs', expectedVersion });
 
-describe('QMS document_v1 is read (D-79)', () => {
+describe('ASSURE document_v1 is read (D-79)', () => {
   let t: TestApp;
   beforeAll(async () => { t = await freshApp(); });
   afterAll(() => t.close());
@@ -53,17 +53,17 @@ describe('QMS document_v1 is read (D-79)', () => {
   });
 });
 
-describe('linked: SOPs are picked from QMS (D-79)', () => {
+describe('linked: SOPs are picked from ASSURE (D-79)', () => {
   let t: TestApp; let c: Record<string, string>;
   beforeAll(async () => ({ t, c } = await setUp(fakeSops)));
   afterAll(() => t.close());
 
-  it('D-79: settings take QMS SOPs only; recorded ones stay; QMS down adds nothing; logbook_sop_v1 publishes what is recorded', async () => {
+  it('D-79: settings take ASSURE SOPs only; recorded ones stay; ASSURE down adds nothing; logbook_sop_v1 publishes what is recorded', async () => {
     list = [sop('SOP-ENG-010'), sop('SOP-ENG-011')]; down = false;
     expect((await call(t.app, c.admin!, 'GET', '/api/sops')).json()).toMatchObject({ linked: true, available: true, sops: list });
     const typed = await draft(t, c, 'SOP-HAND-1');
     expect(typed.statusCode).toBe(400);
-    expect(typed.json().problems[0]).toMatch(/SOP-HAND-1 is not an effective SOP in QMS/);
+    expect(typed.json().problems[0]).toMatch(/SOP-HAND-1 is not an effective SOP in ASSURE/);
     const v1 = await draft(t, c, 'sop-eng-010');
     expect(v1.statusCode).toBe(201);
     await approve(t, c, v1.json().id);
@@ -89,7 +89,7 @@ describe('linked: SOPs are picked from QMS (D-79)', () => {
     expect(await published(t)).toEqual(['maintenance:SOP-ENG-010']);
   });
 
-  it('D-79: an item\'s SOP references are picked from QMS the same way', async () => {
+  it('D-79: an item\'s SOP references are picked from ASSURE the same way', async () => {
     list = [sop('SOP-PRD-021')]; down = false;
     const id = await addItem(t, { code: 'PRESS-9' });
     expect((await details(t, c, id, 'SOP-TYPED', 0)).statusCode).toBe(400);

@@ -574,10 +574,10 @@ function RequalificationFields({ data, setData, equipment }: { data: Data; setDa
     <>
       <fieldset className="checklist">
         <legend>Source</legend>
-        <label className="check"><input type="radio" checked={data.source === 'protocol'} disabled={!list?.linked} onChange={() => set({ source: 'protocol' })} />From a protocol in the Qualification system</label>
+        <label className="check"><input type="radio" checked={data.source === 'protocol'} disabled={!list?.linked} onChange={() => set({ source: 'protocol' })} />From a protocol in EQUIP</label>
         <label className="check"><input type="radio" checked={data.source === 'manual'} onChange={() => set({ source: 'manual', protocolNumber: '' })} />Written by hand (e.g. done by a vendor)</label>
         {list?.error && <p className="error" role="alert">{list.error}</p>}
-        {list && !list.linked && !list.error && <p className="muted">The Qualification system is not linked: write the requalification by hand.</p>}
+        {list && !list.linked && !list.error && <p className="muted">EQUIP is not linked: write the requalification by hand.</p>}
       </fieldset>
       {data.source === 'protocol' ? (
         <>

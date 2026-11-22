@@ -61,7 +61,7 @@ beforeAll(async () => {
 });
 afterAll(() => t.close());
 
-describe('missed limits are recorded for Deviations (owner 2026-11-12, D-37)', () => {
+describe('missed limits are recorded for DIVE (owner 2026-11-12, D-37)', () => {
   it('LB-06: a limit that ran out before the feature was installed is not recorded (no flood of old misses)', async () => {
     const a = await item({ pmFrequencyDays: 10 });
     await t.owner`update equipment set created_at = now() - interval '12 days' where id = ${a.id}`;   // PM due 2 days ago
@@ -119,7 +119,7 @@ describe('missed limits are recorded for Deviations (owner 2026-11-12, D-37)', (
     expect(await events(a.id)).toHaveLength(0);
   });
 
-  it('LB-06: the overdue list shows the deviation number once Deviations has filed the record', async () => {
+  it('LB-06: the overdue list shows the deviation number once DIVE has filed the record', async () => {
     const a = await item({ pmFrequencyDays: 5 });
     await t.owner`update equipment set created_at = now() - interval '8 days' where id = ${a.id}`;
     await record();
@@ -136,7 +136,7 @@ describe('missed limits are recorded for Deviations (owner 2026-11-12, D-37)', (
 
 // D-80 (owner decision, 20 Nov 2026): a missed limit is an exception, closed here (reason and e-signature) or sent to
 // Deviations by a person holding logbook.exception.decide; Deviations sees only the ones sent (overdue_v1.sent_at).
-describe('missed limits are exceptions: close here or send to Deviations (D-80)', () => {
+describe('missed limits are exceptions: close here or send to DIVE (D-80)', () => {
   const view = async (code: string) => {
     await t.owner.unsafe(`grant usage on schema ${t.reportSchema.replace(/_report$/, '')} to logbook_report`);
     const v = await asReport(t.owner, `select event_id, decision, sent_at from ${t.reportSchema}.overdue_v1 where equipment_code = '${code}'`);
@@ -152,7 +152,7 @@ describe('missed limits are exceptions: close here or send to Deviations (D-80)'
     return { ...a, ev: ev!, row };
   }
 
-  it('LB-06: a new missed limit waits for a decision; overdue_v1 says open, with no sent_at (Deviations files nothing)', async () => {
+  it('LB-06: a new missed limit waits for a decision; overdue_v1 says open, with no sent_at (DIVE files nothing)', async () => {
     const m = await missed();
     expect(m.row).toMatchObject({ decision: null, contentHash: expect.stringMatching(/^[0-9a-f]{64}$/) });
     expect(await view(m.code)).toMatchObject({ decision: 'open', sent_at: null });
@@ -193,7 +193,7 @@ describe('missed limits are exceptions: close here or send to Deviations (D-80)'
     expect(csv).toContain('Closed in the Logbook by QA1');
   });
 
-  it('LB-06: send to Deviations sets sent_at in overdue_v1, so Deviations files it; the number comes back as before', async () => {
+  it('LB-06: send to DIVE sets sent_at in overdue_v1, so DIVE files it; the number comes back as before', async () => {
     const m = await missed();
     expect((await call(t.app, c.qa!, 'POST', `/api/overdue/${m.ev.id}/send`, {})).statusCode).toBe(200);
     const v = await view(m.code);
@@ -206,14 +206,14 @@ describe('missed limits are exceptions: close here or send to Deviations (D-80)'
       .toMatchObject({ decision: { kind: 'sent', by: 'QA1' }, deviation: { number: 'DEV-2026-0077' } });
   });
 
-  it('LB-06: without the Deviations link a missed limit cannot be sent: it is closed here', async () => {
+  it('LB-06: without the DIVE link a missed limit cannot be sent: it is closed here', async () => {
     const m = await missed();
     const alone = await buildApp({ sql: t.sql, signOn: fakeSignOn(), proofKey: TEST_PROOF_KEY, master: t.master, webRoot: '/nonexistent' });
     try {
       const cookie = (await login(alone, 'qa1')).cookie;
       const r = await call(alone, cookie, 'POST', `/api/overdue/${m.ev.id}/send`, {});
       expect(r.statusCode).toBe(409);
-      expect(r.json().problems).toEqual(['Deviations is not linked: close it here.']);
+      expect(r.json().problems).toEqual(['DIVE is not linked: close it here.']);
       expect((await call(alone, cookie, 'GET', '/api/overdue')).json().linked).toBe(false);
     } finally { await alone.close(); }
   });

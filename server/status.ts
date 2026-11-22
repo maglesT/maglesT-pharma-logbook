@@ -1,7 +1,7 @@
 import type { Sql, Tx } from './db.js';
 import { careByLocalId, type Care, type Master } from './master.js';
 import { QualificationOff, type MediaFill, type Qualification, type QualStatus } from './qualification.js';
-import { LIMS, UsesOff, type TrueBatchUse, type TrueBatchUses, type UseSource } from './batches.js';
+import { QLIMS, UsesOff, type TrueBatchUse, type TrueBatchUses, type UseSource } from './batches.js';
 import { dayText, timeText } from './dates.js';
 
 // Plant time zone: calibration due dates are plant-local dates (D-19).
@@ -211,7 +211,7 @@ export function antibioticBlocker(last: { code: string; antibiotic?: boolean } |
   return null;
 }
 /** D-46, D-47: what a cut link to TrueBatch or TrueBatch Packing leaves out of the status. */
-export const usesOffWarning = (source: UseSource) => source === LIMS
+export const usesOffWarning = (source: UseSource) => source === QLIMS
   ? `Connection to ${source} is off: instrument uses recorded in ${source} (in use) are not shown. Ask your administrator.`
   : `Connection to ${source} is off: machine and room uses recorded in ${source} (in use, dirty after use) are not shown. Ask your administrator.`;
 export const TRUEBATCH_USES_OFF = usesOffWarning('TrueBatch');
@@ -281,7 +281,7 @@ const DUE_SOON_DAYS = 7;
 export const IN_USE = 'In use: end the current use first.';
 /** D-46: the blocker of a use open in TrueBatch (D-47: or TrueBatch Packing). D-49: since TrueBatch 1.6.0 a use ends when
  * the batch is done with the item there (the last stage using it closes, or the batch is approved or terminated). */
-export const inTrueBatch = (batch: string, step: string, source: UseSource = 'TrueBatch') => source === LIMS
+export const inTrueBatch = (batch: string, step: string, source: UseSource = 'TrueBatch') => source === QLIMS
   // D-76: a lab instrument use open in LIMS, for an analysis.
   ? `In use by analysis ${batch} in ${source}${step ? ` (${step})` : ''}: it ends when the analysis is done with it in ${source} (every step naming it is signed done, or the analysis is stopped or reviewed).`
   : `In use by batch ${batch} in ${source}${step ? ` (${step})` : ''}: it ends when the batch is done with it in ${source} (its last stage using it closes, or the batch is approved or terminated).`;
@@ -626,7 +626,7 @@ export function deriveStatus(f: Facts): EquipmentStatus {
       if (d.overdue) { blockers.push(`Requalification overdue since ${plantDay(d.due)}: requalify before use.`); duesState ??= 'requalification_overdue'; }
     }
     if (f.qual.status === 'not_qualified' || f.qual.status === 'requalification_needed') {
-      blockers.push(f.qual.status === 'not_qualified' ? 'Not qualified: see the Qualification system.' : 'Requalification needed: see the Qualification system.');
+      blockers.push(f.qual.status === 'not_qualified' ? 'Not qualified: see EQUIP.' : 'Requalification needed: see EQUIP.');
       duesState ??= 'not_qualified';
     }
   }
