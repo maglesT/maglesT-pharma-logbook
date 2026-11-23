@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Sql } from '../db.js';
@@ -12,6 +13,18 @@ import { MEANINGS, makeProof } from '../signatures.js';
 // A started sign-on lives in a short cookie on this browser only (state + PKCE verifier): /cb accepts only the
 // state this browser started (no login CSRF), and nothing is kept on the server.
 const PENDING_COOKIE = 'signon';
+// MED-01: the pending sign-on is HMAC-signed with the proof key, so its start time cannot be forged, and a password
+// entered more than 2 minutes ago does not make a signature.
+const SIGN_MAX_AGE_MS = 120_000;
+const pendingMac = (key: Buffer, value: string) => createHmac('sha256', key).update(value).digest('base64url');
+export const sealPending = (key: Buffer, value: string) => `${value}.${pendingMac(key, value)}`;
+export function openPending(key: Buffer, cookie = ''): string {
+  const at = cookie.lastIndexOf('.');
+  const value = cookie.slice(0, at);
+  const mac = Buffer.from(cookie.slice(at + 1));
+  const want = Buffer.from(pendingMac(key, value));
+  return at > 0 && mac.length === want.length && timingSafeEqual(mac, want) ? value : '';
+}
 const PENDING_SECONDS = 600;
 const page = (title: string, text: string) => `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>${title}</title>
@@ -31,7 +44,7 @@ export function authRoutes(app: FastifyInstance, sql: Sql, signOn: SignOn) {
     const state = newVerifier();
     const verifier = newVerifier();
     // Lax: the cookie must come back on core's top-level redirect to /cb.
-    void reply.setCookie(PENDING_COOKIE, `${state}.${verifier}`, { path: '/cb', httpOnly: true, sameSite: 'lax', secure: app.cookieSecure, maxAge: PENDING_SECONDS });
+    void reply.setCookie(PENDING_COOKIE, sealPending(app.proofKey, `${state}.${verifier}`), { path: '/cb', httpOnly: true, sameSite: 'lax', secure: app.cookieSecure, maxAge: PENDING_SECONDS });
     return reply.redirect(signOn.authUrl({ state, challenge: challengeOf(verifier), loginHint: q.login_hint }));
   });
 
@@ -48,13 +61,13 @@ export function authRoutes(app: FastifyInstance, sql: Sql, signOn: SignOn) {
     if (!user) return reply.code(401).header('cache-control', 'no-store').type('text/html').send(signPage({ signError: 'Your session has ended. Sign in again.' }));
     const state = newVerifier();
     const verifier = newVerifier();
-    void reply.setCookie(PENDING_COOKIE, `${state}.${verifier}.sign.${Date.now()}.${q.data.meanings}`, { path: '/cb', httpOnly: true, sameSite: 'lax', secure: app.cookieSecure, maxAge: PENDING_SECONDS });
+    void reply.setCookie(PENDING_COOKIE, sealPending(app.proofKey, `${state}.${verifier}.sign.${Date.now()}.${q.data.meanings}`), { path: '/cb', httpOnly: true, sameSite: 'lax', secure: app.cookieSecure, maxAge: PENDING_SECONDS });
     return reply.redirect(signOn.authUrl({ state, challenge: challengeOf(verifier), prompt: 'login', loginHint: user.username }));
   });
 
   app.get('/cb', async (req, reply) => {
     const q = z.object({ code: z.string().min(1), state: z.string().min(1) }).safeParse(req.query);
-    const [state, verifier, mode, startedAt, meanings] = (req.cookies[PENDING_COOKIE] ?? '').split('.');
+    const [state, verifier, mode, startedAt, meanings] = openPending(app.proofKey, req.cookies[PENDING_COOKIE]).split('.');
     void reply.clearCookie(PENDING_COOKIE, { path: '/cb' });
     if (!q.success || !state || !verifier || state !== q.data.state) {
       return reply.code(400).type('text/html').send(page('Sign-in expired', 'This sign-in link is no longer valid.'));
@@ -70,7 +83,9 @@ export function authRoutes(app: FastifyInstance, sql: Sql, signOn: SignOn) {
     if (mode === 'sign') {
       // PL-05: core must have asked for the password after this signature started (prompt=login, max_age=0 are only
       // a request; the ID token's auth_time shows what core did). One second's leeway: auth_time has whole seconds.
-      if (!who.authTime || who.authTime * 1000 < Number(startedAt) - 1000) {
+      const started = Number(startedAt);
+      if (!startedAt || !Number.isFinite(started) || !who.authTime || who.authTime * 1000 < started - 1000
+        || Date.now() - who.authTime * 1000 > SIGN_MAX_AGE_MS) {
         return reply.header('cache-control', 'no-store').type('text/html').send(signPage({ signError: 'Your password was not asked for again. Try again.' }));
       }
       return reply.header('cache-control', 'no-store').type('text/html').send(signPage({ signProof: makeProof(app.proofKey, who, (meanings ?? '').split(',')) }));

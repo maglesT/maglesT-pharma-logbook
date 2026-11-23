@@ -314,6 +314,30 @@ describe('review fixes (S4)', () => {
     await signEntry('qa', 'release', corr);
     expect((await status(id)).state).toBe('clean');
   });
+
+  it('MED-10 LB-06: nobody releases a breakdown they entered, changed or verified; another QA person does', async () => {
+    // QA people who may also record and correct maintenance entries.
+    for (const [u, roles] of [['qa2', ['qa', 'engineering']], ['qa3', ['qa']], ['qa4', ['qa', 'engineering', 'supervisor']]] as const) {
+      await seedUser(t.owner, u, [...roles]);
+      c[u] = (await login(t.app, u)).cookie;
+    }
+    const id = await newItem();
+    await cleanAndVerify(id);
+    const bd = (await entry('qa2', id, { logbookType: 'maintenance', activityStart: now(), activityEnd: now(), data: breakdown('Seal'), signature: sig('qa2') })).json().id;
+    const v = (await call(t.app, c.qa!, 'GET', `/api/entries/${bd}/versions`)).json()[0];
+    const corr = (await call(t.app, c.qa4!, 'POST', `/api/entries/${bd}/correct`, {
+      activityStart: v.activityStart, activityEnd: v.activityEnd, data: { ...v.data, description: 'Shaft seal' }, reason: 'clarified', signature: sig('qa4'),
+    })).json().id;
+    expect((await signEntry('qa3', 'verify', corr)).statusCode).toBe(200);
+    for (const who of ['qa2', 'qa4', 'qa3']) {   // entrant, changer, verifier
+      const res = await signEntry(who, 'release', corr);
+      expect(res.statusCode).toBe(403);
+      expect(res.json()).toMatchObject({ error: 'own_entry', problems: ['You cannot release a breakdown you entered, changed or verified.'] });
+    }
+    expect((await status(id)).state).toBe('out_of_service');
+    expect((await signEntry('qa', 'release', corr)).statusCode).toBe(200);
+    expect((await status(id)).state).toBe('clean');
+  });
 });
 
 describe('minute precision (S5 browser finding)', () => {
