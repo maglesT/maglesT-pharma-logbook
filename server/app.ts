@@ -77,6 +77,12 @@ export interface AppOptions {
   advisor?: AdviceProvider | null;
 }
 
+/** A browser page address (the single-page app answers it). Dotfiles (/.env, /.git/config) and file-like paths (*.map, *.js) are not pages: they get a plain 404. */
+const isPagePath = (url: string): boolean => {
+  const p = url.split(/[?#]/)[0] ?? '';
+  return !/\/\./.test(p) && !/\.[a-z0-9]*[a-z][a-z0-9]*$/i.test(p);
+};
+
 export async function buildApp({ sql, signOn, master, qualification = null, deviations = null, batches = null, trueBatchUses = [], cycles = null, training = null, sops = null, proofKey = randomBytes(32), logger = false, webRoot, cookieSecure = true, speech = null, advisor = null }: AppOptions): Promise<FastifyInstance> {
   const app = Fastify({ logger, trustProxy: true });
   app.decorate('cookieSecure', cookieSecure);
@@ -119,9 +125,9 @@ export async function buildApp({ sql, signOn, master, qualification = null, devi
   app.get('/api/health', async (_req, reply) => {
     try {
       const [row] = await sql<{ now: Date }[]>`select now() as now`;
-      return { status: 'ok', version: VERSION, db: 'ok', serverTime: row!.now.toISOString() };
+      return { status: 'ok', db: 'ok', serverTime: row!.now.toISOString() };
     } catch {
-      return reply.code(503).send({ status: 'error', version: VERSION, db: 'unreachable' });
+      return reply.code(503).send({ status: 'error', db: 'unreachable' });
     }
   });
 
@@ -145,9 +151,9 @@ export async function buildApp({ sql, signOn, master, qualification = null, devi
   // In production the built web UI is served from the same process.
   const root = webRoot ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');
   if (existsSync(path.join(root, 'index.html'))) {
-    await app.register(fastifyStatic, { root });
+    await app.register(fastifyStatic, { root, allowedPath: (p) => !p.endsWith('.map') });
     app.setNotFoundHandler((req, reply) =>
-      req.url.startsWith('/api/') ? reply.code(404).send({ error: 'not found' }) : reply.sendFile('index.html'),
+      req.url.startsWith('/api/') ? reply.code(404).send({ error: 'not found' }) : (isPagePath(req.url) ? reply.sendFile('index.html') : reply.code(404).send({ error: 'not found' })),
     );
   }
 

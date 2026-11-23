@@ -38,7 +38,7 @@ const createBody = z.object({
   batch: z.string().trim().min(1).max(60).optional(),
   // D-69: the batch (of a change over: the batches not in the list) typed by hand, its product picked from master data.
   batchTyped: z.boolean().default(false),
-  data: z.record(z.unknown()),
+  data: z.record(z.string(), z.unknown()),
   lateReason: z.string().trim().max(500).optional(),
   // Required for types whose performer signs (D-16).
   signature: credentials.optional(),
@@ -52,7 +52,7 @@ const completeBody = z.object({
   lateReason: z.string().trim().max(500).optional(),
   // D-49: why a use ends (data field endReason).
   endReason: z.string().trim().max(500).optional(),
-  data: z.record(z.unknown()).optional(),
+  data: z.record(z.string(), z.unknown()).optional(),
   signature: credentials.optional(),
   trainedTyped,
   ...voiceFields,
@@ -63,7 +63,7 @@ const correctBody = z.object({
   productId: z.number().int().positive().nullable().optional(),
   batch: z.string().trim().min(1).max(60).nullable().optional(),
   batchTyped: z.boolean().default(false),
-  data: z.record(z.unknown()),
+  data: z.record(z.string(), z.unknown()),
   reason: z.string().trim().min(1).max(500),
   lateReason: z.string().trim().max(500).optional(),
   signature: credentials,

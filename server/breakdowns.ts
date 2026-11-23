@@ -8,7 +8,7 @@ import { FAILURE_CATEGORIES } from './entries.js';
 
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const text = (max: number) => z.string().trim().max(max).default('');
-const qualificationStep = z.object({ date: day.nullable().default(null), ref: text(80) }).default({});
+const qualificationStep = z.object({ date: day.nullable().default(null), ref: text(80) }).prefault({});
 
 // Equipment details (versioned). Admin edits; each change needs a reason. Make, model and serial are master data
 // (D-29 3): new versions leave them out; versions recorded before keep them.
