@@ -755,6 +755,10 @@ export function entryRoutes(app: FastifyInstance, sql: Sql) {
         if (row.logbook_type !== 'maintenance' || row.data.kind !== 'breakdown') throw new EntryError(409, 'not_a_breakdown');
         const [verified] = await tx`select 1 from signatures where object_type = 'entry' and object_id = ${row.id} and meaning = 'verified'`;
         if (!verified) throw new EntryError(409, 'not_verified', ['The breakdown entry must be verified before release.']);
+        // MED-10: nobody releases their own repair or verification: not who entered or changed it, nor its verifier.
+        const people = await tx<{ entered_by: number }[]>`select distinct entered_by::int from entries where entry_id = ${row.entry_id}
+          union select user_id::int from signatures where object_type = 'entry' and object_id = ${row.id} and meaning = 'verified'`;
+        if (people.some((p) => p.entered_by === req.user!.id)) throw new EntryError(403, 'own_entry', ['You cannot release a breakdown you entered, changed or verified.']);
         // A work order raised from this breakdown must be closed first.
         const [wo] = await tx<{ number: string }[]>`select number from work_orders where entry_id = ${row.entry_id} and status <> 'closed'`;
         if (wo) throw new EntryError(409, 'work_order_open', [`Work order ${wo.number} of this breakdown is not closed yet: close it first.`]);

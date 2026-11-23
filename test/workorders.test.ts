@@ -106,15 +106,17 @@ describe('work orders (D-86)', () => {
     expect((await reg())).toMatchObject({ workOrderRef: wo.number, workOrder: { number: wo.number, status: 'open' } });
     expect((await get('op1', `/api/workorders/${wo.id}`)).entryId).toBe(entryId);
     const release = async () => post('qa1', `/api/entries/${e.id}/release`, { ...sig('qa1'), contentHash: (await v()).contentHash });
-    directory.get('qa1')!.permissions.push('logbook.breakdown.release');
-    c.qa = (await login(t.app, 'qa1')).cookie;
-    const refused = await call(t.app, c.qa, 'POST', `/api/entries/${e.id}/release`, { ...sig('qa1'), contentHash: (await v()).contentHash });
+    // MED-10: released by a QA person other than the verifier.
+    await seedUser(t.owner, 'qa2', ['qa']);
+    directory.get('qa2')!.permissions.push('logbook.breakdown.release');
+    c.qa = (await login(t.app, 'qa2')).cookie;
+    const refused = await call(t.app, c.qa, 'POST', `/api/entries/${e.id}/release`, { ...sig('qa2'), contentHash: (await v()).contentHash });
     expect(refused.json().problems).toEqual([`Work order ${wo.number} of this breakdown is not closed yet: close it first.`]);
     await post('eng1', `/api/workorders/${wo.id}/start`);
     await post('eng1', `/api/workorders/${wo.id}/work`, { workDone: 'Replaced contactor', timeMinutes: 45 });
     await post('eng1', `/api/workorders/${wo.id}/done`, { ...sig('eng1'), contentHash: await hashOf('eng1', wo.id, 'doneHash') });
     expect((await post('qa1', `/api/workorders/${wo.id}/close`, { ...sig('qa1'), contentHash: await hashOf('qa1', wo.id, 'closeHash') })).statusCode).toBe(200);
-    expect((await call(t.app, c.qa, 'POST', `/api/entries/${e.id}/release`, { ...sig('qa1'), contentHash: (await v()).contentHash })).statusCode).toBe(200);
+    expect((await call(t.app, c.qa, 'POST', `/api/entries/${e.id}/release`, { ...sig('qa2'), contentHash: (await v()).contentHash })).statusCode).toBe(200);
     void release;
   });
 });
