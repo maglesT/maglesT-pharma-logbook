@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { POLICY, ROLE_PERMISSIONS, sessionKey } from '../server/auth.js';
 import { buildApp } from '../server/app.js';
+import { openPending, sealPending } from '../server/routes/auth.js';
 import { call, directory, fakeMaster, fakeSignOn, freshApp, login, seedUser, TEST_PROOF_KEY, type TestApp } from './helpers.js';
 
 // B1-2 (D-29): people, passwords, lockout and the permission register are Medhanta core's; the Logbook signs people
@@ -136,7 +137,7 @@ describe('sign-on through core', () => {
     expect(start.statusCode).toBe(302);
     expect(new URL(String(start.headers.location), 'http://x').searchParams.get('code')).toBe(`op${n}`);   // login_hint: this person
     const pending = start.cookies.find((c) => c.name === 'signon')!;
-    expect(pending.value).toMatch(/\.sign\.\d+\.performed,voice_confirmed$/);
+    expect(openPending(t.app.proofKey, pending.value)).toMatch(/\.sign\.\d+\.performed,voice_confirmed$/);
     const page = await t.app.inject({ method: 'GET', url: String(start.headers.location), headers: { cookie: `signon=${pending.value}` } });
     expect(page.body).toMatch(/"signProof":"[^"]+"/);
     expect(page.body).toContain('location.origin');   // posted only to the Logbook's own window
@@ -150,8 +151,23 @@ describe('sign-on through core', () => {
     const start = await t.app.inject({ method: 'GET', url: '/sign?meanings=performed', headers: { cookie } });
     const pending = start.cookies.find((c) => c.name === 'signon')!;
     // As if core answered from its existing session: the password was last entered before this signature started.
-    const old = pending.value.replace(/\.sign\.\d+\./, `.sign.${Date.now() + 60_000}.`);
+    const old = sealPending(t.app.proofKey, openPending(t.app.proofKey, pending.value).replace(/\.sign\.\d+\./, `.sign.${Date.now() + 60_000}.`));
     const page = await t.app.inject({ method: 'GET', url: String(start.headers.location), headers: { cookie: `signon=${old}` } });
+    expect(page.body).toContain('Your password was not asked for again');
+    expect(page.body).not.toContain('signProof');
+  });
+
+  it('MED-01 PL-05: a forged sign-on cookie with startedAt=0 is refused', async () => {
+    await seedUser(t.owner, uniq('op'), ['operator']);
+    const { cookie } = await login(t.app, `op${n}`);
+    const start = await t.app.inject({ method: 'GET', url: '/sign?meanings=performed', headers: { cookie } });
+    const [state, verifier] = openPending(t.app.proofKey, start.cookies.find((c) => c.name === 'signon')!.value).split('.');
+    // Unsigned: the start time cannot be set back to skip the password.
+    const forged = await t.app.inject({ method: 'GET', url: String(start.headers.location), headers: { cookie: `signon=${state}.${verifier}.sign.0.performed` } });
+    expect(forged.body).not.toContain('signProof');
+    // Signed but with no start time: refused too.
+    const empty = sealPending(t.app.proofKey, `${state}.${verifier}.sign..performed`);
+    const page = await t.app.inject({ method: 'GET', url: String(start.headers.location), headers: { cookie: `signon=${empty}` } });
     expect(page.body).toContain('Your password was not asked for again');
     expect(page.body).not.toContain('signProof');
   });
