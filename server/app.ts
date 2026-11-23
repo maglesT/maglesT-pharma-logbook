@@ -35,6 +35,7 @@ import { overdueRoutes } from './routes/overdue.js';
 import { workOrderRoutes } from './routes/workorders.js';
 import { statusContext, type StatusContext } from './status.js';
 import { refreshStatus } from './item-status.js';
+import { hasEncodedUnreserved, isApiUrl } from './path-gate.js';
 
 // D-45: a write that can change an item's status (a new entry, completing, correcting, verifying or releasing one).
 // D-85: a reservation made or cancelled is published at once too.
@@ -112,7 +113,8 @@ export async function buildApp({ sql, signOn, master, qualification = null, devi
   });
 
   app.addHook('onRequest', async (req, reply) => {
-    if (!req.url.startsWith('/api/')) return;
+    if (hasEncodedUnreserved(req.url)) return reply.code(400).send({ error: 'bad_path' });
+    if (!isApiUrl(req.url)) return;
     // Writes must be JSON: together with SameSite=Strict cookies this blocks cross-site form posts.
     if (req.method !== 'GET' && req.method !== 'HEAD' && !req.headers['content-type']?.startsWith('application/json')) {
       return reply.code(415).send({ error: 'json_required' });
@@ -153,7 +155,7 @@ export async function buildApp({ sql, signOn, master, qualification = null, devi
   if (existsSync(path.join(root, 'index.html'))) {
     await app.register(fastifyStatic, { root, allowedPath: (p) => !p.endsWith('.map') });
     app.setNotFoundHandler((req, reply) =>
-      req.url.startsWith('/api/') ? reply.code(404).send({ error: 'not found' }) : (isPagePath(req.url) ? reply.sendFile('index.html') : reply.code(404).send({ error: 'not found' })),
+      isApiUrl(req.url) ? reply.code(404).send({ error: 'not found' }) : (isPagePath(req.url) ? reply.sendFile('index.html') : reply.code(404).send({ error: 'not found' })),
     );
   }
 
