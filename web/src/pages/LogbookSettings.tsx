@@ -59,8 +59,11 @@ export function LogbookSettings({ me }: { me: Me }) {
             {t.versions.filter((v) => v.status !== 'in force').map((v) => (
               <p key={v.id}>
                 <span className="status">{v.status}</span> version {v.version}, effective {plantTime(v.effectiveFrom)}, drafted by {v.createdBy}
-                {v.status === 'draft' && isQa && (
+                {v.status === 'draft' && isQa && !v.mine && (
                   <button onClick={() => setApproving({ type: t, version: v })}>Approve</button>
+                )}
+                {v.status === 'draft' && isQa && v.mine && (
+                  <span className="muted"> · You drafted or edited this version: a second person must approve it.</span>
                 )}
               </p>
             ))}

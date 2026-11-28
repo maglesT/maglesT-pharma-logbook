@@ -147,6 +147,29 @@ describe('logbook settings (LB-24)', () => {
     expect((await approve(admin, id, 'admin1')).statusCode).toBe(403);
   });
 
+  it('LB-24: the person who drafted or edited a version cannot approve it (four eyes)', async () => {
+    await seedUser(t.owner, 'drafter1', ['admin', 'qa']);
+    const both = (await login(t.app, 'drafter1')).cookie;
+    const own = await call(t.app, both, 'POST', '/api/settings', { logbookType: 'general_log', settings: baseSettings, effectiveFrom: new Date().toISOString() });
+    expect(own.statusCode).toBe(201);
+    const ownId = own.json().id as number;
+    const mineOf = async (cookie: string, id: number) => {
+      const types = (await call(t.app, cookie, 'GET', '/api/logbook-types')).json();
+      for (const ty of types) for (const v of ty.versions) if (v.id === id) return v.mine as boolean;
+    };
+    expect(await mineOf(both, ownId)).toBe(true);
+    expect(await mineOf(qa, ownId)).toBe(false);
+    const res = await approve(both, ownId, 'drafter1');
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('own_draft');
+    // Edited by them (drafted by another admin): still not theirs to approve.
+    const other = await draft('general_log');
+    expect((await call(t.app, both, 'PATCH', `/api/settings/${other}`, { settings: { ...baseSettings, sopRef: 'SOP-CL-002' }, effectiveFrom: new Date().toISOString(), reason: 'typo' })).statusCode).toBe(200);
+    expect((await approve(both, other, 'drafter1')).json().error).toBe('own_draft');
+    // A second person approves.
+    expect((await approve(qa, ownId, 'qa1')).statusCode).toBe(200);
+  });
+
   it('LB-16: pressure points can only be set up as non-critical with a CCS reference', async () => {
     const bad = await call(t.app, admin, 'POST', '/api/settings', {
       logbookType: 'pressure_reading',

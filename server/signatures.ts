@@ -57,7 +57,7 @@ export function contentHash(objectType: string, objectId: number, content: unkno
 }
 
 export class SignError extends Error {
-  constructor(public code: 'wrong_credentials' | 'not_allowed' | 'already_signed' | 'content_changed') {
+  constructor(public code: 'wrong_credentials' | 'not_allowed' | 'already_signed' | 'content_changed' | 'own_draft') {
     super(code);
   }
 }

@@ -90,6 +90,8 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
     const rows = await sql`
       select s.id::int, s.logbook_type, s.version, s.settings, s.effective_from, s.created_by::int, s.created_at,
         u.full_name as created_by_name, g.printed_name as approved_by, g.signed_at as approved_at,
+        (s.created_by = ${req.user!.id} or exists (select 1 from audit_log a where a.object_type = 'settings'
+          and a.object_id = s.id::text and a.action = 'settings.edited' and a.actor_id = ${req.user!.id})) as mine,
         (g.id is not null and s.effective_from <= now()) as effective,
         row_number() over (partition by s.logbook_type, (g.id is not null and s.effective_from <= now()) order by s.version desc) as rank
       from logbook_settings s
@@ -111,6 +113,8 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
           createdBy: r.created_by_name,
           approvedBy: r.approved_by,
           approvedAt: r.approved_at,
+          // Drafted or edited by this user: a second person must approve it.
+          mine: Boolean(r.mine),
           // Database time decides what is in force (review finding S2-3).
           status: !r.approved_at ? 'draft' : !r.effective ? 'approved, not yet effective' : Number(r.rank) === 1 ? 'in force' : 'superseded',
           contentHash: contentHash('settings', r.id, signedContent(r as unknown as SettingsRow)),
@@ -191,6 +195,14 @@ export function settingsRoutes(app: FastifyInstance, sql: Sql) {
         if (!row) return null;
         const [signed] = await tx`select 1 from signatures where object_type = 'settings' and object_id = ${id} and meaning = 'approved'`;
         if (signed) throw new SignError('already_signed');
+        // Four eyes: the person who drafted or edited this version may not approve it.
+        const [own] = await tx`
+          select 1 from logbook_settings where id = ${id} and created_by = ${req.user!.id}
+          union all
+          select 1 from audit_log where object_type = 'settings' and object_id = ${String(id)}
+            and action = 'settings.edited' and actor_id = ${req.user!.id}
+          limit 1`;
+        if (own) throw new SignError('own_draft');
         // The signer saw this exact content (draft as displayed).
         const shown = contentHash('settings', id, signedContent(row));
         if (shown !== body.data.contentHash) throw new SignError('content_changed');

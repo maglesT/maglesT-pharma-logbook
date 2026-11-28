@@ -164,6 +164,7 @@ export interface SettingsVersion {
   createdBy: string;
   approvedBy: string | null;
   approvedAt: string | null;
+  mine?: boolean;
   status: string;
   // Hash of exactly this content; sent back when signing (LB-19).
   contentHash: string;
