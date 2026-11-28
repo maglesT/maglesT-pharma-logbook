@@ -238,6 +238,8 @@ interface Facts {
   // The latest verified requalification written in the Logbook (owner 2026-11-12): its date and next due date.
   last_requal_at: Date | null;
   last_requal_due: string | null;
+  // The "Last requalification" date typed in the item's details (e.g. a vendor requalification before go-live).
+  details_requal_on: string | null;
   tracks_cleaning: boolean;
   open_use_id: number | null;
   open_use_product: number | null;
@@ -322,6 +324,8 @@ async function facts(q: Sql | Tx, ids: number[] | null, ctx: StatusContext): Pro
          and l.logbook_type = 'calibration' and l.data->>'result' = 'pass') as last_cal_pass_at,
       (select max(l.activity_start) from latest l where l.equipment_id = q.id and l.logbook_type = 'change_over' and l.activity_end is null) as open_change_over_since,
       rq.at as last_requal_at, rq.due as last_requal_due,
+      (select nullif(d.details->>'lastRequalification', '') from equipment_details d where d.equipment_id = q.id
+         order by d.version desc limit 1) as details_requal_on,
       -- D-62 (owner, 17 Nov 2026): an instrument (balance, filter integrity tester) is not made dirty by a use: calibration decides.
       q.kind <> 'instrument' and coalesce((select en.on from enabled en
                 where en.logbook_type = case when q.kind = 'area' then 'area_cleaning' else 'equipment_cleaning' end), false) as tracks_cleaning,
@@ -608,12 +612,14 @@ export function deriveStatus(f: Facts): EquipmentStatus {
     dues.push(dueOf('calibration', calibrationDue, f.today, c.calibrationFrequencyDays ? `every ${c.calibrationFrequencyDays} days` : 'per certificate',
       f.last_cal_pass_at ? plantDate(f.last_cal_pass_at) : null));
   }
-  // A requalification written in the Logbook gives the due date where the Qualification product has none.
+  // A requalification written in the Logbook gives the due date where the Qualification product has none;
+  // without one, the "Last requalification" date in the item's details is the start of the frequency.
+  const requalFrom = f.last_requal_at ? plantDate(f.last_requal_at) : f.details_requal_on;
   const requalDue = f.qual?.nextReviewDue ?? f.last_requal_due
-    ?? (f.last_requal_at && c.requalificationFrequencyMonths ? addMonths(plantDate(f.last_requal_at), c.requalificationFrequencyMonths) : null);
+    ?? (requalFrom && c.requalificationFrequencyMonths ? addMonths(requalFrom, c.requalificationFrequencyMonths) : null);
   if (requalDue && !f.qual?.nextReviewDue) {
     const d = dueOf('requalification', requalDue, f.today, c.requalificationFrequencyMonths ? `every ${c.requalificationFrequencyMonths} months` : 'per requalification report',
-      f.last_requal_at ? plantDate(f.last_requal_at) : null);
+      requalFrom);
     dues.push(d);
     if (d.overdue) { blockers.push(`Requalification overdue since ${plantDay(d.due)}: requalify before use.`); duesState ??= 'requalification_overdue'; }
   }

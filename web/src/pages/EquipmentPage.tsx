@@ -185,7 +185,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
           {[...status.blockers, ...status.warnings].map((b) => <span key={b} className="reason">{b}</span>)}
         </div>
       )}
-      {status && <UseCheck status={status} />}
+      {status && <UseCheck status={status} requalEveryMonths={equipment.requalificationFrequencyMonths} />}
       <div className="subtabs">
         <button className={tab === 'log' ? 'on' : ''} onClick={() => setTab('log')}>Logbook</button>
         <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>History card</button>
@@ -251,7 +251,7 @@ function Logbook({ me, equipment, onBack }: { me: Me; equipment: Equipment; onBa
                 {e.inProgress && e.logbookType === 'maintenance' && mayRecord('maintenance') && (
                   <button onClick={() => setForm({ type: 'maintenance', completing: e })}>Complete repair</button>
                 )}
-                {e.logbookType === 'maintenance' && e.data.kind === 'breakdown' && can(me, 'advice.ask') && (
+                {e.logbookType === 'maintenance' && e.data.kind === 'breakdown' && can(me, 'advice.ask') && inForce.has('breakdown_advice') && (
                   <button onClick={() => setAdvising(e.id)}>💡 Suggest from history</button>
                 )}
                 {e.logbookType === 'maintenance' && e.data.kind === 'breakdown' && can(me, 'workorder.raise') && (() => {
@@ -414,7 +414,7 @@ export function Summary({ e, full = false, products }: { e: Entry; full?: boolea
 }
 
 // Owner 2026-11-12 (slide 4): what is checked before use, when the item is scanned or opened.
-export function UseCheck({ status: s }: { status: EquipmentStatus }) {
+export function UseCheck({ status: s, requalEveryMonths }: { status: EquipmentStatus; requalEveryMonths?: number | null }) {
   const due = (k: Due['kind']) => s.dues.find((d) => d.kind === k);
   const has = (re: RegExp) => s.blockers.some((b) => re.test(b));
   // Nothing to check (no schedule in master data): a dash, never a green tick.
@@ -434,8 +434,10 @@ export function UseCheck({ status: s }: { status: EquipmentStatus }) {
         : s.deadline ? `${s.deadline.kind === 'dirty_hold' ? 'Dirty hold ends' : s.schedule === 'frequency' ? 'Next cleaning due' : 'Clean until'} ${plantTime(s.deadline.at)}` : 'Clean')}
       {line('Preventive maintenance', Boolean(pm?.overdue), Boolean(pm?.soon), dueText(pm, 'No PM schedule in master data'), !pm)}
       {line('Calibration', calBad, Boolean(cal?.soon), calBad ? s.blockers.find((b) => /^(Calibration|Not calibrated|Re-calibration)/.test(b))! : dueText(cal, 'No calibration schedule in master data'), !calBad && !cal)}
-      {line('Requalification', Boolean(rq?.overdue) || has(/^(Not qualified|Requalification needed)/), Boolean(rq?.soon),
-        has(/^(Not qualified|Requalification needed)/) ? s.blockers.find((b) => /^(Not qualified|Requalification needed)/.test(b))! : dueText(rq, 'No requalification date'),
+      {line('Requalification', Boolean(rq?.overdue) || has(/^(Not qualified|Requalification needed)/), Boolean(rq?.soon) || (!rq && Boolean(requalEveryMonths)),
+        has(/^(Not qualified|Requalification needed)/) ? s.blockers.find((b) => /^(Not qualified|Requalification needed)/.test(b))! : dueText(rq, requalEveryMonths
+          ? `Every ${requalEveryMonths} months, but no requalification is recorded yet (Logbook entry, item details or EQUIP)`
+          : 'No requalification schedule in master data'),
         !rq && !has(/^(Not qualified|Requalification needed)/))}
       {line('Breakdown (QA released)', has(/^Out of service/), false, has(/^Out of service/) ? 'A breakdown is not released by QA' : 'No open breakdown')}
     </ul>

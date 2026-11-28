@@ -159,6 +159,17 @@ describe('dues from master data and the Qualification product (owner, slide 4 an
     expect(s.dues.filter((d: { kind: string }) => d.kind === 'calibration')).toEqual([{ kind: 'calibration', due: day(30), frequency: 'every 30 days', soon: false, overdue: false, dueFrom: day(25) }]);
   });
 
+  it('LB-05: without a requalification record, the item details\' "Last requalification" date starts the frequency', async () => {
+    const id = await item({ requalificationFrequencyMonths: 12 });
+    qualify(t.master.items_.get(`RD-${n}`)!, 'qualified', null);                  // EQUIP gives no date
+    expect((await status(id)).dues.filter((d: { kind: string }) => d.kind === 'requalification')).toEqual([]);
+    const put = await call(t.app, c.admin!, 'PUT', `/api/equipment/${id}/details`, { details: { lastRequalification: day(-400) }, reason: 'vendor requalification', expectedVersion: 0 });
+    expect(put.statusCode).toBe(200);
+    const s = await status(id);
+    expect(s.dues).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'requalification', frequency: 'every 12 months', overdue: true, due: `${Number(day(-400).slice(0, 4)) + 1}${day(-400).slice(4)}` })]));
+    expect(s.blockers.join(' ')).toMatch(/Requalification overdue since/);
+  });
+
   it('LB-05: requalification due and status come from the Qualification product; overdue or not qualified blocks use', async () => {
     const id = await item({ requalificationFrequencyMonths: 12 });
     const m = t.master.items_.get(`RD-${n}`)!;
