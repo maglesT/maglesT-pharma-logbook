@@ -187,4 +187,4 @@ export interface ExceptionRow { id: number; equipment_id: number; code: string; 
 /** What the person closing an exception signs: the missed limit as the Logbook recorded it (the reason is kept with the decision). */
 export const exceptionContent = (e: ExceptionRow) =>
   ({ event: e.id, equipment: e.code, kind: e.kind, dueAt: new Date(e.due_at).toISOString(), title: e.title, decision: 'closed' });
-export const DECISION_LABEL: Record<Decision | 'open', string> = { open: 'Waiting for a decision', closed: 'Closed in the Logbook', sent: 'Sent to DIVE' };
+export const DECISION_LABEL: Record<Decision | 'open', string> = { open: 'Waiting for a decision', closed: 'Closed in LEAD', sent: 'Sent to DIVE' };

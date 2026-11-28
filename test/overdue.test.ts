@@ -190,7 +190,7 @@ describe('missed limits are exceptions: close here or send to DIVE (D-80)', () =
     expect(ex[0].exception).toMatchObject({ id: m.ev.id, decision: { kind: 'closed', reason: 'PM done next morning, no batch made meanwhile' } });
     expect(h.events.some((e: { kind: string; action?: string }) => e.kind === 'masterdata' && e.action?.startsWith('exception.'))).toBe(false);
     const csv = (await call(t.app, c.qa!, 'GET', `/api/export/history.csv?equipmentId=${m.id}&fromDay=${day0}&toDay=${day(1)}`)).body;
-    expect(csv).toContain('Closed in the Logbook by QA1');
+    expect(csv).toContain('Closed in LEAD by QA1');
   });
 
   it('LB-06: send to DIVE sets sent_at in overdue_v1, so DIVE files it; the number comes back as before', async () => {

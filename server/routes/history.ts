@@ -210,7 +210,7 @@ function eventRow(ev: Event): { at: Date; kind: string; type: string; what: stri
     const d = x.decision;
     return { at: ev.at, kind: 'exception', type: 'Missed limit (exception)', what: `${x.label}: ${x.title}`,
       detail: [d ? `${d.label} ${d.by ? `by ${d.by}` : 'automatically'}, ${plant(d.at)}` : 'Waiting for a decision: close it here or send it to DIVE', d?.reason ? `Reason: ${d.reason}` : ''].filter(Boolean).join('\n'),
-      who: d?.by ?? 'Logbook', signatures: d?.signedBy && d.at ? `closed: ${d.signedBy}, ${plant(d.at)}` : '', breakdown: '', highlight: !d, grey: false };
+      who: d?.by ?? 'LEAD (automatic)', signatures: d?.signedBy && d.at ? `closed: ${d.signedBy}, ${plant(d.at)}` : '', breakdown: '', highlight: !d, grey: false };
   }
   return { at: ev.at, kind: 'master data', type: 'Master data', what: ITEM_ACTION_LABEL[ev.action] ?? ev.action, detail: [ev.reason ? `Reason: ${ev.reason}` : '', ...ev.lines].filter(Boolean).join('\n'), who: ev.actor ?? 'system', signatures: '', breakdown: '', highlight: false, grey: false };
 }
