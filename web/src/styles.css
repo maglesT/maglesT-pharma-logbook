@@ -233,6 +233,8 @@ table.register th:nth-child(4), table.register th:nth-child(11), table.register 
 table.register th:nth-child(5), table.register th:nth-child(10) { min-width: 5.5rem; }
 table.register th:nth-child(6), table.register th:nth-child(7), table.register th:nth-child(8), table.register th:nth-child(9) { min-width: 6rem; }
 table.register td:last-child { white-space: nowrap; }
+/* The Status chip keeps a gap to the table edge (LEAD manual check 27 Nov). */
+table.register td:last-child, table.register th:last-child { padding-right: 16px; }
 
 /* Owner 2026-11-12: add an item by its ID */
 .add-item h2 { margin: 0; }
@@ -508,6 +510,8 @@ table.register td:last-child { white-space: nowrap; }
 .due-col-head h3 { font-size: .95rem; }
 .home-head h1 { margin-bottom: 2px; }
 .due-row { grid-template-columns: auto minmax(0, 1fr); } .due-row .due-name { min-width: 0; }
+/* Long item names stay inside the Dues card (LEAD manual check 27 Nov). */
+.due-col { min-width: 0; grid-template-columns: minmax(0, 1fr); } .due-row { min-width: 0; width: 100%; box-sizing: border-box; overflow: hidden; }
 
 /* Work orders on a phone: filters and selects stay inside the card, tables scroll inside theirs. */
 .card.row label { min-width: 0; max-width: 100%; }

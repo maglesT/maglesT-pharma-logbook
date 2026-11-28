@@ -216,7 +216,7 @@ function DueColumns({ items, onOpen }: { items: Item[]; onOpen: (id: number) => 
                 <span className="pill bad" hidden={!over}>{over} overdue</span><span className="pill warn" hidden={rows.length - over === 0}>{rows.length - over} due</span></div>
               {rows.length === 0 ? <p className="all-good small"><span aria-hidden="true">✓</span> Nothing due</p> : rows.map((r, n) => (
                 <button key={n} className={r.over ? 'due-row over' : 'due-row'} onClick={() => onOpen(r.i.eq.id)}>
-                  <span className="due-code">{r.i.eq.code}</span><span className="due-name">{r.i.eq.name}</span><span className="due-when">{r.text}</span>
+                  <span className="due-code">{r.i.eq.code}</span><span className="due-name" title={r.i.eq.name}>{r.i.eq.name}</span><span className="due-when">{r.text}</span>
                 </button>
               ))}
             </div>
