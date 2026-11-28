@@ -91,6 +91,14 @@ describe('adding an item by its ID (owner, point 4)', () => {
     expect((await call(t.app, c.op1!, 'POST', '/api/equipment', { itemId: ok.itemId, reason: 'x' })).statusCode).toBe(403);
   });
 
+  it('PL-08: a room may be added as sterile (pressure readings are for sterile rooms), as the master-data table allows', async () => {
+    const room = masterItem('AD-RM', 'area');
+    qualify(room);
+    const added = await call(t.app, c.admin!, 'POST', '/api/equipment', { itemId: room.itemId, sterile: true, classified: true, reason: 'Grade B filling room' });
+    expect(added.statusCode).toBe(201);
+    expect(added.json()).toMatchObject({ sterile: true, classified: true });
+  });
+
   it('PL-08 D-53: an instrument is calibrated, not qualified: it can be chosen and added without a qualification; its calibration decides its status', async () => {
     const ins = masterItem('AD-INS', 'instrument', { calibrationFrequencyDays: 180 });
     const row = (await call(t.app, c.admin!, 'GET', '/api/equipment/candidates')).json().items.find((x: { code: string }) => x.code === 'AD-INS');
